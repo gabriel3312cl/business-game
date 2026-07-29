@@ -1,0 +1,728 @@
+{
+  "tiles": [
+    {
+      "id": "start_00",
+      "kind": "start",
+      "name_key": "tile.00.name"
+    },
+    {
+      "id": "property_01",
+      "kind": "property",
+      "name_key": "tile.01.name",
+      "group": "group_1",
+      "color": "#7c4dff",
+      "price": 70,
+      "base_rent": 6,
+      "mortgage_value": 35,
+      "build_cost": 50,
+      "rent_levels": [
+        6,
+        30,
+        90,
+        270,
+        480,
+        750
+      ]
+    },
+    {
+      "id": "property_02",
+      "kind": "property",
+      "name_key": "tile.02.name",
+      "group": "group_1",
+      "color": "#7c4dff",
+      "price": 80,
+      "base_rent": 8,
+      "mortgage_value": 40,
+      "build_cost": 50,
+      "rent_levels": [
+        8,
+        40,
+        120,
+        360,
+        640,
+        1000
+      ]
+    },
+    {
+      "id": "property_03",
+      "kind": "property",
+      "name_key": "tile.03.name",
+      "group": "group_2",
+      "color": "#26c6da",
+      "price": 90,
+      "base_rent": 10,
+      "mortgage_value": 45,
+      "build_cost": 75,
+      "rent_levels": [
+        10,
+        50,
+        150,
+        450,
+        800,
+        1250
+      ]
+    },
+    {
+      "id": "tax_04",
+      "kind": "tax",
+      "name_key": "tile.04.name",
+      "amount": 104
+    },
+    {
+      "id": "transport_05",
+      "kind": "transport",
+      "name_key": "tile.05.name",
+      "price": 200,
+      "base_rent": 25,
+      "mortgage_value": 100,
+      "rent_levels": [
+        25,
+        50,
+        100,
+        200,
+        400,
+        800
+      ]
+    },
+    {
+      "id": "property_06",
+      "kind": "property",
+      "name_key": "tile.06.name",
+      "group": "group_3",
+      "color": "#ec407a",
+      "price": 120,
+      "base_rent": 16,
+      "mortgage_value": 60,
+      "build_cost": 100,
+      "rent_levels": [
+        16,
+        80,
+        240,
+        720,
+        1280,
+        2000
+      ]
+    },
+    {
+      "id": "property_07",
+      "kind": "property",
+      "name_key": "tile.07.name",
+      "group": "group_3",
+      "color": "#ec407a",
+      "price": 130,
+      "base_rent": 18,
+      "mortgage_value": 65,
+      "build_cost": 100,
+      "rent_levels": [
+        18,
+        90,
+        270,
+        810,
+        1440,
+        2250
+      ]
+    },
+    {
+      "id": "card_08",
+      "kind": "card",
+      "name_key": "tile.08.name",
+      "deck_id": "opportunity"
+    },
+    {
+      "id": "property_09",
+      "kind": "property",
+      "name_key": "tile.09.name",
+      "group": "group_4",
+      "color": "#ff7043",
+      "price": 150,
+      "base_rent": 22,
+      "mortgage_value": 75,
+      "build_cost": 125,
+      "rent_levels": [
+        22,
+        110,
+        330,
+        990,
+        1760,
+        2750
+      ]
+    },
+    {
+      "id": "jail_10",
+      "kind": "jail",
+      "name_key": "tile.10.name"
+    },
+    {
+      "id": "property_11",
+      "kind": "property",
+      "name_key": "tile.11.name",
+      "group": "group_4",
+      "color": "#ff7043",
+      "price": 170,
+      "base_rent": 26,
+      "mortgage_value": 85,
+      "build_cost": 125,
+      "rent_levels": [
+        26,
+        130,
+        390,
+        1170,
+        2080,
+        3250
+      ]
+    },
+    {
+      "id": "property_12",
+      "kind": "property",
+      "name_key": "tile.12.name",
+      "group": "group_5",
+      "color": "#ffee58",
+      "price": 180,
+      "base_rent": 28,
+      "mortgage_value": 90,
+      "build_cost": 50,
+      "rent_levels": [
+        28,
+        140,
+        420,
+        1260,
+        2240,
+        3500
+      ]
+    },
+    {
+      "id": "property_13",
+      "kind": "property",
+      "name_key": "tile.13.name",
+      "group": "group_5",
+      "color": "#ffee58",
+      "price": 190,
+      "base_rent": 30,
+      "mortgage_value": 95,
+      "build_cost": 50,
+      "rent_levels": [
+        30,
+        150,
+        450,
+        1350,
+        2400,
+        3750
+      ]
+    },
+    {
+      "id": "tax_14",
+      "kind": "tax",
+      "name_key": "tile.14.name",
+      "amount": 114
+    },
+    {
+      "id": "transport_15",
+      "kind": "transport",
+      "name_key": "tile.15.name",
+      "price": 200,
+      "base_rent": 25,
+      "mortgage_value": 100,
+      "rent_levels": [
+        25,
+        50,
+        100,
+        200,
+        400,
+        800
+      ]
+    },
+    {
+      "id": "card_16",
+      "kind": "card",
+      "name_key": "tile.16.name",
+      "deck_id": "community"
+    },
+    {
+      "id": "property_17",
+      "kind": "property",
+      "name_key": "tile.17.name",
+      "group": "group_6",
+      "color": "#66bb6a",
+      "price": 230,
+      "base_rent": 38,
+      "mortgage_value": 115,
+      "build_cost": 75,
+      "rent_levels": [
+        38,
+        190,
+        570,
+        1710,
+        3040,
+        4750
+      ]
+    },
+    {
+      "id": "property_18",
+      "kind": "property",
+      "name_key": "tile.18.name",
+      "group": "group_7",
+      "color": "#42a5f5",
+      "price": 240,
+      "base_rent": 40,
+      "mortgage_value": 120,
+      "build_cost": 100,
+      "rent_levels": [
+        40,
+        200,
+        600,
+        1800,
+        3200,
+        5000
+      ]
+    },
+    {
+      "id": "property_19",
+      "kind": "property",
+      "name_key": "tile.19.name",
+      "group": "group_7",
+      "color": "#42a5f5",
+      "price": 250,
+      "base_rent": 42,
+      "mortgage_value": 125,
+      "build_cost": 100,
+      "rent_levels": [
+        42,
+        210,
+        630,
+        1890,
+        3360,
+        5250
+      ]
+    },
+    {
+      "id": "free_20",
+      "kind": "free",
+      "name_key": "tile.20.name"
+    },
+    {
+      "id": "property_21",
+      "kind": "property",
+      "name_key": "tile.21.name",
+      "group": "group_8",
+      "color": "#ab47bc",
+      "price": 270,
+      "base_rent": 46,
+      "mortgage_value": 135,
+      "build_cost": 125,
+      "rent_levels": [
+        46,
+        230,
+        690,
+        2070,
+        3680,
+        5750
+      ]
+    },
+    {
+      "id": "property_22",
+      "kind": "property",
+      "name_key": "tile.22.name",
+      "group": "group_8",
+      "color": "#ab47bc",
+      "price": 280,
+      "base_rent": 48,
+      "mortgage_value": 140,
+      "build_cost": 125,
+      "rent_levels": [
+        48,
+        240,
+        720,
+        2160,
+        3840,
+        6000
+      ]
+    },
+    {
+      "id": "property_23",
+      "kind": "property",
+      "name_key": "tile.23.name",
+      "group": "group_8",
+      "color": "#ab47bc",
+      "price": 290,
+      "base_rent": 50,
+      "mortgage_value": 145,
+      "build_cost": 125,
+      "rent_levels": [
+        50,
+        250,
+        750,
+        2250,
+        4000,
+        6250
+      ]
+    },
+    {
+      "id": "tax_24",
+      "kind": "tax",
+      "name_key": "tile.24.name",
+      "amount": 124
+    },
+    {
+      "id": "transport_25",
+      "kind": "transport",
+      "name_key": "tile.25.name",
+      "price": 200,
+      "base_rent": 25,
+      "mortgage_value": 100,
+      "rent_levels": [
+        25,
+        50,
+        100,
+        200,
+        400,
+        800
+      ]
+    },
+    {
+      "id": "property_26",
+      "kind": "property",
+      "name_key": "tile.26.name",
+      "group": "group_1",
+      "color": "#7c4dff",
+      "price": 320,
+      "base_rent": 56,
+      "mortgage_value": 160,
+      "build_cost": 50,
+      "rent_levels": [
+        56,
+        280,
+        840,
+        2520,
+        4480,
+        7000
+      ]
+    },
+    {
+      "id": "property_27",
+      "kind": "property",
+      "name_key": "tile.27.name",
+      "group": "group_2",
+      "color": "#26c6da",
+      "price": 330,
+      "base_rent": 58,
+      "mortgage_value": 165,
+      "build_cost": 75,
+      "rent_levels": [
+        58,
+        290,
+        870,
+        2610,
+        4640,
+        7250
+      ]
+    },
+    {
+      "id": "utility_28",
+      "kind": "utility",
+      "name_key": "tile.28.name",
+      "price": 150,
+      "base_rent": 20,
+      "mortgage_value": 75,
+      "rent_multipliers": [
+        4,
+        10,
+        15,
+        20
+      ]
+    },
+    {
+      "id": "property_29",
+      "kind": "property",
+      "name_key": "tile.29.name",
+      "group": "group_2",
+      "color": "#26c6da",
+      "price": 350,
+      "base_rent": 62,
+      "mortgage_value": 175,
+      "build_cost": 75,
+      "rent_levels": [
+        62,
+        310,
+        930,
+        2790,
+        4960,
+        7750
+      ]
+    },
+    {
+      "id": "go_to_jail_30",
+      "kind": "go_to_jail",
+      "name_key": "tile.30.name"
+    },
+    {
+      "id": "property_31",
+      "kind": "property",
+      "name_key": "tile.31.name",
+      "group": "group_3",
+      "color": "#ec407a",
+      "price": 370,
+      "base_rent": 66,
+      "mortgage_value": 185,
+      "build_cost": 100,
+      "rent_levels": [
+        66,
+        330,
+        990,
+        2970,
+        5280,
+        8250
+      ]
+    },
+    {
+      "id": "card_32",
+      "kind": "card",
+      "name_key": "tile.32.name",
+      "deck_id": "community"
+    },
+    {
+      "id": "property_33",
+      "kind": "property",
+      "name_key": "tile.33.name",
+      "group": "group_4",
+      "color": "#ff7043",
+      "price": 390,
+      "base_rent": 70,
+      "mortgage_value": 195,
+      "build_cost": 125,
+      "rent_levels": [
+        70,
+        350,
+        1050,
+        3150,
+        5600,
+        8750
+      ]
+    },
+    {
+      "id": "tax_34",
+      "kind": "tax",
+      "name_key": "tile.34.name",
+      "amount": 134
+    },
+    {
+      "id": "transport_35",
+      "kind": "transport",
+      "name_key": "tile.35.name",
+      "price": 200,
+      "base_rent": 25,
+      "mortgage_value": 100,
+      "rent_levels": [
+        25,
+        50,
+        100,
+        200,
+        400,
+        800
+      ]
+    },
+    {
+      "id": "property_36",
+      "kind": "property",
+      "name_key": "tile.36.name",
+      "group": "group_5",
+      "color": "#ffee58",
+      "price": 420,
+      "base_rent": 76,
+      "mortgage_value": 210,
+      "build_cost": 50,
+      "rent_levels": [
+        76,
+        380,
+        1140,
+        3420,
+        6080,
+        9500
+      ]
+    },
+    {
+      "id": "property_37",
+      "kind": "property",
+      "name_key": "tile.37.name",
+      "group": "group_5",
+      "color": "#ffee58",
+      "price": 430,
+      "base_rent": 78,
+      "mortgage_value": 215,
+      "build_cost": 50,
+      "rent_levels": [
+        78,
+        390,
+        1170,
+        3510,
+        6240,
+        9750
+      ]
+    },
+    {
+      "id": "property_38",
+      "kind": "property",
+      "name_key": "tile.38.name",
+      "group": "group_5",
+      "color": "#ffee58",
+      "price": 440,
+      "base_rent": 80,
+      "mortgage_value": 220,
+      "build_cost": 50,
+      "rent_levels": [
+        80,
+        400,
+        1200,
+        3600,
+        6400,
+        10000
+      ]
+    },
+    {
+      "id": "property_39",
+      "kind": "property",
+      "name_key": "tile.39.name",
+      "group": "group_6",
+      "color": "#66bb6a",
+      "price": 450,
+      "base_rent": 82,
+      "mortgage_value": 225,
+      "build_cost": 75,
+      "rent_levels": [
+        82,
+        410,
+        1230,
+        3690,
+        6560,
+        10250
+      ]
+    }
+  ],
+  "decks": [
+    {
+      "id": "opportunity",
+      "cards": [
+        {
+          "id": "opportunity_bonus",
+          "message_key": "card.opportunity_bonus",
+          "effect": {
+            "type": "cash",
+            "amount": 100
+          }
+        },
+        {
+          "id": "opportunity_fee",
+          "message_key": "card.opportunity_fee",
+          "effect": {
+            "type": "cash",
+            "amount": -50
+          }
+        },
+        {
+          "id": "opportunity_start",
+          "message_key": "card.opportunity_start",
+          "effect": {
+            "type": "move_to",
+            "tile_id": "start_00",
+            "collect_start": true
+          }
+        },
+        {
+          "id": "opportunity_nearest_transport",
+          "message_key": "card.opportunity_nearest_transport",
+          "effect": {
+            "type": "move_to_nearest",
+            "tile_kind": "transport",
+            "collect_start": true,
+            "rent_multiplier": 2
+          }
+        },
+        {
+          "id": "opportunity_nearest_utility",
+          "message_key": "card.opportunity_nearest_utility",
+          "effect": {
+            "type": "move_to_nearest",
+            "tile_kind": "utility",
+            "collect_start": true,
+            "dice_multiplier": 10
+          }
+        },
+        {
+          "id": "opportunity_back",
+          "message_key": "card.opportunity_back",
+          "effect": {
+            "type": "move_relative",
+            "steps": -3
+          }
+        },
+        {
+          "id": "opportunity_jail",
+          "message_key": "card.opportunity_jail",
+          "effect": {
+            "type": "go_to_jail"
+          }
+        },
+        {
+          "id": "opportunity_jail_free",
+          "message_key": "card.opportunity_jail_free",
+          "effect": {
+            "type": "get_out_of_jail"
+          }
+        }
+      ]
+    },
+    {
+      "id": "community",
+      "cards": [
+        {
+          "id": "community_bonus",
+          "message_key": "card.community_bonus",
+          "effect": {
+            "type": "cash",
+            "amount": 50
+          }
+        },
+        {
+          "id": "community_repairs",
+          "message_key": "card.community_repairs",
+          "effect": {
+            "type": "repairs",
+            "house_amount": 40,
+            "hotel_amount": 115
+          }
+        },
+        {
+          "id": "community_collect_each",
+          "message_key": "card.community_collect_each",
+          "effect": {
+            "type": "cash_each",
+            "amount": 10
+          }
+        },
+        {
+          "id": "community_pay_each",
+          "message_key": "card.community_pay_each",
+          "effect": {
+            "type": "cash_each",
+            "amount": -20
+          }
+        },
+        {
+          "id": "community_move",
+          "message_key": "card.community_move",
+          "effect": {
+            "type": "move_to",
+            "tile_id": "property_03",
+            "collect_start": true
+          }
+        },
+        {
+          "id": "community_jail_free",
+          "message_key": "card.community_jail_free",
+          "effect": {
+            "type": "get_out_of_jail"
+          }
+        }
+      ]
+    }
+  ]
+}

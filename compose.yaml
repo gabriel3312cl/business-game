@@ -1,0 +1,108 @@
+name: business-game
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      BUSINESS_GAME_ENVIRONMENT: development
+      BUSINESS_GAME_DATABASE_URL: postgresql+asyncpg://${BUSINESS_GAME_POSTGRES_USER:-business_game}:${BUSINESS_GAME_POSTGRES_PASSWORD:-local_business_game_only}@postgres:5432/${BUSINESS_GAME_POSTGRES_DB:-business_game}
+      BUSINESS_GAME_JWT_SECRET: ${BUSINESS_GAME_JWT_SECRET:-development-only-change-this-secret}
+      BUSINESS_GAME_ACCESS_TOKEN_MINUTES: ${BUSINESS_GAME_ACCESS_TOKEN_MINUTES:-30}
+      BUSINESS_GAME_PACKS_DIR: /app/content/packs
+    ports:
+      - "127.0.0.1:${BUSINESS_GAME_API_PORT:-48010}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - business_game_internal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${BUSINESS_GAME_FRONTEND_PORT:-43173}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - business_game_internal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:8080/health",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${BUSINESS_GAME_POSTGRES_DB:-business_game}
+      POSTGRES_USER: ${BUSINESS_GAME_POSTGRES_USER:-business_game}
+      POSTGRES_PASSWORD: ${BUSINESS_GAME_POSTGRES_PASSWORD:-local_business_game_only}
+    ports:
+      - "127.0.0.1:${BUSINESS_GAME_POSTGRES_PORT:-45432}:5432"
+    volumes:
+      - business_game_postgres_data:/var/lib/postgresql/data
+    networks:
+      - business_game_internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${BUSINESS_GAME_POSTGRES_USER:-business_game} -d ${BUSINESS_GAME_POSTGRES_DB:-business_game}",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${BUSINESS_GAME_REDIS_PORT:-46379}:6379"
+    volumes:
+      - business_game_redis_data:/data
+    networks:
+      - business_game_internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  business_game_internal:
+    name: business-game-internal
+
+volumes:
+  business_game_postgres_data:
+    name: business-game-postgres-data
+  business_game_redis_data:
+    name: business-game-redis-data
