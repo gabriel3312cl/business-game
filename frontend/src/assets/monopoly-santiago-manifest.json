@@ -1,0 +1,895 @@
+{
+  "nombre": "Monopoly Santiago, 48 casillas",
+  "version": "1.0",
+  "nota_licencia": "Los SVG de esta carpeta son originales y sin marcas registradas. El campo foto_sugerida es una guia de que buscar o fotografiar, no un enlace.",
+  "convencion_codigo": "POS_TIPO, la posicion coincide con el orden de juego en sentido horario desde la Salida",
+  "grupos": {
+    "Maipu": {
+      "color": "#8a5a3b",
+      "costo_casa": 50
+    },
+    "Puente Alto": {
+      "color": "#7fd0f0",
+      "costo_casa": 50
+    },
+    "La Florida": {
+      "color": "#e86fb0",
+      "costo_casa": 100
+    },
+    "Estacion Central": {
+      "color": "#f0902e",
+      "costo_casa": 100
+    },
+    "San Miguel": {
+      "color": "#d94141",
+      "costo_casa": 100
+    },
+    "Santiago Centro": {
+      "color": "#f2ce3b",
+      "costo_casa": 150
+    },
+    "Lastarria": {
+      "color": "#45a862",
+      "costo_casa": 150
+    },
+    "Nunoa": {
+      "color": "#2fb3a8",
+      "costo_casa": 150
+    },
+    "Providencia": {
+      "color": "#8a5fd6",
+      "costo_casa": 200
+    },
+    "Las Condes y Vitacura": {
+      "color": "#2b56c4",
+      "costo_casa": 200
+    }
+  },
+  "dinero_inicial": 2000,
+  "cobro_salida": 200,
+  "stock_banco": {
+    "casas": 40,
+    "hoteles": 16
+  },
+  "casillas": [
+    {
+      "pos": 1,
+      "codigo": "01_SALIDA",
+      "nombre": "Salida",
+      "tipo": "salida",
+      "svg": "svg/c01_salida.svg",
+      "foto_sugerida": "Flecha de partida o baldosa de vereda santiaguina"
+    },
+    {
+      "pos": 2,
+      "codigo": "02_PROPIEDAD",
+      "nombre": "Av. Pajaritos",
+      "tipo": "propiedad",
+      "svg": "svg/p02_pajaritos.svg",
+      "foto_sugerida": "Micro del Transantiago en Pajaritos, corredor segregado",
+      "grupo": "Maipu",
+      "color": "#8a5a3b",
+      "costo_casa": 50,
+      "precio": 60,
+      "hipoteca": 30,
+      "renta": {
+        "sola": 2,
+        "casa_1": 10,
+        "casa_2": 30,
+        "casa_3": 90,
+        "casa_4": 160,
+        "hotel": 250
+      }
+    },
+    {
+      "pos": 3,
+      "codigo": "03_FONDO_VECINAL",
+      "nombre": "Fondo Vecinal",
+      "tipo": "fondo_vecinal",
+      "svg": "svg/card_fondo.svg",
+      "foto_sugerida": "Sede de junta de vecinos, libro de actas"
+    },
+    {
+      "pos": 4,
+      "codigo": "04_PROPIEDAD",
+      "nombre": "Plaza de Maipu",
+      "tipo": "propiedad",
+      "svg": "svg/p04_plazamaipu.svg",
+      "foto_sugerida": "Templo Votivo de Maipu, torre del campanario",
+      "grupo": "Maipu",
+      "color": "#8a5a3b",
+      "costo_casa": 50,
+      "precio": 60,
+      "hipoteca": 30,
+      "renta": {
+        "sola": 4,
+        "casa_1": 20,
+        "casa_2": 60,
+        "casa_3": 180,
+        "casa_4": 320,
+        "hotel": 450
+      }
+    },
+    {
+      "pos": 5,
+      "codigo": "05_IMPUESTO",
+      "nombre": "Impuesto a la renta",
+      "tipo": "impuesto",
+      "svg": "svg/tax_renta.svg",
+      "foto_sugerida": "Formulario 22 del SII, calculadora"
+    },
+    {
+      "pos": 6,
+      "codigo": "06_PROPIEDAD",
+      "nombre": "Concha y Toro",
+      "tipo": "propiedad",
+      "svg": "svg/p06_conchaytoro.svg",
+      "foto_sugerida": "Parron, vinedo en Pirque",
+      "grupo": "Puente Alto",
+      "color": "#7fd0f0",
+      "costo_casa": 50,
+      "precio": 100,
+      "hipoteca": 50,
+      "renta": {
+        "sola": 6,
+        "casa_1": 30,
+        "casa_2": 90,
+        "casa_3": 270,
+        "casa_4": 400,
+        "hotel": 550
+      }
+    },
+    {
+      "pos": 7,
+      "codigo": "07_METRO",
+      "nombre": "Metro Los Heroes",
+      "tipo": "metro",
+      "svg": "svg/metro_heroes.svg",
+      "foto_sugerida": "Acceso de estacion, letrero rojo del Metro",
+      "precio": 200,
+      "hipoteca": 100,
+      "renta": {
+        "con_1": 25,
+        "con_2": 50,
+        "con_3": 100,
+        "con_4": 200
+      }
+    },
+    {
+      "pos": 8,
+      "codigo": "08_PROPIEDAD",
+      "nombre": "Av. Gabriela",
+      "tipo": "propiedad",
+      "svg": "svg/p08_gabriela.svg",
+      "foto_sugerida": "Paradero de micro, letrero de calle",
+      "grupo": "Puente Alto",
+      "color": "#7fd0f0",
+      "costo_casa": 50,
+      "precio": 100,
+      "hipoteca": 50,
+      "renta": {
+        "sola": 6,
+        "casa_1": 30,
+        "casa_2": 90,
+        "casa_3": 270,
+        "casa_4": 400,
+        "hotel": 550
+      }
+    },
+    {
+      "pos": 9,
+      "codigo": "09_PROPIEDAD",
+      "nombre": "Plaza Puente Alto",
+      "tipo": "propiedad",
+      "svg": "svg/p09_plazapuentealto.svg",
+      "foto_sugerida": "Pileta de la plaza, kiosco central",
+      "grupo": "Puente Alto",
+      "color": "#7fd0f0",
+      "costo_casa": 50,
+      "precio": 110,
+      "hipoteca": 55,
+      "renta": {
+        "sola": 8,
+        "casa_1": 40,
+        "casa_2": 100,
+        "casa_3": 300,
+        "casa_4": 450,
+        "hotel": 600
+      }
+    },
+    {
+      "pos": 10,
+      "codigo": "10_SUERTE",
+      "nombre": "Suerte",
+      "tipo": "suerte",
+      "svg": "svg/surp_suerte.svg",
+      "foto_sugerida": "Boleto de loteria, kiosco de Polla"
+    },
+    {
+      "pos": 11,
+      "codigo": "11_PROPIEDAD",
+      "nombre": "Vicuna Mackenna",
+      "tipo": "propiedad",
+      "svg": "svg/p11_vicunamackenna.svg",
+      "foto_sugerida": "Avenida troncal de noche, luces de autos",
+      "grupo": "La Florida",
+      "color": "#e86fb0",
+      "costo_casa": 100,
+      "precio": 120,
+      "hipoteca": 60,
+      "renta": {
+        "sola": 8,
+        "casa_1": 40,
+        "casa_2": 100,
+        "casa_3": 300,
+        "casa_4": 450,
+        "hotel": 600
+      }
+    },
+    {
+      "pos": 12,
+      "codigo": "12_PROPIEDAD",
+      "nombre": "Mall Vespucio",
+      "tipo": "propiedad",
+      "svg": "svg/p12_mallvespucio.svg",
+      "foto_sugerida": "Fachada del mall, patio de comidas",
+      "grupo": "La Florida",
+      "color": "#e86fb0",
+      "costo_casa": 100,
+      "precio": 130,
+      "hipoteca": 65,
+      "renta": {
+        "sola": 10,
+        "casa_1": 50,
+        "casa_2": 140,
+        "casa_3": 400,
+        "casa_4": 550,
+        "hotel": 700
+      }
+    },
+    {
+      "pos": 13,
+      "codigo": "13_CARCEL",
+      "nombre": "Carcel",
+      "tipo": "carcel",
+      "svg": "svg/c13_carcel.svg",
+      "foto_sugerida": "Reja de fierro forjado de casa antigua"
+    },
+    {
+      "pos": 14,
+      "codigo": "14_PROPIEDAD",
+      "nombre": "Matucana",
+      "tipo": "propiedad",
+      "svg": "svg/p14_matucana.svg",
+      "foto_sugerida": "Galpones de Matucana 100, Estacion Central",
+      "grupo": "Estacion Central",
+      "color": "#f0902e",
+      "costo_casa": 100,
+      "precio": 140,
+      "hipoteca": 70,
+      "renta": {
+        "sola": 10,
+        "casa_1": 50,
+        "casa_2": 150,
+        "casa_3": 450,
+        "casa_4": 625,
+        "hotel": 750
+      }
+    },
+    {
+      "pos": 15,
+      "codigo": "15_PROPIEDAD",
+      "nombre": "Av. Ecuador",
+      "tipo": "propiedad",
+      "svg": "svg/p15_ecuador.svg",
+      "foto_sugerida": "Campus de la USACH, arco de entrada",
+      "grupo": "Estacion Central",
+      "color": "#f0902e",
+      "costo_casa": 100,
+      "precio": 140,
+      "hipoteca": 70,
+      "renta": {
+        "sola": 10,
+        "casa_1": 50,
+        "casa_2": 150,
+        "casa_3": 450,
+        "casa_4": 625,
+        "hotel": 750
+      }
+    },
+    {
+      "pos": 16,
+      "codigo": "16_SERVICIO",
+      "nombre": "Enel Distribucion",
+      "tipo": "servicio",
+      "svg": "svg/util_enel.svg",
+      "foto_sugerida": "Poste de alumbrado publico, medidor electrico",
+      "precio": 150,
+      "hipoteca": 75,
+      "renta": {
+        "con_1": "4x dados",
+        "con_2": "10x dados",
+        "con_3": "20x dados"
+      }
+    },
+    {
+      "pos": 17,
+      "codigo": "17_PROPIEDAD",
+      "nombre": "Quinta Normal",
+      "tipo": "propiedad",
+      "svg": "svg/p17_quintanormal.svg",
+      "foto_sugerida": "Arboles del parque, laguna con botes",
+      "grupo": "Estacion Central",
+      "color": "#f0902e",
+      "costo_casa": 100,
+      "precio": 160,
+      "hipoteca": 80,
+      "renta": {
+        "sola": 12,
+        "casa_1": 60,
+        "casa_2": 180,
+        "casa_3": 500,
+        "casa_4": 700,
+        "hotel": 900
+      }
+    },
+    {
+      "pos": 18,
+      "codigo": "18_PROPIEDAD",
+      "nombre": "Barrio Yungay",
+      "tipo": "propiedad",
+      "svg": "svg/p18_yungay.svg",
+      "foto_sugerida": "Fachada continua con zocalo, Peluqueria Francesa",
+      "grupo": "Estacion Central",
+      "color": "#f0902e",
+      "costo_casa": 100,
+      "precio": 160,
+      "hipoteca": 80,
+      "renta": {
+        "sola": 12,
+        "casa_1": 60,
+        "casa_2": 180,
+        "casa_3": 500,
+        "casa_4": 700,
+        "hotel": 900
+      }
+    },
+    {
+      "pos": 19,
+      "codigo": "19_METRO",
+      "nombre": "Metro Universidad de Chile",
+      "tipo": "metro",
+      "svg": "svg/metro_uchile.svg",
+      "foto_sugerida": "Mural de Mario Toral en el anden",
+      "precio": 200,
+      "hipoteca": 100,
+      "renta": {
+        "con_1": 25,
+        "con_2": 50,
+        "con_3": 100,
+        "con_4": 200
+      }
+    },
+    {
+      "pos": 20,
+      "codigo": "20_PROPIEDAD",
+      "nombre": "Gran Avenida",
+      "tipo": "propiedad",
+      "svg": "svg/p20_granavenida.svg",
+      "foto_sugerida": "Comercio con toldos, letreros de vitrina",
+      "grupo": "San Miguel",
+      "color": "#d94141",
+      "costo_casa": 100,
+      "precio": 180,
+      "hipoteca": 90,
+      "renta": {
+        "sola": 14,
+        "casa_1": 70,
+        "casa_2": 200,
+        "casa_3": 550,
+        "casa_4": 750,
+        "hotel": 950
+      }
+    },
+    {
+      "pos": 21,
+      "codigo": "21_FONDO_VECINAL",
+      "nombre": "Fondo Vecinal",
+      "tipo": "fondo_vecinal",
+      "svg": "svg/card_fondo.svg",
+      "foto_sugerida": "Sede de junta de vecinos, libro de actas"
+    },
+    {
+      "pos": 22,
+      "codigo": "22_PROPIEDAD",
+      "nombre": "Av. Departamental",
+      "tipo": "propiedad",
+      "svg": "svg/p22_departamental.svg",
+      "foto_sugerida": "Paso sobre nivel, cruce con Vicuna Mackenna",
+      "grupo": "San Miguel",
+      "color": "#d94141",
+      "costo_casa": 100,
+      "precio": 180,
+      "hipoteca": 90,
+      "renta": {
+        "sola": 14,
+        "casa_1": 70,
+        "casa_2": 200,
+        "casa_3": 550,
+        "casa_4": 750,
+        "hotel": 950
+      }
+    },
+    {
+      "pos": 23,
+      "codigo": "23_SERVICIO",
+      "nombre": "Metrogas",
+      "tipo": "servicio",
+      "svg": "svg/util_metrogas.svg",
+      "foto_sugerida": "Cocina a gas, medidor de gas de ciudad",
+      "precio": 150,
+      "hipoteca": 75,
+      "renta": {
+        "con_1": "4x dados",
+        "con_2": "10x dados",
+        "con_3": "20x dados"
+      }
+    },
+    {
+      "pos": 24,
+      "codigo": "24_PROPIEDAD",
+      "nombre": "Plaza San Miguel",
+      "tipo": "propiedad",
+      "svg": "svg/p24_plazasanmiguel.svg",
+      "foto_sugerida": "Escanos de la plaza, glorieta",
+      "grupo": "San Miguel",
+      "color": "#d94141",
+      "costo_casa": 100,
+      "precio": 200,
+      "hipoteca": 100,
+      "renta": {
+        "sola": 16,
+        "casa_1": 80,
+        "casa_2": 220,
+        "casa_3": 600,
+        "casa_4": 800,
+        "hotel": 1000
+      }
+    },
+    {
+      "pos": 25,
+      "codigo": "25_VACACIONES",
+      "nombre": "Vacaciones, Cajon del Maipo",
+      "tipo": "vacaciones",
+      "svg": "svg/c25_vacaciones.svg",
+      "foto_sugerida": "Cordillera desde el Cajon del Maipo, rio Maipo"
+    },
+    {
+      "pos": 26,
+      "codigo": "26_PROPIEDAD",
+      "nombre": "Paseo Ahumada",
+      "tipo": "propiedad",
+      "svg": "svg/p26_ahumada.svg",
+      "foto_sugerida": "Paseo peatonal con gente, organillero",
+      "grupo": "Santiago Centro",
+      "color": "#f2ce3b",
+      "costo_casa": 150,
+      "precio": 220,
+      "hipoteca": 110,
+      "renta": {
+        "sola": 18,
+        "casa_1": 90,
+        "casa_2": 250,
+        "casa_3": 700,
+        "casa_4": 875,
+        "hotel": 1050
+      }
+    },
+    {
+      "pos": 27,
+      "codigo": "27_SUERTE",
+      "nombre": "Suerte",
+      "tipo": "suerte",
+      "svg": "svg/surp_suerte.svg",
+      "foto_sugerida": "Boleto de loteria, kiosco de Polla"
+    },
+    {
+      "pos": 28,
+      "codigo": "28_PROPIEDAD",
+      "nombre": "Plaza de Armas",
+      "tipo": "propiedad",
+      "svg": "svg/p28_plazadearmas.svg",
+      "foto_sugerida": "Catedral Metropolitana, palmeras de la plaza",
+      "grupo": "Santiago Centro",
+      "color": "#f2ce3b",
+      "costo_casa": 150,
+      "precio": 220,
+      "hipoteca": 110,
+      "renta": {
+        "sola": 18,
+        "casa_1": 90,
+        "casa_2": 250,
+        "casa_3": 700,
+        "casa_4": 875,
+        "hotel": 1050
+      }
+    },
+    {
+      "pos": 29,
+      "codigo": "29_FONDO_VECINAL",
+      "nombre": "Fondo Vecinal",
+      "tipo": "fondo_vecinal",
+      "svg": "svg/card_fondo.svg",
+      "foto_sugerida": "Sede de junta de vecinos, libro de actas"
+    },
+    {
+      "pos": 30,
+      "codigo": "30_PROPIEDAD",
+      "nombre": "Cerro Santa Lucia",
+      "tipo": "propiedad",
+      "svg": "svg/p30_santalucia.svg",
+      "foto_sugerida": "Torre del cerro, terraza Neptuno",
+      "grupo": "Santiago Centro",
+      "color": "#f2ce3b",
+      "costo_casa": 150,
+      "precio": 240,
+      "hipoteca": 120,
+      "renta": {
+        "sola": 20,
+        "casa_1": 100,
+        "casa_2": 300,
+        "casa_3": 750,
+        "casa_4": 925,
+        "hotel": 1100
+      }
+    },
+    {
+      "pos": 31,
+      "codigo": "31_METRO",
+      "nombre": "Metro Baquedano",
+      "tipo": "metro",
+      "svg": "svg/metro_baquedano.svg",
+      "foto_sugerida": "Anden de combinacion, escaleras",
+      "precio": 200,
+      "hipoteca": 100,
+      "renta": {
+        "con_1": 25,
+        "con_2": 50,
+        "con_3": 100,
+        "con_4": 200
+      }
+    },
+    {
+      "pos": 32,
+      "codigo": "32_PROPIEDAD",
+      "nombre": "Lastarria",
+      "tipo": "propiedad",
+      "svg": "svg/p32_lastarria.svg",
+      "foto_sugerida": "Farol de la calle, adoquines",
+      "grupo": "Lastarria",
+      "color": "#45a862",
+      "costo_casa": 150,
+      "precio": 260,
+      "hipoteca": 130,
+      "renta": {
+        "sola": 22,
+        "casa_1": 110,
+        "casa_2": 330,
+        "casa_3": 800,
+        "casa_4": 975,
+        "hotel": 1150
+      }
+    },
+    {
+      "pos": 33,
+      "codigo": "33_PROPIEDAD",
+      "nombre": "Bellas Artes",
+      "tipo": "propiedad",
+      "svg": "svg/p33_bellasartes.svg",
+      "foto_sugerida": "Fachada del Museo de Bellas Artes, cupula de vidrio",
+      "grupo": "Lastarria",
+      "color": "#45a862",
+      "costo_casa": 150,
+      "precio": 260,
+      "hipoteca": 130,
+      "renta": {
+        "sola": 22,
+        "casa_1": 110,
+        "casa_2": 330,
+        "casa_3": 800,
+        "casa_4": 975,
+        "hotel": 1150
+      }
+    },
+    {
+      "pos": 34,
+      "codigo": "34_SERVICIO",
+      "nombre": "Aguas Andinas",
+      "tipo": "servicio",
+      "svg": "svg/util_aguas.svg",
+      "foto_sugerida": "Llave de agua, estanque de La Reina",
+      "precio": 150,
+      "hipoteca": 75,
+      "renta": {
+        "con_1": "4x dados",
+        "con_2": "10x dados",
+        "con_3": "20x dados"
+      }
+    },
+    {
+      "pos": 35,
+      "codigo": "35_PROPIEDAD",
+      "nombre": "Plaza Nunoa",
+      "tipo": "propiedad",
+      "svg": "svg/p35_plazanunoa.svg",
+      "foto_sugerida": "Fuente de la plaza, terrazas de bares",
+      "grupo": "Nunoa",
+      "color": "#2fb3a8",
+      "costo_casa": 150,
+      "precio": 280,
+      "hipoteca": 140,
+      "renta": {
+        "sola": 24,
+        "casa_1": 120,
+        "casa_2": 360,
+        "casa_3": 850,
+        "casa_4": 1025,
+        "hotel": 1200
+      }
+    },
+    {
+      "pos": 36,
+      "codigo": "36_PROPIEDAD",
+      "nombre": "Barrio Italia",
+      "tipo": "propiedad",
+      "svg": "svg/p36_barrioitalia.svg",
+      "foto_sugerida": "Anticuarios, patios con talleres",
+      "grupo": "Nunoa",
+      "color": "#2fb3a8",
+      "costo_casa": 150,
+      "precio": 280,
+      "hipoteca": 140,
+      "renta": {
+        "sola": 24,
+        "casa_1": 120,
+        "casa_2": 360,
+        "casa_3": 850,
+        "casa_4": 1025,
+        "hotel": 1200
+      }
+    },
+    {
+      "pos": 37,
+      "codigo": "37_VE_A_LA_CARCEL",
+      "nombre": "Ve a la carcel",
+      "tipo": "ve_a_la_carcel",
+      "svg": "svg/c37_alacarcel.svg",
+      "foto_sugerida": "Furgon de Carabineros o portón de reja"
+    },
+    {
+      "pos": 38,
+      "codigo": "38_PROPIEDAD",
+      "nombre": "Bellavista",
+      "tipo": "propiedad",
+      "svg": "svg/p38_bellavista.svg",
+      "foto_sugerida": "Murales de calle Pio Nono, La Chascona",
+      "grupo": "Providencia",
+      "color": "#8a5fd6",
+      "costo_casa": 200,
+      "precio": 300,
+      "hipoteca": 150,
+      "renta": {
+        "sola": 26,
+        "casa_1": 130,
+        "casa_2": 390,
+        "casa_3": 900,
+        "casa_4": 1100,
+        "hotel": 1275
+      }
+    },
+    {
+      "pos": 39,
+      "codigo": "39_PROPIEDAD",
+      "nombre": "Av. Providencia",
+      "tipo": "propiedad",
+      "svg": "svg/p39_providencia.svg",
+      "foto_sugerida": "Ciclovia de Providencia, edificios de oficina",
+      "grupo": "Providencia",
+      "color": "#8a5fd6",
+      "costo_casa": 200,
+      "precio": 300,
+      "hipoteca": 150,
+      "renta": {
+        "sola": 26,
+        "casa_1": 130,
+        "casa_2": 390,
+        "casa_3": 900,
+        "casa_4": 1100,
+        "hotel": 1275
+      }
+    },
+    {
+      "pos": 40,
+      "codigo": "40_FONDO_VECINAL",
+      "nombre": "Fondo Vecinal",
+      "tipo": "fondo_vecinal",
+      "svg": "svg/card_fondo.svg",
+      "foto_sugerida": "Sede de junta de vecinos, libro de actas"
+    },
+    {
+      "pos": 41,
+      "codigo": "41_PROPIEDAD",
+      "nombre": "Pedro de Valdivia",
+      "tipo": "propiedad",
+      "svg": "svg/p41_pedrodevaldivia.svg",
+      "foto_sugerida": "Torres de oficina, metro Pedro de Valdivia",
+      "grupo": "Providencia",
+      "color": "#8a5fd6",
+      "costo_casa": 200,
+      "precio": 320,
+      "hipoteca": 160,
+      "renta": {
+        "sola": 28,
+        "casa_1": 150,
+        "casa_2": 450,
+        "casa_3": 1000,
+        "casa_4": 1200,
+        "hotel": 1400
+      }
+    },
+    {
+      "pos": 42,
+      "codigo": "42_PROPIEDAD",
+      "nombre": "Costanera Center",
+      "tipo": "propiedad",
+      "svg": "svg/p42_costaneracenter.svg",
+      "foto_sugerida": "Gran Torre Santiago, mirador Sky Costanera",
+      "grupo": "Providencia",
+      "color": "#8a5fd6",
+      "costo_casa": 200,
+      "precio": 320,
+      "hipoteca": 160,
+      "renta": {
+        "sola": 28,
+        "casa_1": 150,
+        "casa_2": 450,
+        "casa_3": 1000,
+        "casa_4": 1200,
+        "hotel": 1400
+      }
+    },
+    {
+      "pos": 43,
+      "codigo": "43_METRO",
+      "nombre": "Metro Tobalaba",
+      "tipo": "metro",
+      "svg": "svg/metro_tobalaba.svg",
+      "foto_sugerida": "Pasillo de combinacion, torniquetes",
+      "precio": 200,
+      "hipoteca": 100,
+      "renta": {
+        "con_1": 25,
+        "con_2": 50,
+        "con_3": 100,
+        "con_4": 200
+      }
+    },
+    {
+      "pos": 44,
+      "codigo": "44_PROPIEDAD",
+      "nombre": "Nueva Costanera",
+      "tipo": "propiedad",
+      "svg": "svg/p44_nuevacostanera.svg",
+      "foto_sugerida": "Restaurantes con terraza, vitrinas de galeria",
+      "grupo": "Las Condes y Vitacura",
+      "color": "#2b56c4",
+      "costo_casa": 200,
+      "precio": 350,
+      "hipoteca": 175,
+      "renta": {
+        "sola": 35,
+        "casa_1": 175,
+        "casa_2": 500,
+        "casa_3": 1100,
+        "casa_4": 1300,
+        "hotel": 1500
+      }
+    },
+    {
+      "pos": 45,
+      "codigo": "45_SUERTE",
+      "nombre": "Suerte",
+      "tipo": "suerte",
+      "svg": "svg/surp_suerte.svg",
+      "foto_sugerida": "Boleto de loteria, kiosco de Polla"
+    },
+    {
+      "pos": 46,
+      "codigo": "46_PROPIEDAD",
+      "nombre": "El Golf",
+      "tipo": "propiedad",
+      "svg": "svg/p46_elgolf.svg",
+      "foto_sugerida": "Parque Araucano, hoyo de golf",
+      "grupo": "Las Condes y Vitacura",
+      "color": "#2b56c4",
+      "costo_casa": 200,
+      "precio": 360,
+      "hipoteca": 180,
+      "renta": {
+        "sola": 36,
+        "casa_1": 180,
+        "casa_2": 520,
+        "casa_3": 1150,
+        "casa_4": 1350,
+        "hotel": 1550
+      }
+    },
+    {
+      "pos": 47,
+      "codigo": "47_IMPUESTO",
+      "nombre": "Contribuciones",
+      "tipo": "impuesto",
+      "svg": "svg/tax_contrib.svg",
+      "foto_sugerida": "Boleta de contribuciones, casa con antejardin"
+    },
+    {
+      "pos": 48,
+      "codigo": "48_PROPIEDAD",
+      "nombre": "Alonso de Cordova",
+      "tipo": "propiedad",
+      "svg": "svg/p48_alonsodecordova.svg",
+      "foto_sugerida": "Boutiques de la calle, galerias de arte",
+      "grupo": "Las Condes y Vitacura",
+      "color": "#2b56c4",
+      "costo_casa": 200,
+      "precio": 400,
+      "hipoteca": 200,
+      "renta": {
+        "sola": 50,
+        "casa_1": 200,
+        "casa_2": 600,
+        "casa_3": 1400,
+        "casa_4": 1700,
+        "hotel": 2000
+      }
+    }
+  ],
+  "fichas": [
+    {
+      "codigo": "FICHA_MICRO",
+      "nombre": "Ficha, micro",
+      "svg": "svg-fichas/ficha_micro.svg",
+      "foto_sugerida": "Micro roja del Transantiago"
+    },
+    {
+      "codigo": "FICHA_COLECTIVO",
+      "nombre": "Ficha, colectivo",
+      "svg": "svg-fichas/ficha_colectivo.svg",
+      "foto_sugerida": "Colectivo con letrero de recorrido"
+    },
+    {
+      "codigo": "FICHA_COMPLETO",
+      "nombre": "Ficha, completo italiano",
+      "svg": "svg-fichas/ficha_completo.svg",
+      "foto_sugerida": "Completo italiano de fuente de soda"
+    },
+    {
+      "codigo": "FICHA_TERREMOTO",
+      "nombre": "Ficha, terremoto",
+      "svg": "svg-fichas/ficha_terremoto.svg",
+      "foto_sugerida": "Terremoto en pichanga de La Piojera"
+    },
+    {
+      "codigo": "FICHA_SANCRISTOBAL",
+      "nombre": "Ficha, cerro San Cristobal",
+      "svg": "svg-fichas/ficha_sancristobal.svg",
+      "foto_sugerida": "Virgen del cerro San Cristobal"
+    },
+    {
+      "codigo": "FICHA_GATO",
+      "nombre": "Ficha, gato callejero",
+      "svg": "svg-fichas/ficha_gato.svg",
+      "foto_sugerida": "Gato de barrio en techo de zinc"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "schema_version": 4,
   "id": "classic-demo",
-  "version": "1.3.0",
+  "version": "2.0.0",
   "name_key": "pack.name",
   "board_mode": "classic",
   "side_length": 11,

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from business_game.domain.models import (
     BoardDefinition,
@@ -338,6 +338,17 @@ class PublishBoardRequest(BoardRevisionRequest):
         pattern=r"^\d+\.\d+\.\d+$",
     )
 
+    @field_validator("version", mode="before")
+    @classmethod
+    def normalize_version(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        parts = value.strip().split(".")
+        if 1 <= len(parts) <= 3 and all(part.isdigit() for part in parts):
+            normalized = [str(int(part)) for part in parts]
+            return ".".join(normalized + ["0"] * (3 - len(normalized)))
+        return value
+
 
 class BoardValidationIssue(BaseModel):
     path: str
@@ -369,3 +380,14 @@ class PublishedBoardVersion(BaseModel):
     version: str
     manifest: PackManifest
     published_at: datetime
+
+
+class BoardAsset(BaseModel):
+    id: UUID
+    project_id: UUID
+    name: str
+    content_type: Literal["image/svg+xml"]
+    size_bytes: int
+    sha256: str
+    path: str
+    created_at: datetime

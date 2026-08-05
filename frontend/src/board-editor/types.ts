@@ -71,6 +71,7 @@ export interface BoardTileDraft {
   color?: string
   icon?: TileIcon
   icon_background?: TileIconBackground
+  asset_path?: string
   purchasable?: boolean
   deck_id?: string
   price?: number
@@ -169,4 +170,15 @@ export interface BoardVersionSummary {
   version: string
   pack_id: string
   published_at: string
+}
+
+export interface BoardAsset {
+  id: string
+  project_id: string
+  name: string
+  content_type: 'image/svg+xml'
+  size_bytes: number
+  sha256: string
+  path: string
+  created_at: string
 }

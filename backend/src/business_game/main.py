@@ -6,7 +6,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from business_game.api.advisor_routes import router as advisor_router
+from business_game.api.board_routes import asset_router
 from business_game.api.board_routes import router as board_router
+from business_game.api.chat_routes import router as chat_router
 from business_game.api.routes import router
 from business_game.config import settings
 from business_game.domain.errors import (
@@ -18,7 +21,10 @@ from business_game.domain.errors import (
 )
 from business_game.realtime import (
     resume_auction_timers,
+    resume_bot_runners,
     shutdown_auction_timers,
+    shutdown_bot_runners,
+    shutdown_chat_replies,
     sio,
 )
 
@@ -26,7 +32,10 @@ from business_game.realtime import (
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await resume_auction_timers()
+    await resume_bot_runners()
     yield
+    await shutdown_chat_replies()
+    await shutdown_bot_runners()
     await shutdown_auction_timers()
 
 
@@ -40,6 +49,9 @@ api.add_middleware(
 )
 api.include_router(router)
 api.include_router(board_router)
+api.include_router(asset_router)
+api.include_router(advisor_router)
+api.include_router(chat_router)
 
 
 @api.exception_handler(DomainError)

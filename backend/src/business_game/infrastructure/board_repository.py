@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.domain.errors import NotFoundError
 from business_game.infrastructure.db_models import (
+    BoardAssetRecord,
     BoardProjectRecord,
     BoardVersionRecord,
 )
@@ -71,6 +72,60 @@ class BoardProjectRepository:
         await self.session.refresh(record)
 
     async def delete(self, record: BoardProjectRecord) -> None:
+        await self.session.delete(record)
+        await self.session.flush()
+
+    async def create_asset(
+        self,
+        *,
+        project_id: UUID,
+        name: str,
+        content: str,
+        size_bytes: int,
+        sha256: str,
+    ) -> BoardAssetRecord:
+        record = BoardAssetRecord(
+            project_id=project_id,
+            name=name,
+            content_type="image/svg+xml",
+            content=content,
+            size_bytes=size_bytes,
+            sha256=sha256,
+        )
+        self.session.add(record)
+        await self.session.flush()
+        await self.session.refresh(record)
+        return record
+
+    async def list_assets(self, project_id: UUID) -> list[BoardAssetRecord]:
+        statement = (
+            select(BoardAssetRecord)
+            .where(BoardAssetRecord.project_id == project_id)
+            .order_by(BoardAssetRecord.created_at, BoardAssetRecord.id)
+        )
+        return list((await self.session.scalars(statement)).all())
+
+    async def count_assets(self, project_id: UUID) -> int:
+        statement = select(func.count(BoardAssetRecord.id)).where(
+            BoardAssetRecord.project_id == project_id
+        )
+        return int(await self.session.scalar(statement) or 0)
+
+    async def get_asset(
+        self,
+        asset_id: UUID,
+        *,
+        project_id: UUID | None = None,
+    ) -> BoardAssetRecord:
+        statement = select(BoardAssetRecord).where(BoardAssetRecord.id == asset_id)
+        if project_id is not None:
+            statement = statement.where(BoardAssetRecord.project_id == project_id)
+        record = await self.session.scalar(statement)
+        if record is None:
+            raise NotFoundError("board asset was not found")
+        return record
+
+    async def delete_asset(self, record: BoardAssetRecord) -> None:
         await self.session.delete(record)
         await self.session.flush()
 

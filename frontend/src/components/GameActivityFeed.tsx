@@ -274,16 +274,20 @@ function eventMessage(
         count: numberValue(event, 'failed_rolls'),
       })
     case 'trade.proposed':
-      return t('activity.tradeProposed', {
-        player: playerName(textValue(event, 'proposer_id')),
-        recipient: playerName(textValue(event, 'recipient_id')),
-      })
+      return withBotReason(
+        t('activity.tradeProposed', {
+          player: playerName(textValue(event, 'proposer_id')),
+          recipient: playerName(textValue(event, 'recipient_id')),
+        }),
+        event,
+        t,
+      )
     case 'trade.accepted':
-      return t('activity.tradeAccepted')
+      return withBotReason(t('activity.tradeAccepted'), event, t)
     case 'trade.rejected':
-      return t('activity.tradeRejected')
+      return withBotReason(t('activity.tradeRejected'), event, t)
     case 'trade.cancelled':
-      return t('activity.tradeCancelled')
+      return withBotReason(t('activity.tradeCancelled'), event, t)
     case 'player.bankrupt':
       return t('activity.playerBankrupt', { player })
     case 'turn.started':
@@ -297,6 +301,16 @@ function eventMessage(
     default:
       return t('activity.generic', { type: event.type })
   }
+}
+
+function withBotReason(message: string, event: GameEvent, t: Translate): string {
+  // An AI bot writes its own note; a scripted bot sends a code we translate.
+  const note = textValue(event, 'bot_note')
+  if (note) return `${message} — ${note}`
+  const reason = textValue(event, 'bot_reason')
+  if (!reason) return message
+  const explanation = t(`activity.botReason.${reason}`, { defaultValue: '' })
+  return explanation ? `${message} — ${explanation}` : message
 }
 
 function textValue(event: GameEvent, key: string): string | undefined {

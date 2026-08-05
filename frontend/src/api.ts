@@ -1,4 +1,6 @@
 import type {
+  BotController,
+  BotPersonality,
   ContentPack,
   GameCommand,
   GameState,
@@ -37,7 +39,11 @@ async function request<T>(
   retryAuthentication = true,
 ): Promise<T> {
   const headers = new Headers(init.headers)
-  if (init.body && !(init.body instanceof URLSearchParams)) {
+  if (
+    init.body &&
+    !(init.body instanceof URLSearchParams) &&
+    !(init.body instanceof FormData)
+  ) {
     headers.set('Content-Type', 'application/json')
   }
   if (authenticated) {
@@ -63,14 +69,42 @@ async function request<T>(
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
-      detail?: string
+      detail?: unknown
     } | null
-    throw new ApiError(body?.detail ?? `API error ${response.status}`, response.status)
+    throw new ApiError(
+      formatApiError(body?.detail, response.status),
+      response.status,
+    )
   }
   if (response.status === 204) {
     return undefined as T
   }
   return response.json() as Promise<T>
+}
+
+function formatApiError(detail: unknown, status: number): string {
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (Array.isArray(detail)) {
+    const messages = detail.flatMap((item) => {
+      if (!item || typeof item !== 'object') return []
+      const message = 'msg' in item && typeof item.msg === 'string' ? item.msg : null
+      if (!message) return []
+      const location =
+        'loc' in item && Array.isArray(item.loc)
+          ? item.loc.filter((part: unknown) => part !== 'body').join('.')
+          : ''
+      return [location ? `${location}: ${message}` : message]
+    })
+    if (messages.length > 0) return messages.join(' · ')
+  }
+  if (detail && typeof detail === 'object') {
+    try {
+      return JSON.stringify(detail)
+    } catch {
+      // Use the stable fallback below.
+    }
+  }
+  return `Error de API ${status}`
 }
 
 export function authenticatedRequest<T>(
@@ -145,6 +179,30 @@ export const api = {
   listActiveGames: () => request<GameState[]>('/games/me/active', {}, true),
   joinGame: (gameId: string) =>
     request<GameState>(`/games/${gameId}/players`, { method: 'POST' }, true),
+  addBot: (
+    gameId: string,
+    controller: BotController,
+    personality: BotPersonality,
+    displayName?: string,
+  ) =>
+    request<GameState>(
+      `/games/${gameId}/bots`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          controller,
+          personality,
+          ...(displayName?.trim() ? { display_name: displayName.trim() } : {}),
+        }),
+      },
+      true,
+    ),
+  removeBot: (gameId: string, botId: string) =>
+    request<GameState>(
+      `/games/${gameId}/bots/${botId}`,
+      { method: 'DELETE' },
+      true,
+    ),
   watchGame: (gameId: string) =>
     request<GameState>(`/games/${gameId}/spectators`, { method: 'POST' }, true),
   updateGameSettings: (

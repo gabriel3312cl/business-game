@@ -39,6 +39,7 @@ import { EditorPanel } from './EditorPanels'
 import { textForLocale } from './defaults'
 import type {
   BoardDraft,
+  BoardAsset,
   BoardDraftDocument,
   BoardEditorStep,
   BoardValidationIssue,
@@ -86,6 +87,11 @@ export function BoardEditor({
   const [publishing, setPublishing] = useState(false)
   const [version, setVersion] = useState('')
   const [versions, setVersions] = useState<BoardVersionSummary[]>([])
+  const [assets, setAssets] = useState<BoardAsset[]>([])
+  const [assetsLoading, setAssetsLoading] = useState(true)
+  const [uploadingAsset, setUploadingAsset] = useState(false)
+  const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null)
+  const [assetError, setAssetError] = useState<string | null>(null)
   const [closing, setClosing] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const revisionRef = useRef(initialDraft.revision)
@@ -102,6 +108,23 @@ export function BoardEditor({
         if (mountedRef.current) setVersions(items)
       })
       .catch(() => undefined)
+    void boardEditorApi
+      .assets(initialDraft.id)
+      .then((items) => {
+        if (mountedRef.current) setAssets(items)
+      })
+      .catch((error: unknown) => {
+        if (mountedRef.current) {
+          setAssetError(
+            error instanceof ApiError
+              ? `No fue posible cargar los assets: ${error.message}`
+              : 'No fue posible cargar los assets del tablero.',
+          )
+        }
+      })
+      .finally(() => {
+        if (mountedRef.current) setAssetsLoading(false)
+      })
     return () => {
       mountedRef.current = false
     }
@@ -268,6 +291,46 @@ export function BoardEditor({
     setSelectedTileId(sourceTileId)
   }
 
+  const uploadAsset = async (file: File): Promise<BoardAsset> => {
+    setUploadingAsset(true)
+    setAssetError(null)
+    try {
+      const asset = await boardEditorApi.uploadAsset(draft.id, file)
+      if (mountedRef.current) setAssets((current) => [...current, asset])
+      return asset
+    } catch (error: unknown) {
+      const message =
+        error instanceof ApiError
+          ? `No fue posible cargar el SVG: ${error.message}`
+          : 'No fue posible cargar el SVG.'
+      if (mountedRef.current) setAssetError(message)
+      throw error
+    } finally {
+      if (mountedRef.current) setUploadingAsset(false)
+    }
+  }
+
+  const deleteAsset = async (assetId: string) => {
+    setDeletingAssetId(assetId)
+    setAssetError(null)
+    try {
+      await boardEditorApi.deleteAsset(draft.id, assetId)
+      if (mountedRef.current) {
+        setAssets((current) => current.filter((asset) => asset.id !== assetId))
+      }
+    } catch (error: unknown) {
+      if (mountedRef.current) {
+        setAssetError(
+          error instanceof ApiError
+            ? `No fue posible eliminar el asset: ${error.message}`
+            : 'No fue posible eliminar el asset.',
+        )
+      }
+    } finally {
+      if (mountedRef.current) setDeletingAssetId(null)
+    }
+  }
+
   return (
     <Stack
       spacing={1.5}
@@ -414,6 +477,13 @@ export function BoardEditor({
               selectedTileId={selectedTileId}
               onSelectTile={setSelectedTileId}
               onChange={changeDocument}
+              assets={assets}
+              assetsLoading={assetsLoading}
+              uploadingAsset={uploadingAsset}
+              deletingAssetId={deletingAssetId}
+              assetError={assetError}
+              onUploadAsset={uploadAsset}
+              onDeleteAsset={(assetId) => void deleteAsset(assetId)}
             />
           )}
         </Paper>
@@ -543,10 +613,10 @@ function PublishPanel({
       <Divider />
       <TextField
         size="small"
-        label="Versión (opcional, ej. 1.0.0)"
+        label="Versión (opcional)"
         value={version}
         onChange={(event) => onVersionChange(event.target.value)}
-        helperText="Si queda vacío, el servidor asignará la siguiente versión."
+        helperText="Acepta 1, 1.2 o 1.2.3. Si queda vacío, se asignará la siguiente."
       />
       <Button
         variant="contained"

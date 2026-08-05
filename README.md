@@ -31,6 +31,15 @@ Esta primera entrega contiene:
   al caer en Salida.
 - Bancarrota con transferencia al acreedor o subastas bancarias encadenadas.
 - Socket.IO sobre ASGI para sincronización en tiempo real.
+- Bots autoritativos con perfiles conservador, equilibrado, agresivo y negociador;
+  compran, construyen, subastan, resuelven deudas e intercambian mediante los
+  mismos comandos validados que los jugadores humanos.
+- Negociación real entre bots: proponen cambios que completan grupos a ambas partes,
+  ponen precio a lo que gana el rival, contraofertan cuando el trato queda cerca y se
+  niegan a entregar la pieza que cierra un grupo ajeno; la bitácora muestra el motivo
+  de cada respuesta.
+- Asesor estratégico de solo lectura con preguntas adaptadas al estado de la
+  partida y sin acceso a comandos del motor.
 - PostgreSQL con migraciones Alembic, snapshots y eventos append-only.
 - Contrato validado para paquetes de tablero, reglas, mazos e i18n.
 - Paquetes demostrativos de 40 y 64 casillas con nombres ficticios.
@@ -106,6 +115,21 @@ volúmenes con prefijo `business-game-`. No declara `container_name`, por lo que
 no puede apropiarse de nombres globales de otros proyectos. Todos los puertos se
 publican exclusivamente en `127.0.0.1`; si alguno ya está ocupado, Docker o Vite
 detendrán el arranque en vez de elegir otro en silencio.
+
+La configuración local parte desde el contrato versionado y se guarda en un
+archivo `.env` ignorado por Git:
+
+```bash
+cp .env.example .env
+# Edita BUSINESS_GAME_DEEPSEEK_API_KEY en .env
+make stack
+```
+
+Modelo, URL, timeout y límite por usuario también se configuran en `.env`; no
+están fijados en el código. La clave nunca se envía al navegador. El backend
+entrega al modelo un resumen seudonimizado de la partida y no expone al asesor
+ningún comando capaz de modificar el juego. Mientras la clave esté vacía, el
+resto del juego funciona y el asesor responde como no disponible.
 
 ## Validación
 

@@ -10,10 +10,10 @@ import {
   Typography,
 } from '@mui/material'
 import { useMemo, useRef, useState } from 'react'
+import { TileVisual } from '../components/AssetVisual'
 import {
   defaultTileColor,
   tileIconBackgroundStyle,
-  tileIconComponent,
 } from '../components/tilePresentation'
 import { textForLocale } from './defaults'
 import type {
@@ -272,7 +272,6 @@ function PreviewTile({
   onDragEnterTile: (tileId: string) => void
   onDragEndTile: () => void
 }) {
-  const Icon = tileIconComponent(tile.kind, tile.icon)
   const name = textForLocale(tile.name, locale, defaultLocale)
   const showName = cellSize >= 42
   return (
@@ -353,7 +352,11 @@ function PreviewTile({
           '& svg': { fontSize: Math.max(8, cellSize * 0.2) },
         }}
       >
-        <Icon />
+        <TileVisual
+          kind={tile.kind}
+          icon={tile.icon}
+          assetPath={tile.asset_path}
+        />
       </Box>
       {showName && (
         <Typography

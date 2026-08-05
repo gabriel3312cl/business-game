@@ -1,72 +1,64 @@
 {
+  "groups": [
+    { "id": "brown", "name_key": "group.brown", "color": "#955436" },
+    { "id": "light_blue", "name_key": "group.light_blue", "color": "#aae0fa" },
+    { "id": "pink", "name_key": "group.pink", "color": "#d93a96" },
+    { "id": "orange", "name_key": "group.orange", "color": "#f7941d" },
+    { "id": "red", "name_key": "group.red", "color": "#ed1b24" },
+    { "id": "yellow", "name_key": "group.yellow", "color": "#fef200" },
+    { "id": "green", "name_key": "group.green", "color": "#1fb25a" },
+    { "id": "dark_blue", "name_key": "group.dark_blue", "color": "#0072bb" }
+  ],
   "tiles": [
     {
       "id": "start_00",
       "kind": "start",
-      "name_key": "tile.00.name"
+      "name_key": "tile.00.name",
+      "color": "#b8ff3d",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/salida.svg"
     },
     {
       "id": "property_01",
       "kind": "property",
       "name_key": "tile.01.name",
-      "group": "group_1",
-      "color": "#7c4dff",
-      "price": 70,
-      "base_rent": 6,
-      "mortgage_value": 35,
+      "group": "brown",
+      "color": "#955436",
+      "price": 60,
+      "base_rent": 2,
+      "mortgage_value": 30,
       "build_cost": 50,
-      "rent_levels": [
-        6,
-        30,
-        90,
-        270,
-        480,
-        750
-      ]
+      "rent_levels": [2, 10, 30, 90, 160, 250]
     },
     {
-      "id": "property_02",
-      "kind": "property",
+      "id": "card_02",
+      "kind": "card",
       "name_key": "tile.02.name",
-      "group": "group_1",
-      "color": "#7c4dff",
-      "price": 80,
-      "base_rent": 8,
-      "mortgage_value": 40,
-      "build_cost": 50,
-      "rent_levels": [
-        8,
-        40,
-        120,
-        360,
-        640,
-        1000
-      ]
+      "deck_id": "community",
+      "color": "#f4b942",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/arca_comunal.svg"
     },
     {
       "id": "property_03",
       "kind": "property",
       "name_key": "tile.03.name",
-      "group": "group_2",
-      "color": "#26c6da",
-      "price": 90,
-      "base_rent": 10,
-      "mortgage_value": 45,
-      "build_cost": 75,
-      "rent_levels": [
-        10,
-        50,
-        150,
-        450,
-        800,
-        1250
-      ]
+      "group": "brown",
+      "color": "#955436",
+      "price": 60,
+      "base_rent": 4,
+      "mortgage_value": 30,
+      "build_cost": 50,
+      "rent_levels": [4, 20, 60, 180, 320, 450]
     },
     {
       "id": "tax_04",
       "kind": "tax",
       "name_key": "tile.04.name",
-      "amount": 104
+      "net_worth_percent": 10,
+      "color": "#f5f5f5",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/imp_renta.svg"
     },
     {
       "id": "transport_05",
@@ -75,145 +67,111 @@
       "price": 200,
       "base_rent": 25,
       "mortgage_value": 100,
-      "rent_levels": [
-        25,
-        50,
-        100,
-        200,
-        400,
-        800
-      ]
+      "rent_levels": [25, 50, 100, 200],
+      "color": "#f5f5f5",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/ferrocarril.svg"
     },
     {
       "id": "property_06",
       "kind": "property",
       "name_key": "tile.06.name",
-      "group": "group_3",
-      "color": "#ec407a",
-      "price": 120,
-      "base_rent": 16,
-      "mortgage_value": 60,
-      "build_cost": 100,
-      "rent_levels": [
-        16,
-        80,
-        240,
-        720,
-        1280,
-        2000
-      ]
+      "group": "light_blue",
+      "color": "#aae0fa",
+      "price": 100,
+      "base_rent": 6,
+      "mortgage_value": 50,
+      "build_cost": 50,
+      "rent_levels": [6, 30, 90, 270, 400, 550]
     },
     {
-      "id": "property_07",
-      "kind": "property",
-      "name_key": "tile.07.name",
-      "group": "group_3",
-      "color": "#ec407a",
-      "price": 130,
-      "base_rent": 18,
-      "mortgage_value": 65,
-      "build_cost": 100,
-      "rent_levels": [
-        18,
-        90,
-        270,
-        810,
-        1440,
-        2250
-      ]
-    },
-    {
-      "id": "card_08",
+      "id": "card_07",
       "kind": "card",
+      "name_key": "tile.07.name",
+      "deck_id": "opportunity",
+      "color": "#ff8bd1",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/fortuna.svg"
+    },
+    {
+      "id": "property_08",
+      "kind": "property",
       "name_key": "tile.08.name",
-      "deck_id": "opportunity"
+      "group": "light_blue",
+      "color": "#aae0fa",
+      "price": 100,
+      "base_rent": 6,
+      "mortgage_value": 50,
+      "build_cost": 50,
+      "rent_levels": [6, 30, 90, 270, 400, 550]
     },
     {
       "id": "property_09",
       "kind": "property",
       "name_key": "tile.09.name",
-      "group": "group_4",
-      "color": "#ff7043",
-      "price": 150,
-      "base_rent": 22,
-      "mortgage_value": 75,
-      "build_cost": 125,
-      "rent_levels": [
-        22,
-        110,
-        330,
-        990,
-        1760,
-        2750
-      ]
+      "group": "light_blue",
+      "color": "#aae0fa",
+      "price": 120,
+      "base_rent": 8,
+      "mortgage_value": 60,
+      "build_cost": 50,
+      "rent_levels": [8, 40, 100, 300, 450, 600]
     },
     {
       "id": "jail_10",
       "kind": "jail",
-      "name_key": "tile.10.name"
+      "name_key": "tile.10.name",
+      "color": "#f5f5f5",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/carcel.svg"
     },
     {
       "id": "property_11",
       "kind": "property",
       "name_key": "tile.11.name",
-      "group": "group_4",
-      "color": "#ff7043",
-      "price": 170,
-      "base_rent": 26,
-      "mortgage_value": 85,
-      "build_cost": 125,
-      "rent_levels": [
-        26,
-        130,
-        390,
-        1170,
-        2080,
-        3250
-      ]
+      "group": "pink",
+      "color": "#d93a96",
+      "price": 140,
+      "base_rent": 10,
+      "mortgage_value": 70,
+      "build_cost": 100,
+      "rent_levels": [10, 50, 150, 450, 625, 750]
     },
     {
-      "id": "property_12",
-      "kind": "property",
+      "id": "utility_12",
+      "kind": "utility",
       "name_key": "tile.12.name",
-      "group": "group_5",
+      "price": 150,
+      "base_rent": 4,
+      "mortgage_value": 75,
+      "rent_multipliers": [4, 10],
       "color": "#ffee58",
-      "price": 180,
-      "base_rent": 28,
-      "mortgage_value": 90,
-      "build_cost": 50,
-      "rent_levels": [
-        28,
-        140,
-        420,
-        1260,
-        2240,
-        3500
-      ]
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/cia_electrica.svg"
     },
     {
       "id": "property_13",
       "kind": "property",
       "name_key": "tile.13.name",
-      "group": "group_5",
-      "color": "#ffee58",
-      "price": 190,
-      "base_rent": 30,
-      "mortgage_value": 95,
-      "build_cost": 50,
-      "rent_levels": [
-        30,
-        150,
-        450,
-        1350,
-        2400,
-        3750
-      ]
+      "group": "pink",
+      "color": "#d93a96",
+      "price": 140,
+      "base_rent": 10,
+      "mortgage_value": 70,
+      "build_cost": 100,
+      "rent_levels": [10, 50, 150, 450, 625, 750]
     },
     {
-      "id": "tax_14",
-      "kind": "tax",
+      "id": "property_14",
+      "kind": "property",
       "name_key": "tile.14.name",
-      "amount": 114
+      "group": "pink",
+      "color": "#d93a96",
+      "price": 160,
+      "base_rent": 12,
+      "mortgage_value": 80,
+      "build_cost": 100,
+      "rent_levels": [12, 60, 180, 500, 700, 900]
     },
     {
       "id": "transport_15",
@@ -222,145 +180,108 @@
       "price": 200,
       "base_rent": 25,
       "mortgage_value": 100,
-      "rent_levels": [
-        25,
-        50,
-        100,
-        200,
-        400,
-        800
-      ]
+      "rent_levels": [25, 50, 100, 200],
+      "color": "#f5f5f5",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/ferrocarril.svg"
     },
     {
-      "id": "card_16",
-      "kind": "card",
-      "name_key": "tile.16.name",
-      "deck_id": "community"
-    },
-    {
-      "id": "property_17",
+      "id": "property_16",
       "kind": "property",
+      "name_key": "tile.16.name",
+      "group": "orange",
+      "color": "#f7941d",
+      "price": 180,
+      "base_rent": 14,
+      "mortgage_value": 90,
+      "build_cost": 100,
+      "rent_levels": [14, 70, 200, 550, 750, 950]
+    },
+    {
+      "id": "card_17",
+      "kind": "card",
       "name_key": "tile.17.name",
-      "group": "group_6",
-      "color": "#66bb6a",
-      "price": 230,
-      "base_rent": 38,
-      "mortgage_value": 115,
-      "build_cost": 75,
-      "rent_levels": [
-        38,
-        190,
-        570,
-        1710,
-        3040,
-        4750
-      ]
+      "deck_id": "community",
+      "color": "#f4b942",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/arca_comunal.svg"
     },
     {
       "id": "property_18",
       "kind": "property",
       "name_key": "tile.18.name",
-      "group": "group_7",
-      "color": "#42a5f5",
-      "price": 240,
-      "base_rent": 40,
-      "mortgage_value": 120,
+      "group": "orange",
+      "color": "#f7941d",
+      "price": 180,
+      "base_rent": 14,
+      "mortgage_value": 90,
       "build_cost": 100,
-      "rent_levels": [
-        40,
-        200,
-        600,
-        1800,
-        3200,
-        5000
-      ]
+      "rent_levels": [14, 70, 200, 550, 750, 950]
     },
     {
       "id": "property_19",
       "kind": "property",
       "name_key": "tile.19.name",
-      "group": "group_7",
-      "color": "#42a5f5",
-      "price": 250,
-      "base_rent": 42,
-      "mortgage_value": 125,
+      "group": "orange",
+      "color": "#f7941d",
+      "price": 200,
+      "base_rent": 16,
+      "mortgage_value": 100,
       "build_cost": 100,
-      "rent_levels": [
-        42,
-        210,
-        630,
-        1890,
-        3360,
-        5250
-      ]
+      "rent_levels": [16, 80, 220, 600, 800, 1000]
     },
     {
       "id": "free_20",
       "kind": "free",
-      "name_key": "tile.20.name"
+      "name_key": "tile.20.name",
+      "color": "#f5f5f5",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/estacionamiento_gratis.svg"
     },
     {
       "id": "property_21",
       "kind": "property",
       "name_key": "tile.21.name",
-      "group": "group_8",
-      "color": "#ab47bc",
-      "price": 270,
-      "base_rent": 46,
-      "mortgage_value": 135,
-      "build_cost": 125,
-      "rent_levels": [
-        46,
-        230,
-        690,
-        2070,
-        3680,
-        5750
-      ]
+      "group": "red",
+      "color": "#ed1b24",
+      "price": 220,
+      "base_rent": 18,
+      "mortgage_value": 110,
+      "build_cost": 150,
+      "rent_levels": [18, 90, 250, 700, 875, 1050]
     },
     {
-      "id": "property_22",
-      "kind": "property",
+      "id": "card_22",
+      "kind": "card",
       "name_key": "tile.22.name",
-      "group": "group_8",
-      "color": "#ab47bc",
-      "price": 280,
-      "base_rent": 48,
-      "mortgage_value": 140,
-      "build_cost": 125,
-      "rent_levels": [
-        48,
-        240,
-        720,
-        2160,
-        3840,
-        6000
-      ]
+      "deck_id": "opportunity",
+      "color": "#ff8bd1",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/fortuna.svg"
     },
     {
       "id": "property_23",
       "kind": "property",
       "name_key": "tile.23.name",
-      "group": "group_8",
-      "color": "#ab47bc",
-      "price": 290,
-      "base_rent": 50,
-      "mortgage_value": 145,
-      "build_cost": 125,
-      "rent_levels": [
-        50,
-        250,
-        750,
-        2250,
-        4000,
-        6250
-      ]
+      "group": "red",
+      "color": "#ed1b24",
+      "price": 220,
+      "base_rent": 18,
+      "mortgage_value": 110,
+      "build_cost": 150,
+      "rent_levels": [18, 90, 250, 700, 875, 1050]
     },
     {
-      "id": "tax_24",
-      "kind": "tax",
+      "id": "property_24",
+      "kind": "property",
       "name_key": "tile.24.name",
-      "amount": 124
+      "group": "red",
+      "color": "#ed1b24",
+      "price": 240,
+      "base_rent": 20,
+      "mortgage_value": 120,
+      "build_cost": 150,
+      "rent_levels": [20, 100, 300, 750, 925, 1100]
     },
     {
       "id": "transport_25",
@@ -369,140 +290,111 @@
       "price": 200,
       "base_rent": 25,
       "mortgage_value": 100,
-      "rent_levels": [
-        25,
-        50,
-        100,
-        200,
-        400,
-        800
-      ]
+      "rent_levels": [25, 50, 100, 200],
+      "color": "#f5f5f5",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/ferrocarril.svg"
     },
     {
       "id": "property_26",
       "kind": "property",
       "name_key": "tile.26.name",
-      "group": "group_1",
-      "color": "#7c4dff",
-      "price": 320,
-      "base_rent": 56,
-      "mortgage_value": 160,
-      "build_cost": 50,
-      "rent_levels": [
-        56,
-        280,
-        840,
-        2520,
-        4480,
-        7000
-      ]
+      "group": "yellow",
+      "color": "#fef200",
+      "price": 260,
+      "base_rent": 22,
+      "mortgage_value": 130,
+      "build_cost": 150,
+      "rent_levels": [22, 110, 330, 800, 975, 1150]
     },
     {
       "id": "property_27",
       "kind": "property",
       "name_key": "tile.27.name",
-      "group": "group_2",
-      "color": "#26c6da",
-      "price": 330,
-      "base_rent": 58,
-      "mortgage_value": 165,
-      "build_cost": 75,
-      "rent_levels": [
-        58,
-        290,
-        870,
-        2610,
-        4640,
-        7250
-      ]
+      "group": "yellow",
+      "color": "#fef200",
+      "price": 260,
+      "base_rent": 22,
+      "mortgage_value": 130,
+      "build_cost": 150,
+      "rent_levels": [22, 110, 330, 800, 975, 1150]
     },
     {
       "id": "utility_28",
       "kind": "utility",
       "name_key": "tile.28.name",
       "price": 150,
-      "base_rent": 20,
+      "base_rent": 4,
       "mortgage_value": 75,
-      "rent_multipliers": [
-        4,
-        10,
-        15,
-        20
-      ]
+      "rent_multipliers": [4, 10],
+      "color": "#42a5f5",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/cia_aguas.svg"
     },
     {
       "id": "property_29",
       "kind": "property",
       "name_key": "tile.29.name",
-      "group": "group_2",
-      "color": "#26c6da",
-      "price": 350,
-      "base_rent": 62,
-      "mortgage_value": 175,
-      "build_cost": 75,
-      "rent_levels": [
-        62,
-        310,
-        930,
-        2790,
-        4960,
-        7750
-      ]
+      "group": "yellow",
+      "color": "#fef200",
+      "price": 280,
+      "base_rent": 24,
+      "mortgage_value": 140,
+      "build_cost": 150,
+      "rent_levels": [24, 120, 360, 850, 1025, 1200]
     },
     {
       "id": "go_to_jail_30",
       "kind": "go_to_jail",
-      "name_key": "tile.30.name"
+      "name_key": "tile.30.name",
+      "color": "#f5f5f5",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/ve_a_la_carcel.svg"
     },
     {
       "id": "property_31",
       "kind": "property",
       "name_key": "tile.31.name",
-      "group": "group_3",
-      "color": "#ec407a",
-      "price": 370,
-      "base_rent": 66,
-      "mortgage_value": 185,
-      "build_cost": 100,
-      "rent_levels": [
-        66,
-        330,
-        990,
-        2970,
-        5280,
-        8250
-      ]
+      "group": "green",
+      "color": "#1fb25a",
+      "price": 300,
+      "base_rent": 26,
+      "mortgage_value": 150,
+      "build_cost": 200,
+      "rent_levels": [26, 130, 390, 900, 1100, 1275]
     },
     {
-      "id": "card_32",
-      "kind": "card",
-      "name_key": "tile.32.name",
-      "deck_id": "community"
-    },
-    {
-      "id": "property_33",
+      "id": "property_32",
       "kind": "property",
-      "name_key": "tile.33.name",
-      "group": "group_4",
-      "color": "#ff7043",
-      "price": 390,
-      "base_rent": 70,
-      "mortgage_value": 195,
-      "build_cost": 125,
-      "rent_levels": [
-        70,
-        350,
-        1050,
-        3150,
-        5600,
-        8750
-      ]
+      "name_key": "tile.32.name",
+      "group": "green",
+      "color": "#1fb25a",
+      "price": 300,
+      "base_rent": 26,
+      "mortgage_value": 150,
+      "build_cost": 200,
+      "rent_levels": [26, 130, 390, 900, 1100, 1275]
     },
     {
-      "id": "tax_34",
-      "kind": "tax",
+      "id": "card_33",
+      "kind": "card",
+      "name_key": "tile.33.name",
+      "deck_id": "community",
+      "color": "#f4b942",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/arca_comunal.svg"
+    },
+    {
+      "id": "property_34",
+      "kind": "property",
       "name_key": "tile.34.name",
-      "amount": 134
+      "group": "green",
+      "color": "#1fb25a",
+      "price": 320,
+      "base_rent": 28,
+      "mortgage_value": 160,
+      "build_cost": 200,
+      "rent_levels": [28, 150, 450, 1000, 1200, 1400]
     },
     {
       "id": "transport_35",
@@ -511,217 +403,97 @@
       "price": 200,
       "base_rent": 25,
       "mortgage_value": 100,
-      "rent_levels": [
-        25,
-        50,
-        100,
-        200,
-        400,
-        800
-      ]
+      "rent_levels": [25, 50, 100, 200],
+      "color": "#f5f5f5",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/ferrocarril.svg"
     },
     {
-      "id": "property_36",
-      "kind": "property",
+      "id": "card_36",
+      "kind": "card",
       "name_key": "tile.36.name",
-      "group": "group_5",
-      "color": "#ffee58",
-      "price": 420,
-      "base_rent": 76,
-      "mortgage_value": 210,
-      "build_cost": 50,
-      "rent_levels": [
-        76,
-        380,
-        1140,
-        3420,
-        6080,
-        9500
-      ]
+      "deck_id": "opportunity",
+      "color": "#ff8bd1",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/fortuna.svg"
     },
     {
       "id": "property_37",
       "kind": "property",
       "name_key": "tile.37.name",
-      "group": "group_5",
-      "color": "#ffee58",
-      "price": 430,
-      "base_rent": 78,
-      "mortgage_value": 215,
-      "build_cost": 50,
-      "rent_levels": [
-        78,
-        390,
-        1170,
-        3510,
-        6240,
-        9750
-      ]
+      "group": "dark_blue",
+      "color": "#0072bb",
+      "price": 350,
+      "base_rent": 35,
+      "mortgage_value": 175,
+      "build_cost": 200,
+      "rent_levels": [35, 175, 500, 1100, 1300, 1500]
     },
     {
-      "id": "property_38",
-      "kind": "property",
+      "id": "tax_38",
+      "kind": "tax",
       "name_key": "tile.38.name",
-      "group": "group_5",
-      "color": "#ffee58",
-      "price": 440,
-      "base_rent": 80,
-      "mortgage_value": 220,
-      "build_cost": 50,
-      "rent_levels": [
-        80,
-        400,
-        1200,
-        3600,
-        6400,
-        10000
-      ]
+      "amount": 75,
+      "color": "#f5f5f5",
+      "icon_background": "none",
+      "asset_path": "/assets/monopoly-classic/svg/imp_lujo.svg"
     },
     {
       "id": "property_39",
       "kind": "property",
       "name_key": "tile.39.name",
-      "group": "group_6",
-      "color": "#66bb6a",
-      "price": 450,
-      "base_rent": 82,
-      "mortgage_value": 225,
-      "build_cost": 75,
-      "rent_levels": [
-        82,
-        410,
-        1230,
-        3690,
-        6560,
-        10250
-      ]
+      "group": "dark_blue",
+      "color": "#0072bb",
+      "price": 400,
+      "base_rent": 50,
+      "mortgage_value": 200,
+      "build_cost": 200,
+      "rent_levels": [50, 200, 600, 1400, 1700, 2000]
     }
   ],
   "decks": [
     {
       "id": "opportunity",
+      "name_key": "deck.opportunity.name",
       "cards": [
-        {
-          "id": "opportunity_bonus",
-          "message_key": "card.opportunity_bonus",
-          "effect": {
-            "type": "cash",
-            "amount": 100
-          }
-        },
-        {
-          "id": "opportunity_fee",
-          "message_key": "card.opportunity_fee",
-          "effect": {
-            "type": "cash",
-            "amount": -50
-          }
-        },
-        {
-          "id": "opportunity_start",
-          "message_key": "card.opportunity_start",
-          "effect": {
-            "type": "move_to",
-            "tile_id": "start_00",
-            "collect_start": true
-          }
-        },
-        {
-          "id": "opportunity_nearest_transport",
-          "message_key": "card.opportunity_nearest_transport",
-          "effect": {
-            "type": "move_to_nearest",
-            "tile_kind": "transport",
-            "collect_start": true,
-            "rent_multiplier": 2
-          }
-        },
-        {
-          "id": "opportunity_nearest_utility",
-          "message_key": "card.opportunity_nearest_utility",
-          "effect": {
-            "type": "move_to_nearest",
-            "tile_kind": "utility",
-            "collect_start": true,
-            "dice_multiplier": 10
-          }
-        },
-        {
-          "id": "opportunity_back",
-          "message_key": "card.opportunity_back",
-          "effect": {
-            "type": "move_relative",
-            "steps": -3
-          }
-        },
-        {
-          "id": "opportunity_jail",
-          "message_key": "card.opportunity_jail",
-          "effect": {
-            "type": "go_to_jail"
-          }
-        },
-        {
-          "id": "opportunity_jail_free",
-          "message_key": "card.opportunity_jail_free",
-          "effect": {
-            "type": "get_out_of_jail"
-          }
-        }
+        { "id": "opportunity_start", "message_key": "card.opportunity_start", "effect": { "type": "move_to", "tile_id": "start_00", "collect_start": true } },
+        { "id": "opportunity_illinois", "message_key": "card.opportunity_illinois", "effect": { "type": "move_to", "tile_id": "property_24", "collect_start": true } },
+        { "id": "opportunity_st_charles", "message_key": "card.opportunity_st_charles", "effect": { "type": "move_to", "tile_id": "property_11", "collect_start": true } },
+        { "id": "opportunity_nearest_utility", "message_key": "card.opportunity_nearest_utility", "effect": { "type": "move_to_nearest", "tile_kind": "utility", "collect_start": true, "dice_multiplier": 10 } },
+        { "id": "opportunity_nearest_transport", "message_key": "card.opportunity_nearest_transport", "effect": { "type": "move_to_nearest", "tile_kind": "transport", "collect_start": true, "rent_multiplier": 2 } },
+        { "id": "opportunity_nearest_transport_2", "message_key": "card.opportunity_nearest_transport", "effect": { "type": "move_to_nearest", "tile_kind": "transport", "collect_start": true, "rent_multiplier": 2 } },
+        { "id": "opportunity_reading", "message_key": "card.opportunity_reading", "effect": { "type": "move_to", "tile_id": "transport_05", "collect_start": true } },
+        { "id": "opportunity_back", "message_key": "card.opportunity_back", "effect": { "type": "move_relative", "steps": -3 } },
+        { "id": "opportunity_jail", "message_key": "card.opportunity_jail", "effect": { "type": "go_to_jail" } },
+        { "id": "opportunity_jail_free", "message_key": "card.opportunity_jail_free", "effect": { "type": "get_out_of_jail" } },
+        { "id": "opportunity_repairs", "message_key": "card.opportunity_repairs", "effect": { "type": "repairs", "house_amount": 25, "hotel_amount": 100 } },
+        { "id": "opportunity_speeding", "message_key": "card.opportunity_speeding", "effect": { "type": "cash", "amount": -15 } },
+        { "id": "opportunity_chairman", "message_key": "card.opportunity_chairman", "effect": { "type": "cash_each", "amount": -50 } },
+        { "id": "opportunity_building_loan", "message_key": "card.opportunity_building_loan", "effect": { "type": "cash", "amount": 150 } },
+        { "id": "opportunity_crossword", "message_key": "card.opportunity_crossword", "effect": { "type": "cash", "amount": 100 } },
+        { "id": "opportunity_nearest_transport_3", "message_key": "card.opportunity_nearest_transport", "effect": { "type": "move_to_nearest", "tile_kind": "transport", "collect_start": true, "rent_multiplier": 2 } }
       ]
     },
     {
       "id": "community",
+      "name_key": "deck.community.name",
       "cards": [
-        {
-          "id": "community_bonus",
-          "message_key": "card.community_bonus",
-          "effect": {
-            "type": "cash",
-            "amount": 50
-          }
-        },
-        {
-          "id": "community_repairs",
-          "message_key": "card.community_repairs",
-          "effect": {
-            "type": "repairs",
-            "house_amount": 40,
-            "hotel_amount": 115
-          }
-        },
-        {
-          "id": "community_collect_each",
-          "message_key": "card.community_collect_each",
-          "effect": {
-            "type": "cash_each",
-            "amount": 10
-          }
-        },
-        {
-          "id": "community_pay_each",
-          "message_key": "card.community_pay_each",
-          "effect": {
-            "type": "cash_each",
-            "amount": -20
-          }
-        },
-        {
-          "id": "community_move",
-          "message_key": "card.community_move",
-          "effect": {
-            "type": "move_to",
-            "tile_id": "property_03",
-            "collect_start": true
-          }
-        },
-        {
-          "id": "community_jail_free",
-          "message_key": "card.community_jail_free",
-          "effect": {
-            "type": "get_out_of_jail"
-          }
-        }
+        { "id": "community_start", "message_key": "card.community_start", "effect": { "type": "move_to", "tile_id": "start_00", "collect_start": true } },
+        { "id": "community_bank_error", "message_key": "card.community_bank_error", "effect": { "type": "cash", "amount": 200 } },
+        { "id": "community_doctor", "message_key": "card.community_doctor", "effect": { "type": "cash", "amount": -50 } },
+        { "id": "community_stock", "message_key": "card.community_stock", "effect": { "type": "cash", "amount": 50 } },
+        { "id": "community_jail_free", "message_key": "card.community_jail_free", "effect": { "type": "get_out_of_jail" } },
+        { "id": "community_jail", "message_key": "card.community_jail", "effect": { "type": "go_to_jail" } },
+        { "id": "community_opera", "message_key": "card.community_opera", "effect": { "type": "cash_each", "amount": 50 } },
+        { "id": "community_tax_refund", "message_key": "card.community_tax_refund", "effect": { "type": "cash", "amount": 20 } },
+        { "id": "community_collect_each", "message_key": "card.community_birthday", "effect": { "type": "cash_each", "amount": 10 } },
+        { "id": "community_life_insurance", "message_key": "card.community_life_insurance", "effect": { "type": "cash", "amount": 100 } },
+        { "id": "community_hospital", "message_key": "card.community_hospital", "effect": { "type": "cash", "amount": -100 } },
+        { "id": "community_school", "message_key": "card.community_school", "effect": { "type": "cash", "amount": -50 } },
+        { "id": "community_consulting", "message_key": "card.community_consulting", "effect": { "type": "cash", "amount": 25 } },
+        { "id": "community_repairs", "message_key": "card.community_repairs", "effect": { "type": "repairs", "house_amount": 40, "hotel_amount": 115 } },
+        { "id": "community_beauty", "message_key": "card.community_beauty", "effect": { "type": "cash", "amount": 10 } },
+        { "id": "community_inheritance", "message_key": "card.community_inheritance", "effect": { "type": "cash", "amount": 100 } }
       ]
     }
   ]

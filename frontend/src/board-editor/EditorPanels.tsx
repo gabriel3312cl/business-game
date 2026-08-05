@@ -1,4 +1,5 @@
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
+import CloudUploadRoundedIcon from '@mui/icons-material/CloudUploadRounded'
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
 import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownRounded'
 import KeyboardArrowUpRoundedIcon from '@mui/icons-material/KeyboardArrowUpRounded'
@@ -23,6 +24,11 @@ import {
   Typography,
 } from '@mui/material'
 import { useEffect, useState } from 'react'
+import {
+  santiagoTileAssetForPosition,
+  santiagoTileAssetOptions,
+} from '../assets/monopolySantiago'
+import { TileVisual } from '../components/AssetVisual'
 import type { TileIcon, TileIconBackground } from '../types'
 import {
   defaultTileColor,
@@ -49,6 +55,7 @@ import {
 } from './EditorControls'
 import type {
   BoardCardEffect,
+  BoardAsset,
   BoardCardDraft,
   BoardDeckDraft,
   BoardDraftDocument,
@@ -65,6 +72,13 @@ export function EditorPanel({
   selectedTileId,
   onSelectTile,
   onChange,
+  assets,
+  assetsLoading,
+  uploadingAsset,
+  deletingAssetId,
+  assetError,
+  onUploadAsset,
+  onDeleteAsset,
 }: {
   step: BoardEditorStep
   document: BoardDraftDocument
@@ -72,6 +86,13 @@ export function EditorPanel({
   selectedTileId?: string
   onSelectTile: (tileId: string) => void
   onChange: (document: BoardDraftDocument) => void
+  assets: BoardAsset[]
+  assetsLoading: boolean
+  uploadingAsset: boolean
+  deletingAssetId: string | null
+  assetError: string | null
+  onUploadAsset: (file: File) => Promise<BoardAsset>
+  onDeleteAsset: (assetId: string) => void
 }) {
   if (step === 'information') {
     return <InformationPanel document={document} onChange={onChange} />
@@ -90,6 +111,13 @@ export function EditorPanel({
         selectedTileId={selectedTileId}
         onSelectTile={onSelectTile}
         onChange={onChange}
+        assets={assets}
+        assetsLoading={assetsLoading}
+        uploadingAsset={uploadingAsset}
+        deletingAssetId={deletingAssetId}
+        assetError={assetError}
+        onUploadAsset={onUploadAsset}
+        onDeleteAsset={onDeleteAsset}
       />
     )
   }
@@ -564,12 +592,26 @@ function TilesPanel({
   selectedTileId,
   onSelectTile,
   onChange,
+  assets,
+  assetsLoading,
+  uploadingAsset,
+  deletingAssetId,
+  assetError,
+  onUploadAsset,
+  onDeleteAsset,
 }: {
   document: BoardDraftDocument
   locale: string
   selectedTileId?: string
   onSelectTile: (tileId: string) => void
   onChange: (document: BoardDraftDocument) => void
+  assets: BoardAsset[]
+  assetsLoading: boolean
+  uploadingAsset: boolean
+  deletingAssetId: string | null
+  assetError: string | null
+  onUploadAsset: (file: File) => Promise<BoardAsset>
+  onDeleteAsset: (assetId: string) => void
 }) {
   const selectedIndex = Math.max(
     0,
@@ -633,14 +675,147 @@ function TilesPanel({
     tile.kind === 'free' ||
     ((tile.kind === 'transport' || tile.kind === 'utility') &&
       tile.purchasable === false)
-  const SelectedIcon = tileIconComponent(tile.kind, tile.icon)
   const accent = tile.color ?? defaultTileColor(tile.kind)
+  const hasSantiagoAssets =
+    document.tiles.length === 48 &&
+    document.tiles.every(
+      (item, index) =>
+        item.asset_path === santiagoTileAssetForPosition(index + 1),
+    )
 
   return (
     <PanelSection
       title="Casillas y recorrido"
       description="Selecciona una casilla en el tablero o en la lista. El orden sigue el perímetro desde Salida."
     >
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+        <Button
+          variant={hasSantiagoAssets ? 'contained' : 'outlined'}
+          disabled={document.tiles.length !== 48}
+          onClick={() =>
+            onChange({
+              ...document,
+              tiles: document.tiles.map((item, index) => ({
+                ...item,
+                asset_path: santiagoTileAssetForPosition(index + 1),
+              })),
+            })
+          }
+        >
+          Usar assets Santiago
+        </Button>
+        <Button
+          variant="outlined"
+          disabled={!document.tiles.some((item) => item.asset_path)}
+          onClick={() =>
+            onChange({
+              ...document,
+              tiles: document.tiles.map((item) => ({
+                ...item,
+                asset_path: undefined,
+              })),
+            })
+          }
+        >
+          Usar iconos integrados
+        </Button>
+      </Stack>
+      {document.tiles.length !== 48 && (
+        <Typography variant="caption" color="text.secondary">
+          El set Santiago completo requiere un tablero de 48 casillas.
+        </Typography>
+      )}
+      <Divider />
+      <Stack spacing={1}>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={1}
+          alignItems={{ sm: 'center' }}
+        >
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography fontWeight={800}>Assets propios</Typography>
+            <Typography variant="caption" color="text.secondary">
+              SVG de hasta 100 KB. Se guardan con este tablero y pasan por una
+              validación de seguridad.
+            </Typography>
+          </Box>
+          <Button
+            component="label"
+            variant="outlined"
+            startIcon={<CloudUploadRoundedIcon />}
+            disabled={uploadingAsset || assets.length >= 100}
+          >
+            {uploadingAsset ? 'Cargando…' : 'Cargar SVG'}
+            <Box
+              component="input"
+              type="file"
+              accept="image/svg+xml,.svg"
+              hidden
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0]
+                event.currentTarget.value = ''
+                if (!file) return
+                void onUploadAsset(file)
+                  .then((asset) => update({ asset_path: asset.path }))
+                  .catch(() => undefined)
+              }}
+            />
+          </Button>
+        </Stack>
+        {assetError && <Alert severity="error">{assetError}</Alert>}
+        {assetsLoading ? (
+          <Typography variant="body2" color="text.secondary">
+            Cargando assets…
+          </Typography>
+        ) : assets.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            Aún no has cargado assets propios.
+          </Typography>
+        ) : (
+          <Stack spacing={0.75}>
+            {assets.map((asset) => {
+              const used = document.tiles.some(
+                (candidate) => candidate.asset_path === asset.path,
+              )
+              return (
+                <Paper key={asset.id} variant="outlined" sx={{ p: 1 }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Box
+                      sx={{
+                        width: 32,
+                        height: 32,
+                        display: 'grid',
+                        placeItems: 'center',
+                        color: 'secondary.main',
+                      }}
+                    >
+                      <TileVisual kind={tile.kind} assetPath={asset.path} />
+                    </Box>
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography variant="body2" noWrap>
+                        {asset.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {Math.ceil(asset.size_bytes / 1024)} KB
+                        {used ? ' · En uso' : ''}
+                      </Typography>
+                    </Box>
+                    <IconButton
+                      color="error"
+                      aria-label={`Eliminar ${asset.name}`}
+                      disabled={used || deletingAssetId === asset.id}
+                      onClick={() => onDeleteAsset(asset.id)}
+                    >
+                      <DeleteOutlineRoundedIcon />
+                    </IconButton>
+                  </Stack>
+                </Paper>
+              )
+            })}
+          </Stack>
+        )}
+      </Stack>
+      <Divider />
       <Stack direction="row" spacing={0.75} alignItems="center">
         <TextField
           select
@@ -718,6 +893,29 @@ function TilesPanel({
         value={tile.name}
         onChange={(name) => update({ name })}
       />
+      <TextField
+        select
+        fullWidth
+        size="small"
+        label="Asset SVG"
+        value={tile.asset_path ?? ''}
+        onChange={(event) =>
+          update({ asset_path: event.target.value || undefined })
+        }
+        helperText="El asset reemplaza visualmente al icono; el icono queda como respaldo."
+      >
+        <MenuItem value="">Usar icono integrado</MenuItem>
+        {santiagoTileAssetOptions.map((option) => (
+          <MenuItem key={option.path} value={option.path}>
+            {option.label}
+          </MenuItem>
+        ))}
+        {assets.map((asset) => (
+          <MenuItem key={asset.id} value={asset.path}>
+            Propio · {asset.name}
+          </MenuItem>
+        ))}
+      </TextField>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
         <TextField
           select
@@ -767,7 +965,11 @@ function TilesPanel({
             ...tileIconBackgroundStyle(tile.icon_background, accent),
           }}
         >
-          <SelectedIcon fontSize="small" />
+          <TileVisual
+            kind={tile.kind}
+            icon={tile.icon}
+            assetPath={tile.asset_path}
+          />
         </Box>
       </Stack>
 

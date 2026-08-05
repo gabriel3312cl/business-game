@@ -16,6 +16,7 @@ from business_game.application.services import GameService, SessionService, User
 from business_game.config import settings
 from business_game.domain.errors import UnauthorizedError
 from business_game.domain.models import (
+    AddBotRequest,
     ContentPack,
     CreateGameRequest,
     GameCommand,
@@ -27,7 +28,7 @@ from business_game.domain.models import (
     UserCreate,
     UserUpdate,
 )
-from business_game.realtime import sio, sync_auction_timer
+from business_game.realtime import sio, sync_auction_timer, sync_bot_runner
 from business_game.security import create_access_token
 
 router = APIRouter(prefix="/api/v1")
@@ -178,6 +179,34 @@ async def join_game(
     return game
 
 
+@router.post(
+    "/games/{game_id}/bots",
+    response_model=GameState,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_bot(
+    game_id: UUID,
+    data: AddBotRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    games: Annotated[GameService, Depends(get_game_service)],
+) -> GameState:
+    game = await games.add_bot(game_id, current_user.id, data)
+    await sio.emit("game_state", game.model_dump(mode="json"), room=str(game_id))
+    return game
+
+
+@router.delete("/games/{game_id}/bots/{bot_id}", response_model=GameState)
+async def remove_bot(
+    game_id: UUID,
+    bot_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    games: Annotated[GameService, Depends(get_game_service)],
+) -> GameState:
+    game = await games.remove_bot(game_id, current_user.id, bot_id)
+    await sio.emit("game_state", game.model_dump(mode="json"), room=str(game_id))
+    return game
+
+
 def _set_session_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         settings.session_cookie_name,
@@ -221,6 +250,7 @@ async def leave_game(
 ) -> GameState:
     game = await games.leave(game_id, current_user.id)
     sync_auction_timer(game)
+    sync_bot_runner(game)
     await sio.emit("game_state", game.model_dump(mode="json"), room=str(game_id))
     return game
 
@@ -232,6 +262,7 @@ async def start_game(
     games: Annotated[GameService, Depends(get_game_service)],
 ) -> GameState:
     game = await games.start(game_id, current_user.id)
+    sync_bot_runner(game)
     await sio.emit("game_state", game.model_dump(mode="json"), room=str(game_id))
     return game
 
@@ -245,5 +276,6 @@ async def execute_command(
 ) -> GameState:
     game = await games.execute(game_id, current_user.id, command)
     sync_auction_timer(game)
+    sync_bot_runner(game)
     await sio.emit("game_state", game.model_dump(mode="json"), room=str(game_id))
     return game

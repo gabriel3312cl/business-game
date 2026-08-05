@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,14 +19,18 @@ from business_game.domain.errors import (
 )
 from business_game.domain.models import (
     AcceptTradeCommand,
+    AddBotRequest,
     AuctionState,
     BidCommand,
+    BotController,
+    BotPersonality,
     BuildPropertyCommand,
     BuyPropertyCommand,
     CancelTradeCommand,
     CardPaymentState,
     CashCardEffect,
     CashEachCardEffect,
+    CompleteGroupsCashCardEffect,
     ContentPack,
     DebtReason,
     DebtState,
@@ -40,18 +44,23 @@ from business_game.domain.models import (
     GameStatus,
     GetOutOfJailCardEffect,
     GoToJailCardEffect,
+    MortgagedPropertiesCashCardEffect,
     MortgagePropertyCommand,
     MoveRelativeCardEffect,
     MoveToCardEffect,
+    MoveToNearestAuctionCardEffect,
     MoveToNearestCardEffect,
+    OwnedPropertiesCashCardEffect,
     PassAuctionCommand,
     PayDebtCommand,
     PayJailFineCommand,
     PlayerState,
     ProposeTradeCommand,
+    RefinanceMortgageCardEffect,
     RejectTradeCommand,
     RepairsCardEffect,
     RollCommand,
+    SelectAuctionPropertyCommand,
     SellBuildingCommand,
     SpectatorState,
     TileDefinition,
@@ -279,6 +288,100 @@ class GameService:
             await self._games.save(game, previous_sequence)
             return game
 
+    async def add_bot(
+        self,
+        game_id: UUID,
+        actor_id: UUID,
+        data: AddBotRequest,
+    ) -> GameState:
+        async with self._session.begin():
+            game = await self._games.get(game_id, for_update=True)
+            if game.host_user_id != actor_id:
+                raise ForbiddenError("only the host can add bots")
+            if game.status is not GameStatus.LOBBY:
+                raise ConflictError("bots can only be added in the lobby")
+            pack = self._pack(game)
+            player_limit = game.settings.max_players or pack.manifest.max_players
+            if len(game.players) >= player_limit:
+                raise ConflictError("the game is full")
+            previous_sequence = len(game.events)
+            display_name = (data.display_name or "").strip()
+            if not display_name:
+                if data.controller is BotController.AI:
+                    base_name = "Bot IA"
+                else:
+                    labels = {
+                        BotPersonality.CONSERVATIVE: "Bot Conservador",
+                        BotPersonality.BALANCED: "Bot Equilibrado",
+                        BotPersonality.AGGRESSIVE: "Bot Agresivo",
+                        BotPersonality.NEGOTIATOR: "Bot Negociador",
+                    }
+                    base_name = labels[data.personality]
+                used_names = {player.display_name for player in game.players}
+                display_name = base_name
+                suffix = 2
+                while display_name in used_names:
+                    display_name = f"{base_name} {suffix}"
+                    suffix += 1
+            bot = PlayerState(
+                user_id=uuid4(),
+                display_name=display_name,
+                is_bot=True,
+                bot_personality=data.personality,
+                bot_controller=data.controller,
+                balance=pack.manifest.starting_balance,
+            )
+            game.players.append(bot)
+            self._append_event(
+                game,
+                "player.joined",
+                {
+                    "player_id": str(bot.user_id),
+                    "display_name": bot.display_name,
+                    "is_bot": True,
+                    "bot_personality": data.personality.value,
+                    "bot_controller": data.controller.value,
+                },
+            )
+            await self._games.save(game, previous_sequence)
+            return game
+
+    async def remove_bot(
+        self,
+        game_id: UUID,
+        actor_id: UUID,
+        bot_id: UUID,
+    ) -> GameState:
+        async with self._session.begin():
+            game = await self._games.get(game_id, for_update=True)
+            if game.host_user_id != actor_id:
+                raise ForbiddenError("only the host can remove bots")
+            if game.status is not GameStatus.LOBBY:
+                raise ConflictError("bots can only be removed in the lobby")
+            bot = next(
+                (
+                    player
+                    for player in game.players
+                    if player.user_id == bot_id and player.is_bot
+                ),
+                None,
+            )
+            if bot is None:
+                raise NotFoundError("bot was not found in this game")
+            previous_sequence = len(game.events)
+            game.players.remove(bot)
+            self._append_event(
+                game,
+                "player.left",
+                {
+                    "player_id": str(bot.user_id),
+                    "display_name": bot.display_name,
+                    "is_bot": True,
+                },
+            )
+            await self._games.save(game, previous_sequence)
+            return game
+
     async def watch(self, game_id: UUID, actor: User) -> GameState:
         async with self._session.begin():
             game = await self._games.get(game_id, for_update=True)
@@ -415,14 +518,16 @@ class GameService:
                         "display_name": player.display_name,
                     },
                 )
-                if not game.players:
+                human_players = [candidate for candidate in game.players if not candidate.is_bot]
+                if not human_players:
+                    game.players.clear()
                     game.status = GameStatus.CANCELLED
                     game.current_player_index = 0
                     self._append_event(game, "game.cancelled")
                 else:
                     game.current_player_index = 0
                     if game.host_user_id == actor_id:
-                        game.host_user_id = game.players[0].user_id
+                        game.host_user_id = human_players[0].user_id
                         self._append_event(
                             game,
                             "host.transferred",
@@ -455,6 +560,9 @@ class GameService:
                 and game.current_player.user_id == actor_id
             ):
                 game.pending_tile_id = None
+                game.pending_purchase_discount_percent = 0
+                game.pending_auction_selector_id = None
+                game.pending_auction_minimum_bid = None
                 game.extra_roll_pending = False
             if game.active_debt is None:
                 game.active_debt = DebtState(
@@ -504,12 +612,18 @@ class GameService:
         game_id: UUID,
         actor_id: UUID,
         command: GameCommand,
+        *,
+        expected_sequence: int | None = None,
+        automation_reason: str | None = None,
+        automation_note: str | None = None,
     ) -> GameState:
         self._remaining_effects = MAX_EFFECTS_PER_COMMAND
         async with self._session.begin():
             game = await self._games.get(game_id, for_update=True)
             self._require_participant(game, actor_id)
             previous_sequence = len(game.events)
+            if expected_sequence is not None and previous_sequence != expected_sequence:
+                raise ConflictError("the game changed before the automated command ran")
             if game.status is not GameStatus.PLAYING:
                 raise ConflictError("the game is not active")
 
@@ -520,6 +634,13 @@ class GameService:
                     self._pass_auction(game, actor_id)
                 else:
                     raise ConflictError("the auction must finish before continuing")
+            elif game.pending_auction_selector_id is not None:
+                if actor_id != game.pending_auction_selector_id:
+                    raise ConflictError("the current player must select the auction property")
+                if isinstance(command, SelectAuctionPropertyCommand):
+                    self._select_auction_property(game, actor_id, command.property_id)
+                else:
+                    raise ConflictError("an auction property must be selected")
             elif game.active_debt is not None:
                 if actor_id != game.active_debt.debtor_id:
                     raise ConflictError("the debtor must resolve the outstanding debt")
@@ -551,12 +672,42 @@ class GameService:
                 self._reject_trade(game, actor_id, command)
             elif isinstance(command, CancelTradeCommand):
                 self._cancel_trade(game, actor_id, command)
-            elif isinstance(command, (BidCommand, PassAuctionCommand)):
+            elif isinstance(
+                command,
+                (BidCommand, PassAuctionCommand, SelectAuctionPropertyCommand),
+            ):
                 raise ConflictError("there is no active auction")
             else:
                 self._execute_turn_command(game, actor_id, command)
+            self._explain_automated_decision(
+                game,
+                previous_sequence,
+                automation_reason,
+                automation_note,
+            )
             await self._games.save(game, previous_sequence)
             return game
+
+    @staticmethod
+    def _explain_automated_decision(
+        game: GameState,
+        previous_sequence: int,
+        reason: str | None,
+        note: str | None,
+    ) -> None:
+        """Attach the bot's motive to the trade events it just produced.
+
+        Only negotiation events carry it: that is where a player wonders why the
+        answer was no, and it keeps the rest of the log untouched.
+        """
+        if reason is None:
+            return
+        for event in game.events[previous_sequence:]:
+            if not event.type.startswith("trade."):
+                continue
+            event.data["bot_reason"] = reason
+            if note is not None:
+                event.data["bot_note"] = note
 
     async def settle_expired_auction(
         self,
@@ -601,6 +752,7 @@ class GameService:
             else:
                 property_id = game.pending_tile_id
                 game.pending_tile_id = None
+                game.pending_purchase_discount_percent = 0
                 game.phase = TurnPhase.WAITING_FOR_END
                 self._append_event(
                     game,
@@ -620,6 +772,7 @@ class GameService:
         dice = self._dice_roller()
         game.last_roll = dice
         game.pending_tile_id = None
+        game.pending_purchase_discount_percent = 0
         game.last_card_id = None
         if player.in_jail:
             self._roll_from_jail(game, player, dice)
@@ -796,12 +949,14 @@ class GameService:
             raise ConflictError("there is no property available to buy")
         pack = self._pack(game)
         tile = next(tile for tile in pack.board.tiles if tile.id == game.pending_tile_id)
-        price = tile.price or 0
+        discount_percent = game.pending_purchase_discount_percent
+        price = (tile.price or 0) * (100 - discount_percent) // 100
         if player.balance < price:
             raise ConflictError("insufficient balance")
         player.balance -= price
         game.owners[tile.id] = player.user_id
         game.pending_tile_id = None
+        game.pending_purchase_discount_percent = 0
         game.phase = TurnPhase.WAITING_FOR_END
         self._append_event(
             game,
@@ -810,6 +965,7 @@ class GameService:
                 "player_id": str(player.user_id),
                 "tile_id": tile.id,
                 "price": price,
+                "discount_percent": discount_percent,
             },
         )
 
@@ -828,13 +984,7 @@ class GameService:
             self._draw_card(game, player, tile.deck_id or "")
             return
         if tile.kind is TileKind.TAX:
-            amount = tile.amount
-            if tile.net_worth_percent is not None:
-                amount = (
-                    self._player_net_worth(game, player)
-                    * tile.net_worth_percent
-                    // 100
-                )
+            amount = self._tax_amount(game, player, tile)
             self._charge_player(
                 game,
                 player,
@@ -845,6 +995,13 @@ class GameService:
             )
             if game.active_debt is None:
                 self._apply_landing_effects(game, player, tile)
+            return
+        if tile.auction_minimum_bid is not None:
+            self._request_auction_selection(
+                game,
+                player,
+                minimum_bid=tile.auction_minimum_bid,
+            )
             return
         if (
             tile.kind is TileKind.FREE
@@ -967,26 +1124,7 @@ class GameService:
         self._remaining_effects -= 1
         pack = self._pack(game)
         if isinstance(effect, CashCardEffect):
-            if effect.amount >= 0:
-                player.balance += effect.amount
-                self._append_event(
-                    game,
-                    "card.cash_applied",
-                    {
-                        "player_id": str(player.user_id),
-                        "card_id": source_id,
-                        "amount": effect.amount,
-                    },
-                )
-            else:
-                self._charge_player(
-                    game,
-                    player,
-                    amount=abs(effect.amount),
-                    creditor_id=None,
-                    reason=DebtReason.CARD,
-                    tile_id=source_id,
-                )
+            self._apply_card_cash(game, player, effect.amount, source_id)
             return False
         if isinstance(effect, MoveToCardEffect):
             from_position = player.position
@@ -1017,12 +1155,45 @@ class GameService:
                 player.position = (
                     player.position + effect.steps
                 ) % pack.manifest.tile_count
+            game.pending_purchase_discount_percent = (
+                effect.purchase_discount_percent or 0
+            )
             self._resolve_card_destination(
                 game,
                 player,
                 source_id,
                 from_position=from_position,
                 steps=effect.steps,
+                movement="step",
+            )
+            return True
+        if isinstance(effect, MoveToNearestAuctionCardEffect):
+            from_position = player.position
+            candidates = [
+                index
+                for index, tile in enumerate(pack.board.tiles)
+                if tile.auction_minimum_bid is not None
+            ]
+            if not candidates:
+                raise ConflictError("the board does not define an auction tile")
+            target_position = min(
+                candidates,
+                key=lambda index: (
+                    (from_position - index) % pack.manifest.tile_count
+                    or pack.manifest.tile_count
+                ),
+            )
+            steps = -(
+                (from_position - target_position) % pack.manifest.tile_count
+                or pack.manifest.tile_count
+            )
+            player.position = target_position
+            self._resolve_card_destination(
+                game,
+                player,
+                source_id,
+                from_position=from_position,
+                steps=steps,
                 movement="step",
             )
             return True
@@ -1132,6 +1303,65 @@ class GameService:
         if isinstance(effect, GetOutOfJailCardEffect):
             player.jail_card_ids.append(source_id)
             return False
+        if isinstance(effect, CompleteGroupsCashCardEffect):
+            group_count = self._complete_group_count(game, player.user_id)
+            amount = (
+                effect.amount_if_at_least
+                if group_count >= effect.threshold
+                else effect.amount_otherwise
+            )
+            self._apply_card_cash(game, player, amount, source_id)
+            return False
+        if isinstance(effect, OwnedPropertiesCashCardEffect):
+            owned_count = sum(
+                owner_id == player.user_id for owner_id in game.owners.values()
+            )
+            self._apply_card_cash(
+                game,
+                player,
+                effect.amount_per_property * owned_count,
+                source_id,
+            )
+            return False
+        if isinstance(effect, MortgagedPropertiesCashCardEffect):
+            mortgaged_count = sum(
+                game.owners.get(property_id) == player.user_id
+                for property_id in game.mortgaged_property_ids
+            )
+            self._apply_card_cash(
+                game,
+                player,
+                effect.amount_per_property * mortgaged_count,
+                source_id,
+            )
+            return False
+        if isinstance(effect, RefinanceMortgageCardEffect):
+            candidates = sorted(
+                (
+                    self._tile(game, property_id)
+                    for property_id in game.mortgaged_property_ids
+                    if game.owners.get(property_id) == player.user_id
+                    and (self._tile(game, property_id).mortgage_value or 0)
+                    <= player.balance
+                ),
+                key=lambda tile: (-(tile.mortgage_value or 0), tile.id),
+            )
+            if candidates:
+                tile = candidates[0]
+                amount = tile.mortgage_value or 0
+                player.balance -= amount
+                game.mortgaged_property_ids.remove(tile.id)
+                self._append_event(
+                    game,
+                    "property.unmortgaged",
+                    {
+                        "player_id": str(player.user_id),
+                        "property_id": tile.id,
+                        "amount": amount,
+                        "card_id": source_id,
+                    },
+                )
+            return False
         raise ValueError(f"unsupported effect type: {type(effect).__name__}")
 
     def _resolve_card_destination(
@@ -1164,6 +1394,7 @@ class GameService:
             game.pending_tile_id = target.id
             game.phase = TurnPhase.BUY_DECISION
             return
+        game.pending_purchase_discount_percent = 0
         game.phase = TurnPhase.WAITING_FOR_END
         self._resolve_landed_tile(game, player, target.id, 0)
 
@@ -1321,6 +1552,9 @@ class GameService:
         player.in_jail = True
         player.jail_failed_rolls = 0
         game.pending_tile_id = None
+        game.pending_purchase_discount_percent = 0
+        game.pending_auction_selector_id = None
+        game.pending_auction_minimum_bid = None
         game.phase = TurnPhase.WAITING_FOR_END
         game.extra_roll_pending = False
         game.consecutive_doubles = 0
@@ -1391,6 +1625,78 @@ class GameService:
             if level == 5:
                 building_value += tile.hotel_cost or house_cost
         return player.balance + property_value + building_value
+
+    def _complete_group_count(self, game: GameState, owner_id: UUID) -> int:
+        pack = self._pack(game)
+        return sum(
+            bool(group_tiles)
+            and all(game.owners.get(tile.id) == owner_id for tile in group_tiles)
+            for group in pack.board.groups
+            if (
+                group_tiles := [
+                    tile
+                    for tile in pack.board.tiles
+                    if tile.kind is TileKind.PROPERTY and tile.group == group.id
+                ]
+            )
+        )
+
+    def _tax_amount(
+        self,
+        game: GameState,
+        player: PlayerState,
+        tile: TileDefinition,
+    ) -> int:
+        if tile.amount is not None:
+            return tile.amount
+        if tile.net_worth_percent is not None:
+            return self._player_net_worth(game, player) * tile.net_worth_percent // 100
+        if tile.complete_group_amount is not None:
+            return (
+                self._complete_group_count(game, player.user_id)
+                * tile.complete_group_amount
+            )
+        house_count = sum(
+            level if level < 5 else 0
+            for property_id, level in game.building_levels.items()
+            if game.owners.get(property_id) == player.user_id
+        )
+        hotel_count = sum(
+            level == 5
+            for property_id, level in game.building_levels.items()
+            if game.owners.get(property_id) == player.user_id
+        )
+        return house_count * (tile.house_amount or 0) + hotel_count * (
+            tile.hotel_amount or 0
+        )
+
+    def _apply_card_cash(
+        self,
+        game: GameState,
+        player: PlayerState,
+        amount: int,
+        card_id: str,
+    ) -> None:
+        if amount >= 0:
+            player.balance += amount
+            self._append_event(
+                game,
+                "card.cash_applied",
+                {
+                    "player_id": str(player.user_id),
+                    "card_id": card_id,
+                    "amount": amount,
+                },
+            )
+            return
+        self._charge_player(
+            game,
+            player,
+            amount=abs(amount),
+            creditor_id=None,
+            reason=DebtReason.CARD,
+            tile_id=card_id,
+        )
 
     def _charge_player(
         self,
@@ -1761,26 +2067,79 @@ class GameService:
     def _start_auction(self, game: GameState) -> None:
         if game.phase is not TurnPhase.BUY_DECISION or game.pending_tile_id is None:
             raise ConflictError("there is no property available for auction")
+        property_id = game.pending_tile_id
+        game.pending_tile_id = None
+        game.pending_purchase_discount_percent = 0
+        game.phase = TurnPhase.WAITING_FOR_END
+        self._start_auction_for_property(game, property_id, minimum_bid=1)
+
+    def _request_auction_selection(
+        self,
+        game: GameState,
+        player: PlayerState,
+        *,
+        minimum_bid: int,
+    ) -> None:
+        pack = self._pack(game)
+        has_unowned_property = any(
+            tile.is_purchasable and tile.id not in game.owners
+            for tile in pack.board.tiles
+        )
+        if not has_unowned_property:
+            return
+        game.pending_auction_selector_id = player.user_id
+        game.pending_auction_minimum_bid = minimum_bid
+        game.phase = TurnPhase.WAITING_FOR_END
+
+    def _select_auction_property(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        property_id: str,
+    ) -> None:
+        if game.pending_auction_selector_id != actor_id:
+            raise ConflictError("the player cannot select this auction property")
+        tile = self._tile(game, property_id)
+        if not tile.is_purchasable or property_id in game.owners:
+            raise ConflictError("the selected property is unavailable for auction")
+        minimum_bid = game.pending_auction_minimum_bid or 1
+        game.pending_auction_selector_id = None
+        game.pending_auction_minimum_bid = None
+        self._start_auction_for_property(
+            game,
+            property_id,
+            minimum_bid=minimum_bid,
+            source="tile",
+        )
+
+    def _start_auction_for_property(
+        self,
+        game: GameState,
+        property_id: str,
+        *,
+        minimum_bid: int,
+        source: str | None = None,
+    ) -> None:
         eligible_player_ids = [
             player.user_id for player in game.players if not player.bankrupt
         ]
         if len(eligible_player_ids) < 2:
             raise ConflictError("at least two active players are required for an auction")
-        property_id = game.pending_tile_id
         game.active_auction = AuctionState(
             property_id=property_id,
+            minimum_bid=minimum_bid,
             eligible_player_ids=eligible_player_ids,
         )
-        game.pending_tile_id = None
-        game.phase = TurnPhase.WAITING_FOR_END
         self._append_event(
             game,
             "auction.started",
             {
                 "property_id": property_id,
+                "minimum_bid": minimum_bid,
                 "eligible_player_ids": [
                     str(player_id) for player_id in eligible_player_ids
                 ],
+                **({"source": source} if source is not None else {}),
             },
         )
 
@@ -1825,6 +2184,8 @@ class GameService:
             raise ConflictError("the player already passed")
         if amount <= auction.current_bid:
             raise ConflictError("the bid must be higher than the current bid")
+        if amount < auction.minimum_bid:
+            raise ConflictError("the bid is below the auction minimum")
         player = self._player(game, actor_id)
         if player.balance < amount:
             raise ConflictError("insufficient balance")

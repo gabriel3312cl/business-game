@@ -2,6 +2,7 @@ import { authenticatedRequest } from '../api'
 import { textForLocale } from './defaults'
 import type {
   BoardCardEffect,
+  BoardAsset,
   BoardDraft,
   BoardDraftDocument,
   BoardDraftSave,
@@ -73,6 +74,7 @@ interface BackendBoardDocument {
     color?: string | null
     icon?: TileIcon | null
     icon_background?: TileIconBackground | null
+    asset_path?: string | null
     purchasable?: boolean | null
     price?: number | null
     base_rent?: number | null
@@ -180,6 +182,21 @@ export const boardEditorApi = {
   versions: (projectId: string) =>
     authenticatedRequest<BoardVersionSummary[]>(
       `/board-projects/${projectId}/versions`,
+    ),
+  assets: (projectId: string) =>
+    authenticatedRequest<BoardAsset[]>(`/board-projects/${projectId}/assets`),
+  uploadAsset: (projectId: string, file: File) => {
+    const body = new FormData()
+    body.set('file', file)
+    return authenticatedRequest<BoardAsset>(
+      `/board-projects/${projectId}/assets`,
+      { method: 'POST', body },
+    )
+  },
+  deleteAsset: (projectId: string, assetId: string) =>
+    authenticatedRequest<void>(
+      `/board-projects/${projectId}/assets/${assetId}`,
+      { method: 'DELETE' },
     ),
 }
 
@@ -331,6 +348,7 @@ function toBackendTile(
     color: tile.color,
     icon: tile.icon,
     icon_background: tile.icon_background,
+    asset_path: tile.asset_path,
   }
   if (tile.kind === 'property') {
     const rents = tile.rent_levels
@@ -404,6 +422,7 @@ function fromBackendTile(
     color: tile.color ?? undefined,
     icon: tile.icon ?? undefined,
     icon_background: tile.icon_background ?? undefined,
+    asset_path: tile.asset_path ?? undefined,
   }
   if (tile.kind === 'property') {
     return {

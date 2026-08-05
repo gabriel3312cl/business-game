@@ -172,6 +172,7 @@ export function changeTileKind(
     color: tile.color,
     icon: tile.icon,
     icon_background: tile.icon_background,
+    asset_path: tile.asset_path,
   }
   if (kind === 'property') {
     const group = document.groups[0]
@@ -211,6 +212,7 @@ export function changeTilePurchasable(
     color: tile.color,
     icon: tile.icon,
     icon_background: tile.icon_background,
+    asset_path: tile.asset_path,
   }
   if (!purchasable) {
     return {

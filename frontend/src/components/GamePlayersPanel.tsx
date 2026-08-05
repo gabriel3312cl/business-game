@@ -1,4 +1,5 @@
 import CrownRoundedIcon from '@mui/icons-material/EmojiEventsRounded'
+import SmartToyRoundedIcon from '@mui/icons-material/SmartToyRounded'
 import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded'
 import {
   Avatar,
@@ -11,15 +12,18 @@ import {
   Typography,
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
+import { santiagoTokenAssets } from '../assets/monopolySantiago'
 import type { GameState, User } from '../types'
+import { AssetGlyph } from './AssetVisual'
 import { playerColors } from './gameColors'
 
 interface Props {
   game: GameState
   user: User
+  useAssetTokens?: boolean
 }
 
-export function GamePlayersPanel({ game, user }: Props) {
+export function GamePlayersPanel({ game, user, useAssetTokens = false }: Props) {
   const { t } = useTranslation()
 
   return (
@@ -57,7 +61,17 @@ export function GamePlayersPanel({ game, user }: Props) {
                     fontSize: 14,
                   }}
                 >
-                  {index + 1}
+                  {useAssetTokens ? (
+                    <AssetGlyph
+                      path={
+                        santiagoTokenAssets[index % santiagoTokenAssets.length]
+                          .path
+                      }
+                      size="72%"
+                    />
+                  ) : (
+                    index + 1
+                  )}
                 </Avatar>
               </ListItemAvatar>
               <ListItemText
@@ -77,6 +91,13 @@ export function GamePlayersPanel({ game, user }: Props) {
                     >
                       {player.display_name}
                     </Box>
+                    {player.is_bot && (
+                      <SmartToyRoundedIcon
+                        color="secondary"
+                        sx={{ fontSize: 16 }}
+                        aria-label={t('bot')}
+                      />
+                    )}
                     {player.user_id === game.host_user_id && (
                       <CrownRoundedIcon
                         color="primary"
@@ -91,6 +112,14 @@ export function GamePlayersPanel({ game, user }: Props) {
                     ? t('bankrupt')
                     : `$${player.balance}${
                         player.in_jail ? ` · ${t('detained')}` : ''
+                      }${
+                        player.is_bot
+                          ? ` · ${t(
+                              `botControllers.${player.bot_controller ?? 'standard'}`,
+                            )} · ${t(
+                              `botPersonalities.${player.bot_personality ?? 'balanced'}`,
+                            )}`
+                          : ''
                       }`
                 }
               />

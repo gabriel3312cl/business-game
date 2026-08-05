@@ -239,7 +239,7 @@ async def test_board_project_crud_publish_and_game_resolution(
     published = await client.post(
         f"/api/v1/board-projects/{project_id}/publish",
         headers=owner_headers,
-        json={"revision": 2},
+        json={"revision": 2, "version": "1"},
     )
     assert published.status_code == 201
     publication = published.json()
@@ -276,6 +276,106 @@ async def test_board_project_crud_publish_and_game_resolution(
         params={"revision": 2},
     )
     assert blocked_delete.status_code == 409
+
+
+async def test_board_assets_are_stored_validated_and_scoped(
+    client: AsyncClient,
+) -> None:
+    owner_headers = await register(
+        client,
+        email="asset-owner@example.com",
+        name="Asset Owner",
+    )
+    other_headers = await register(
+        client,
+        email="asset-other@example.com",
+        name="Asset Other",
+    )
+    created = await client.post(
+        "/api/v1/board-projects",
+        headers=owner_headers,
+        json={"name": "Tablero con assets", "document": board_document()},
+    )
+    assert created.status_code == 201
+    project_id = created.json()["id"]
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+        '<path fill="currentColor" d="M2 2h20v20H2z"/></svg>'
+    )
+
+    uploaded = await client.post(
+        f"/api/v1/board-projects/{project_id}/assets",
+        headers=owner_headers,
+        files={"file": ("marca.svg", svg, "image/svg+xml")},
+    )
+    assert uploaded.status_code == 201
+    asset = uploaded.json()
+    assert asset["name"] == "marca.svg"
+    assert asset["path"] == f"/api/v1/board-assets/{asset['id']}.svg"
+
+    listed = await client.get(
+        f"/api/v1/board-projects/{project_id}/assets",
+        headers=owner_headers,
+    )
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()] == [asset["id"]]
+    inaccessible = await client.get(
+        f"/api/v1/board-projects/{project_id}/assets",
+        headers=other_headers,
+    )
+    assert inaccessible.status_code == 404
+
+    rendered = await client.get(asset["path"])
+    assert rendered.status_code == 200
+    assert rendered.headers["content-type"].startswith("image/svg+xml")
+    assert rendered.headers["x-content-type-options"] == "nosniff"
+    assert rendered.text == svg
+
+    document = board_document()
+    document["tiles"][0]["asset_path"] = asset["path"]  # type: ignore[index]
+    updated = await client.patch(
+        f"/api/v1/board-projects/{project_id}",
+        headers=owner_headers,
+        json={"revision": 1, "document": document},
+    )
+    assert updated.status_code == 200
+    published = await client.post(
+        f"/api/v1/board-projects/{project_id}/publish",
+        headers=owner_headers,
+        json={"revision": 2},
+    )
+    assert published.status_code == 201
+    blocked_delete = await client.delete(
+        f"/api/v1/board-projects/{project_id}/assets/{asset['id']}",
+        headers=owner_headers,
+    )
+    assert blocked_delete.status_code == 409
+
+    unsafe = await client.post(
+        f"/api/v1/board-projects/{project_id}/assets",
+        headers=owner_headers,
+        files={
+            "file": (
+                "unsafe.svg",
+                '<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>',
+                "image/svg+xml",
+            )
+        },
+    )
+    assert unsafe.status_code == 400
+    assert "not allowed" in unsafe.json()["detail"]
+
+    unused = await client.post(
+        f"/api/v1/board-projects/{project_id}/assets",
+        headers=owner_headers,
+        files={"file": ("unused.svg", svg, "image/svg+xml")},
+    )
+    assert unused.status_code == 201
+    deleted = await client.delete(
+        f"/api/v1/board-projects/{project_id}/assets/{unused.json()['id']}",
+        headers=owner_headers,
+    )
+    assert deleted.status_code == 204
 
 
 async def test_delete_requires_the_current_revision(client: AsyncClient) -> None:
@@ -613,14 +713,30 @@ def test_custom_board_preserves_tile_icon_presentation() -> None:
     tiles = cast(list[dict[str, object]], document["tiles"])
     tiles[0]["icon"] = "star"
     tiles[0]["icon_background"] = "none"
+    tiles[0]["asset_path"] = "/assets/monopoly-santiago/svg/c01_salida.svg"
 
     content = EditablePackContent.model_validate(document)
     pack = content.to_pack(pack_id="custom-icon-board", version="1.0.0")
 
     assert content.tiles[0].icon == "star"
     assert content.tiles[0].icon_background == "none"
+    assert content.tiles[0].asset_path == (
+        "/assets/monopoly-santiago/svg/c01_salida.svg"
+    )
     assert pack.board.tiles[0].icon == "star"
     assert pack.board.tiles[0].icon_background == "none"
+    assert pack.board.tiles[0].asset_path == (
+        "/assets/monopoly-santiago/svg/c01_salida.svg"
+    )
+
+
+def test_custom_board_rejects_external_tile_assets() -> None:
+    document = board_document()
+    tiles = cast(list[dict[str, object]], document["tiles"])
+    tiles[0]["asset_path"] = "https://example.com/tile.svg"
+
+    with pytest.raises(ValidationError, match="asset_path"):
+        EditablePackContent.model_validate(document)
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
 from business_game.api.dependencies import (
     get_board_project_service,
@@ -9,6 +9,7 @@ from business_game.api.dependencies import (
 )
 from business_game.application.board_service import BoardProjectService
 from business_game.domain.board_models import (
+    BoardAsset,
     BoardDraft,
     BoardProjectCreate,
     BoardProjectUpdate,
@@ -20,6 +21,7 @@ from business_game.domain.board_models import (
 from business_game.domain.models import User
 
 router = APIRouter(prefix="/api/v1/board-projects", tags=["board-projects"])
+asset_router = APIRouter(prefix="/api/v1/board-assets", tags=["board-assets"])
 
 
 @router.get("", response_model=list[BoardDraft])
@@ -131,3 +133,78 @@ async def list_board_versions(
     ],
 ) -> list[PublishedBoardVersion]:
     return await projects.list_versions(project_id, current_user.id)
+
+
+@router.get("/{project_id}/assets", response_model=list[BoardAsset])
+async def list_board_assets(
+    project_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    projects: Annotated[
+        BoardProjectService,
+        Depends(get_board_project_service),
+    ],
+) -> list[BoardAsset]:
+    return await projects.list_assets(project_id, current_user.id)
+
+
+@router.post(
+    "/{project_id}/assets",
+    response_model=BoardAsset,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_board_asset(
+    project_id: UUID,
+    file: Annotated[UploadFile, File()],
+    current_user: Annotated[User, Depends(get_current_user)],
+    projects: Annotated[
+        BoardProjectService,
+        Depends(get_board_project_service),
+    ],
+) -> BoardAsset:
+    payload = await file.read(100_001)
+    return await projects.upload_asset(
+        project_id,
+        current_user.id,
+        filename=file.filename or "",
+        content_type=file.content_type,
+        payload=payload,
+    )
+
+
+@router.delete(
+    "/{project_id}/assets/{asset_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_board_asset(
+    project_id: UUID,
+    asset_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    projects: Annotated[
+        BoardProjectService,
+        Depends(get_board_project_service),
+    ],
+) -> Response:
+    await projects.delete_asset(project_id, asset_id, current_user.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@asset_router.get("/{asset_id}.svg")
+async def get_board_asset(
+    asset_id: UUID,
+    projects: Annotated[
+        BoardProjectService,
+        Depends(get_board_project_service),
+    ],
+) -> Response:
+    record = await projects.get_asset_content(asset_id)
+    return Response(
+        content=record.content,
+        media_type="image/svg+xml",
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Content-Security-Policy": (
+                "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+            ),
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

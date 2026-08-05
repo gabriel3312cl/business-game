@@ -1,14 +1,18 @@
 import CasinoRoundedIcon from '@mui/icons-material/CasinoRounded'
 import { Box, Button, Chip, Stack, Typography } from '@mui/material'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ContentPack, GameState } from '../types'
+import { santiagoTokenAssets } from '../assets/monopolySantiago'
+import type { ContentPack, GameCommand, GameState } from '../types'
 import {
   BoardTile,
   type BoardEdge,
   type BoardOwner,
+  type BoardTileHeatmap,
   type BoardToken,
 } from './BoardTile'
+import { BoardTileDialog } from './BoardTileDialog'
+import type { BoardHeatmap } from './boardHeatmap'
 import { playerColors } from './gameColors'
 import {
   type MotionSettlement,
@@ -26,6 +30,9 @@ interface GameBoardProps {
   onMotionSettled?: (settlement: MotionSettlement) => void
   motionPending?: boolean
   fitAvailableHeight?: boolean
+  busy?: boolean
+  onCommand?: (command: GameCommand) => Promise<boolean>
+  heatmap?: BoardHeatmap | null
 }
 
 export function GameBoard({
@@ -39,11 +46,16 @@ export function GameBoard({
   onMotionSettled,
   motionPending = false,
   fitAvailableHeight = false,
+  busy = false,
+  onCommand,
+  heatmap = null,
 }: GameBoardProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const [selectedTileId, setSelectedTileId] = useState<string | null>(null)
   const side = pack.manifest.side_length
   const compact = side > 11
   const currentPlayer = game?.players[game.current_player_index]
+  const useAssetTokens = pack.board.tiles.some((tile) => tile.asset_path)
   const visualPositions = useVisualPlayerPositions(
     game,
     pack.manifest.tile_count,
@@ -68,6 +80,9 @@ export function GameBoard({
     tokens.push({
       playerId: player.user_id,
       ...presentation,
+      assetPath: useAssetTokens
+        ? santiagoTokenAssets[index % santiagoTokenAssets.length]?.path
+        : undefined,
       active: index === game.current_player_index,
       currentUser: player.user_id === currentUserId,
     })
@@ -80,6 +95,8 @@ export function GameBoard({
     ? `min(${zoom * 100}%, calc(100dvh * ${zoom}))`
     : `min(${zoom * 100}%, ${maximumSize * zoom}px, calc((100dvh - 160px) * ${zoom}))`
   const fittedHeight = `min(${Math.min(zoom, 1) * 100}%, ${maximumSize * zoom}px)`
+  const selectedTile =
+    pack.board.tiles.find((tile) => tile.id === selectedTileId) ?? null
 
   return (
     <Box
@@ -104,17 +121,52 @@ export function GameBoard({
     >
       {pack.board.tiles.map((tile, index) => {
         const position = perimeterPosition(index, side)
+        const name = pack.messages[tile.name_key] ?? tile.id
+        const owner = ownersById.get(game?.owners[tile.id] ?? '')
+        const heatmapCell = heatmap?.cells.get(index)
+        const tileHeatmap = heatmap && heatmapCell
+          ? boardTileHeatmap(heatmap, heatmapCell, t, i18n.language)
+          : undefined
         return (
           <BoardTile
             key={tile.id}
             tile={tile}
-            name={pack.messages[tile.name_key]}
+            name={name}
             gridColumn={position.column}
             gridRow={position.row}
             edge={position.edge}
             compact={compact}
             tokens={tokensByPosition.get(index)}
-            owner={ownersById.get(game?.owners[tile.id] ?? '')}
+            owner={owner}
+            heatmap={tileHeatmap}
+            tooltip={
+              <Stack spacing={0.25}>
+                <Typography variant="subtitle2" fontWeight={850}>
+                  {name}
+                </Typography>
+                {tile.price != null && (
+                  <Typography variant="caption">
+                    {t('purchasePrice', { amount: tile.price })}
+                  </Typography>
+                )}
+                <Typography variant="caption">
+                  {owner
+                    ? t('ownedBy', { player: owner.displayName })
+                    : tile.price != null
+                      ? t('unownedProperty')
+                      : t(`tileKind.${tile.kind}`)}
+                </Typography>
+                <Typography variant="caption" color="secondary.light">
+                  {t('clickForTileDetails')}
+                </Typography>
+                {tileHeatmap && (
+                  <Typography variant="caption" color="info.light" fontWeight={800}>
+                    {tileHeatmap.ariaLabel}
+                  </Typography>
+                )}
+              </Stack>
+            }
+            onClick={() => setSelectedTileId(tile.id)}
           />
         )
       })}
@@ -243,8 +295,45 @@ export function GameBoard({
           </>
         )}
       </Stack>
+
+      <BoardTileDialog
+        tile={selectedTile}
+        pack={pack}
+        game={game}
+        currentUserId={currentUserId}
+        busy={busy}
+        onClose={() => setSelectedTileId(null)}
+        onSelectTile={setSelectedTileId}
+        onCommand={onCommand}
+      />
     </Box>
   )
+}
+
+function boardTileHeatmap(
+  heatmap: BoardHeatmap,
+  cell: BoardHeatmap['cells'] extends Map<number, infer Value> ? Value : never,
+  t: ReturnType<typeof useTranslation>['t'],
+  locale: string,
+): BoardTileHeatmap {
+  if (heatmap.mode === 'history') {
+    return {
+      intensity: cell.intensity,
+      color: '#ff7043',
+      valueLabel: String(cell.value),
+      ariaLabel: t('heatmap.visitCount', { count: cell.value }),
+    }
+  }
+
+  const percentage = new Intl.NumberFormat(locale, {
+    maximumFractionDigits: 1,
+  }).format((cell.value / heatmap.total) * 100)
+  return {
+    intensity: cell.intensity,
+    color: '#35d7ff',
+    valueLabel: `${percentage}%`,
+    ariaLabel: t('heatmap.probabilityValue', { value: percentage }),
+  }
 }
 
 function perimeterPosition(

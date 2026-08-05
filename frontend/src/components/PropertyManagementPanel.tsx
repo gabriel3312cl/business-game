@@ -11,6 +11,12 @@ import {
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 import type { ContentPack, GameCommand, GameState, User } from '../types'
+import {
+  buildAvailability,
+  mortgageAvailability,
+  sellBuildingAvailability,
+  unmortgageAvailability,
+} from './propertyRules'
 
 interface Props {
   game: GameState
@@ -49,6 +55,10 @@ export function PropertyManagementPanel({
           if (!tile) return null
           const mortgaged = game.mortgaged_property_ids.includes(propertyId)
           const level = game.building_levels[propertyId] ?? 0
+          const build = buildAvailability(game, pack, tile, user.id)
+          const sell = sellBuildingAvailability(game, pack, tile, user.id)
+          const mortgage = mortgageAvailability(game, pack, tile, user.id)
+          const unmortgage = unmortgageAvailability(game, pack, tile, user.id)
           const levelLabel =
             level === 5
               ? t('hotel')
@@ -84,7 +94,7 @@ export function PropertyManagementPanel({
                   {mortgaged ? (
                     <Button
                       size="small"
-                      disabled={busy || game.active_debt !== null}
+                      disabled={busy || !unmortgage.allowed}
                       onClick={() =>
                         void onCommand({
                           action: 'unmortgage_property',
@@ -97,7 +107,7 @@ export function PropertyManagementPanel({
                   ) : (
                     <Button
                       size="small"
-                      disabled={busy || level > 0}
+                      disabled={busy || !mortgage.allowed}
                       onClick={() =>
                         void onCommand({
                           action: 'mortgage_property',
@@ -115,10 +125,7 @@ export function PropertyManagementPanel({
                       <Button
                         size="small"
                         disabled={
-                          busy ||
-                          mortgaged ||
-                          level >= 5 ||
-                          game.active_debt !== null
+                          busy || !build.allowed
                         }
                         onClick={() =>
                           void onCommand({
@@ -135,7 +142,7 @@ export function PropertyManagementPanel({
                       </Button>
                       <Button
                         size="small"
-                        disabled={busy || level === 0}
+                        disabled={busy || !sell.allowed}
                         onClick={() =>
                           void onCommand({
                             action: 'sell_building',

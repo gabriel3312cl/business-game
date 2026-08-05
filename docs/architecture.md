@@ -139,10 +139,69 @@ solo después de resolverla. Las reglas opcionales declaran valores por defecto 
 qué opciones puede modificar el anfitrión, evitando aceptar opciones que el
 paquete no soporta.
 
+## Bots autoritativos
+
+Los bots son participantes controlados por el servidor y no cuentas humanas
+ficticias. Cada uno conserva un UUID dentro del snapshot, declara una personalidad
+y decide sobre el estado durable, pero ejecuta exactamente los mismos comandos
+tipados que un jugador. El motor sigue validando turnos, dinero, propietarios,
+subastas y deudas; la política del bot no puede escribir el estado directamente.
+
+Las personalidades cambian reservas de efectivo, tolerancia al riesgo, valoración
+de grupos, pujas, construcción y márgenes de intercambio. La política escrita es
+determinista y no depende de un LLM: la misma partida produce la misma jugada, lo
+que permite repetir escenarios en tests y es condición del control de secuencia del
+ejecutor. Un bot con controlador de IA tampoco redacta comandos; elige entre las
+acciones que el servidor ya generó y, si el proveedor falla o demora, se aplica igual
+la jugada escrita.
+
+### Negociación
+
+Los tratos viven en un módulo aparte porque valorar una propiedad y valorar un
+intercambio son problemas distintos. El precio del tablero ancla lo primero; lo segundo
+depende de la cartera completa: una propiedad vale lo que cambia en el patrimonio de
+quien la recibe, así cerrar un grupo salta de golpe y romper una pareja se descuenta
+solo. Cada trato se descompone en lo que cada lado entrega y en lo que gana después de
+haber entregado, para que un cambio dentro de un mismo grupo no se cuente como ganancia
+y pérdida a la vez.
+
+Con esa valuación el bot no busca su mejor trato sino el mejor trato que el otro
+aceptaría: resuelve el efectivo mínimo que satisface el umbral del receptor, estimado
+con la misma lógica sobre información pública, y descarta lo que no deje margen a ambos.
+Un jugador humano se modela como equilibrado, porque su temperamento no es información
+pública. Entregar una propiedad suelta es negocio corriente; entregar la que completa el
+grupo ajeno cuesta una fracción de lo que gana el rival, y esa fracción es parte de la
+personalidad.
+
+La personalidad fija también cuánto insiste, cuándo contraoferta y cuánto rencor guarda.
+Un trato que queda cerca del umbral se contraoferta en lugar de rechazarse, con un tope
+de rondas por pareja para que dos bots no negocien indefinidamente y el turno nunca quede
+detenido. La memoria de ofertas rechazadas se reconstruye desde el propio snapshot: la
+política no guarda estado en el proceso, así que reiniciar el servidor no cambia ninguna
+decisión.
+
+Cada decisión viaja con su motivo. El ejecutor acepta un motivo automatizado y lo adjunta
+a los eventos de intercambio que produjo ese comando, de modo que la bitácora explica por
+qué un bot aceptó, rechazó o contraofertó. El motivo es un código que la interfaz traduce;
+un bot de IA puede agregar además una frase propia, acotada y tratada como texto plano.
+
+El ejecutor relee la partida antes de cada acción y entrega la secuencia observada
+al comando. El bloqueo `SELECT ... FOR UPDATE` rechaza una decisión obsoleta si
+otro proceso avanzó primero. Tras fallos repetidos intenta una acción conservadora
+para destrabar la fase; como último recurso hace renunciar al bot. El ciclo se
+reanuda al iniciar el servidor, limita acciones antes de ceder el procesador y
+emite cada estado por Socket.IO.
+
 La prueba de ciclo completo actúa como un cliente determinista: no modifica
 snapshots ni filas directamente y solo envía comandos válidos hasta que queda un
 ganador. El mismo escenario se ejecuta sobre los perímetros clásico y extendido
 para detectar reglas que dependan accidentalmente de 40 o 64 posiciones.
+
+Una simulación de mesa completa recorre además una partida solo de bots con dados
+fijos y falla si alguna fase los deja sin jugada legal, si el motor rechaza un comando
+propuesto o si un paso no produce eventos. Es la prueba que sostiene la promesa de que
+la mesa avanza sin intervención humana, y la que expone de inmediato cualquier fase
+nueva que los bots todavía no sepan resolver.
 
 ## Evolución prevista
 

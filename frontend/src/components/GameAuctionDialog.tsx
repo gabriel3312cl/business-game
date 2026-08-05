@@ -89,7 +89,14 @@ export function GameAuctionDialog({
   const canBid =
     auction.eligible_player_ids.includes(user.id) &&
     !auction.passed_player_ids.includes(user.id)
-  const increments = [2, 10, 100]
+  const bidAmounts =
+    auction.current_bid === 0
+      ? [
+          auction.minimum_bid,
+          auction.minimum_bid + 10,
+          auction.minimum_bid + 100,
+        ]
+      : [2, 10, 100].map((increment) => auction.current_bid + increment)
   const deadlineMs = parseDeadline(auction.bid_deadline)
   const remainingMs =
     deadlineMs === null ? null : Math.max(0, deadlineMs - now)
@@ -218,11 +225,11 @@ export function GameAuctionDialog({
                   {t('placeBid')}
                 </Typography>
                 <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                  {increments.map((increment) => {
-                    const amount = auction.current_bid + increment
+                  {bidAmounts.map((amount) => {
+                    const increment = amount - auction.current_bid
                     return (
                       <Button
-                        key={increment}
+                        key={amount}
                         variant="contained"
                         color="secondary"
                         disabled={busy}

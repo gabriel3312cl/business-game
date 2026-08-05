@@ -1,0 +1,726 @@
+{
+  "nombre": "Monopoly clasico, 40 casillas, en espanol",
+  "version": "1.0",
+  "nota_licencia": "Los nombres de calle y el diseno del tablero son marca registrada de Hasbro. Los SVG de esta carpeta son originales. Uso personal.",
+  "nota_ediciones": "El Impuesto sobre la Renta, el Impuesto de Lujo y el monto de gastos hospitalarios varian entre ediciones. Ver el campo monto de cada casilla.",
+  "convencion_codigo": "POS_TIPO, con POS de 01 a 40 en sentido horario desde la Salida",
+  "nota_propiedades": "Las 22 propiedades no llevan pictograma, solo la banda de color del grupo. El campo svg viene en null y el color en hex.",
+  "dinero_inicial": 1500,
+  "cobro_salida": 200,
+  "salir_de_la_carcel": 50,
+  "stock_banco": {
+    "casas": 32,
+    "hoteles": 12
+  },
+  "estacionamiento_gratis": "No paga nada en las reglas oficiales. El pozo acumulado es regla de casa.",
+  "grupos": {
+    "Cafe": {
+      "color": "#955436",
+      "costo_casa": 50
+    },
+    "Celeste": {
+      "color": "#aae0fa",
+      "costo_casa": 50
+    },
+    "Rosado": {
+      "color": "#d93a96",
+      "costo_casa": 100
+    },
+    "Naranjo": {
+      "color": "#f7941d",
+      "costo_casa": 100
+    },
+    "Rojo": {
+      "color": "#ed1b24",
+      "costo_casa": 150
+    },
+    "Amarillo": {
+      "color": "#fef200",
+      "costo_casa": 150
+    },
+    "Verde": {
+      "color": "#1fb25a",
+      "costo_casa": 200
+    },
+    "Azul": {
+      "color": "#0072bb",
+      "costo_casa": 200
+    }
+  },
+  "hipoteca": "Mitad del precio impreso. Se levanta pagando ese monto mas 10% de interes.",
+  "venta_de_casas": "Al banco, a la mitad del costo de construccion.",
+  "casillas": [
+    {
+      "pos": 1,
+      "codigo": "01_SALIDA",
+      "nombre": "Salida",
+      "tipo": "salida",
+      "svg": "svg/salida.svg"
+    },
+    {
+      "pos": 2,
+      "codigo": "02_PROPIEDAD",
+      "nombre": "Mediterranean Avenue",
+      "tipo": "propiedad",
+      "grupo": "Cafe",
+      "color": "#955436",
+      "costo_casa": 50,
+      "svg": null,
+      "precio": 60,
+      "hipoteca": 30,
+      "renta": {
+        "sola": 2,
+        "casa_1": 10,
+        "casa_2": 30,
+        "casa_3": 90,
+        "casa_4": 160,
+        "hotel": 250,
+        "grupo_completo_sin_construir": 4
+      }
+    },
+    {
+      "pos": 3,
+      "codigo": "03_ARCA_COMUNAL",
+      "nombre": "Arca Comunal",
+      "tipo": "arca_comunal",
+      "svg": "svg/arca_comunal.svg"
+    },
+    {
+      "pos": 4,
+      "codigo": "04_PROPIEDAD",
+      "nombre": "Baltic Avenue",
+      "tipo": "propiedad",
+      "grupo": "Cafe",
+      "color": "#955436",
+      "costo_casa": 50,
+      "svg": null,
+      "precio": 60,
+      "hipoteca": 30,
+      "renta": {
+        "sola": 4,
+        "casa_1": 20,
+        "casa_2": 60,
+        "casa_3": 180,
+        "casa_4": 320,
+        "hotel": 450,
+        "grupo_completo_sin_construir": 8
+      }
+    },
+    {
+      "pos": 5,
+      "codigo": "05_IMPUESTO",
+      "nombre": "Impuesto sobre la Renta",
+      "tipo": "impuesto",
+      "svg": "svg/imp_renta.svg",
+      "monto": "10% del capital total o 200, a eleccion, en ediciones antiguas; 200 fijo en las modernas"
+    },
+    {
+      "pos": 6,
+      "codigo": "06_FERROCARRIL",
+      "nombre": "Reading Railroad",
+      "tipo": "ferrocarril",
+      "svg": "svg/ferrocarril.svg",
+      "precio": 200,
+      "hipoteca": 100,
+      "renta": {
+        "con_1": 25,
+        "con_2": 50,
+        "con_3": 100,
+        "con_4": 200
+      }
+    },
+    {
+      "pos": 7,
+      "codigo": "07_PROPIEDAD",
+      "nombre": "Oriental Avenue",
+      "tipo": "propiedad",
+      "grupo": "Celeste",
+      "color": "#aae0fa",
+      "costo_casa": 50,
+      "svg": null,
+      "precio": 100,
+      "hipoteca": 50,
+      "renta": {
+        "sola": 6,
+        "casa_1": 30,
+        "casa_2": 90,
+        "casa_3": 270,
+        "casa_4": 400,
+        "hotel": 550,
+        "grupo_completo_sin_construir": 12
+      }
+    },
+    {
+      "pos": 8,
+      "codigo": "08_FORTUNA",
+      "nombre": "Fortuna",
+      "tipo": "fortuna",
+      "svg": "svg/fortuna.svg"
+    },
+    {
+      "pos": 9,
+      "codigo": "09_PROPIEDAD",
+      "nombre": "Vermont Avenue",
+      "tipo": "propiedad",
+      "grupo": "Celeste",
+      "color": "#aae0fa",
+      "costo_casa": 50,
+      "svg": null,
+      "precio": 100,
+      "hipoteca": 50,
+      "renta": {
+        "sola": 6,
+        "casa_1": 30,
+        "casa_2": 90,
+        "casa_3": 270,
+        "casa_4": 400,
+        "hotel": 550,
+        "grupo_completo_sin_construir": 12
+      }
+    },
+    {
+      "pos": 10,
+      "codigo": "10_PROPIEDAD",
+      "nombre": "Connecticut Avenue",
+      "tipo": "propiedad",
+      "grupo": "Celeste",
+      "color": "#aae0fa",
+      "costo_casa": 50,
+      "svg": null,
+      "precio": 120,
+      "hipoteca": 60,
+      "renta": {
+        "sola": 8,
+        "casa_1": 40,
+        "casa_2": 100,
+        "casa_3": 300,
+        "casa_4": 450,
+        "hotel": 600,
+        "grupo_completo_sin_construir": 16
+      }
+    },
+    {
+      "pos": 11,
+      "codigo": "11_CARCEL",
+      "nombre": "Carcel, de visita",
+      "tipo": "carcel",
+      "svg": "svg/carcel.svg"
+    },
+    {
+      "pos": 12,
+      "codigo": "12_PROPIEDAD",
+      "nombre": "St. Charles Place",
+      "tipo": "propiedad",
+      "grupo": "Rosado",
+      "color": "#d93a96",
+      "costo_casa": 100,
+      "svg": null,
+      "precio": 140,
+      "hipoteca": 70,
+      "renta": {
+        "sola": 10,
+        "casa_1": 50,
+        "casa_2": 150,
+        "casa_3": 450,
+        "casa_4": 625,
+        "hotel": 750,
+        "grupo_completo_sin_construir": 20
+      }
+    },
+    {
+      "pos": 13,
+      "codigo": "13_SERVICIO",
+      "nombre": "Compania de Electricidad",
+      "tipo": "servicio",
+      "svg": "svg/cia_electrica.svg",
+      "precio": 150,
+      "hipoteca": 75,
+      "renta": {
+        "con_1": "4x dados",
+        "con_2": "10x dados"
+      }
+    },
+    {
+      "pos": 14,
+      "codigo": "14_PROPIEDAD",
+      "nombre": "States Avenue",
+      "tipo": "propiedad",
+      "grupo": "Rosado",
+      "color": "#d93a96",
+      "costo_casa": 100,
+      "svg": null,
+      "precio": 140,
+      "hipoteca": 70,
+      "renta": {
+        "sola": 10,
+        "casa_1": 50,
+        "casa_2": 150,
+        "casa_3": 450,
+        "casa_4": 625,
+        "hotel": 750,
+        "grupo_completo_sin_construir": 20
+      }
+    },
+    {
+      "pos": 15,
+      "codigo": "15_PROPIEDAD",
+      "nombre": "Virginia Avenue",
+      "tipo": "propiedad",
+      "grupo": "Rosado",
+      "color": "#d93a96",
+      "costo_casa": 100,
+      "svg": null,
+      "precio": 160,
+      "hipoteca": 80,
+      "renta": {
+        "sola": 12,
+        "casa_1": 60,
+        "casa_2": 180,
+        "casa_3": 500,
+        "casa_4": 700,
+        "hotel": 900,
+        "grupo_completo_sin_construir": 24
+      }
+    },
+    {
+      "pos": 16,
+      "codigo": "16_FERROCARRIL",
+      "nombre": "Pennsylvania Railroad",
+      "tipo": "ferrocarril",
+      "svg": "svg/ferrocarril.svg",
+      "precio": 200,
+      "hipoteca": 100,
+      "renta": {
+        "con_1": 25,
+        "con_2": 50,
+        "con_3": 100,
+        "con_4": 200
+      }
+    },
+    {
+      "pos": 17,
+      "codigo": "17_PROPIEDAD",
+      "nombre": "St. James Place",
+      "tipo": "propiedad",
+      "grupo": "Naranjo",
+      "color": "#f7941d",
+      "costo_casa": 100,
+      "svg": null,
+      "precio": 180,
+      "hipoteca": 90,
+      "renta": {
+        "sola": 14,
+        "casa_1": 70,
+        "casa_2": 200,
+        "casa_3": 550,
+        "casa_4": 750,
+        "hotel": 950,
+        "grupo_completo_sin_construir": 28
+      }
+    },
+    {
+      "pos": 18,
+      "codigo": "18_ARCA_COMUNAL",
+      "nombre": "Arca Comunal",
+      "tipo": "arca_comunal",
+      "svg": "svg/arca_comunal.svg"
+    },
+    {
+      "pos": 19,
+      "codigo": "19_PROPIEDAD",
+      "nombre": "Tennessee Avenue",
+      "tipo": "propiedad",
+      "grupo": "Naranjo",
+      "color": "#f7941d",
+      "costo_casa": 100,
+      "svg": null,
+      "precio": 180,
+      "hipoteca": 90,
+      "renta": {
+        "sola": 14,
+        "casa_1": 70,
+        "casa_2": 200,
+        "casa_3": 550,
+        "casa_4": 750,
+        "hotel": 950,
+        "grupo_completo_sin_construir": 28
+      }
+    },
+    {
+      "pos": 20,
+      "codigo": "20_PROPIEDAD",
+      "nombre": "New York Avenue",
+      "tipo": "propiedad",
+      "grupo": "Naranjo",
+      "color": "#f7941d",
+      "costo_casa": 100,
+      "svg": null,
+      "precio": 200,
+      "hipoteca": 100,
+      "renta": {
+        "sola": 16,
+        "casa_1": 80,
+        "casa_2": 220,
+        "casa_3": 600,
+        "casa_4": 800,
+        "hotel": 1000,
+        "grupo_completo_sin_construir": 32
+      }
+    },
+    {
+      "pos": 21,
+      "codigo": "21_ESTACIONAMIENTO",
+      "nombre": "Estacionamiento Gratis",
+      "tipo": "estacionamiento",
+      "svg": "svg/estacionamiento_gratis.svg"
+    },
+    {
+      "pos": 22,
+      "codigo": "22_PROPIEDAD",
+      "nombre": "Kentucky Avenue",
+      "tipo": "propiedad",
+      "grupo": "Rojo",
+      "color": "#ed1b24",
+      "costo_casa": 150,
+      "svg": null,
+      "precio": 220,
+      "hipoteca": 110,
+      "renta": {
+        "sola": 18,
+        "casa_1": 90,
+        "casa_2": 250,
+        "casa_3": 700,
+        "casa_4": 875,
+        "hotel": 1050,
+        "grupo_completo_sin_construir": 36
+      }
+    },
+    {
+      "pos": 23,
+      "codigo": "23_FORTUNA",
+      "nombre": "Fortuna",
+      "tipo": "fortuna",
+      "svg": "svg/fortuna.svg"
+    },
+    {
+      "pos": 24,
+      "codigo": "24_PROPIEDAD",
+      "nombre": "Indiana Avenue",
+      "tipo": "propiedad",
+      "grupo": "Rojo",
+      "color": "#ed1b24",
+      "costo_casa": 150,
+      "svg": null,
+      "precio": 220,
+      "hipoteca": 110,
+      "renta": {
+        "sola": 18,
+        "casa_1": 90,
+        "casa_2": 250,
+        "casa_3": 700,
+        "casa_4": 875,
+        "hotel": 1050,
+        "grupo_completo_sin_construir": 36
+      }
+    },
+    {
+      "pos": 25,
+      "codigo": "25_PROPIEDAD",
+      "nombre": "Illinois Avenue",
+      "tipo": "propiedad",
+      "grupo": "Rojo",
+      "color": "#ed1b24",
+      "costo_casa": 150,
+      "svg": null,
+      "precio": 240,
+      "hipoteca": 120,
+      "renta": {
+        "sola": 20,
+        "casa_1": 100,
+        "casa_2": 300,
+        "casa_3": 750,
+        "casa_4": 925,
+        "hotel": 1100,
+        "grupo_completo_sin_construir": 40
+      }
+    },
+    {
+      "pos": 26,
+      "codigo": "26_FERROCARRIL",
+      "nombre": "B&O Railroad",
+      "tipo": "ferrocarril",
+      "svg": "svg/ferrocarril.svg",
+      "precio": 200,
+      "hipoteca": 100,
+      "renta": {
+        "con_1": 25,
+        "con_2": 50,
+        "con_3": 100,
+        "con_4": 200
+      }
+    },
+    {
+      "pos": 27,
+      "codigo": "27_PROPIEDAD",
+      "nombre": "Atlantic Avenue",
+      "tipo": "propiedad",
+      "grupo": "Amarillo",
+      "color": "#fef200",
+      "costo_casa": 150,
+      "svg": null,
+      "precio": 260,
+      "hipoteca": 130,
+      "renta": {
+        "sola": 22,
+        "casa_1": 110,
+        "casa_2": 330,
+        "casa_3": 800,
+        "casa_4": 975,
+        "hotel": 1150,
+        "grupo_completo_sin_construir": 44
+      }
+    },
+    {
+      "pos": 28,
+      "codigo": "28_PROPIEDAD",
+      "nombre": "Ventnor Avenue",
+      "tipo": "propiedad",
+      "grupo": "Amarillo",
+      "color": "#fef200",
+      "costo_casa": 150,
+      "svg": null,
+      "precio": 260,
+      "hipoteca": 130,
+      "renta": {
+        "sola": 22,
+        "casa_1": 110,
+        "casa_2": 330,
+        "casa_3": 800,
+        "casa_4": 975,
+        "hotel": 1150,
+        "grupo_completo_sin_construir": 44
+      }
+    },
+    {
+      "pos": 29,
+      "codigo": "29_SERVICIO",
+      "nombre": "Compania de Aguas",
+      "tipo": "servicio",
+      "svg": "svg/cia_aguas.svg",
+      "precio": 150,
+      "hipoteca": 75,
+      "renta": {
+        "con_1": "4x dados",
+        "con_2": "10x dados"
+      }
+    },
+    {
+      "pos": 30,
+      "codigo": "30_PROPIEDAD",
+      "nombre": "Marvin Gardens",
+      "tipo": "propiedad",
+      "grupo": "Amarillo",
+      "color": "#fef200",
+      "costo_casa": 150,
+      "svg": null,
+      "precio": 280,
+      "hipoteca": 140,
+      "renta": {
+        "sola": 24,
+        "casa_1": 120,
+        "casa_2": 360,
+        "casa_3": 850,
+        "casa_4": 1025,
+        "hotel": 1200,
+        "grupo_completo_sin_construir": 48
+      }
+    },
+    {
+      "pos": 31,
+      "codigo": "31_VE_A_LA_CARCEL",
+      "nombre": "Ve a la Carcel",
+      "tipo": "ve_a_la_carcel",
+      "svg": "svg/ve_a_la_carcel.svg"
+    },
+    {
+      "pos": 32,
+      "codigo": "32_PROPIEDAD",
+      "nombre": "Pacific Avenue",
+      "tipo": "propiedad",
+      "grupo": "Verde",
+      "color": "#1fb25a",
+      "costo_casa": 200,
+      "svg": null,
+      "precio": 300,
+      "hipoteca": 150,
+      "renta": {
+        "sola": 26,
+        "casa_1": 130,
+        "casa_2": 390,
+        "casa_3": 900,
+        "casa_4": 1100,
+        "hotel": 1275,
+        "grupo_completo_sin_construir": 52
+      }
+    },
+    {
+      "pos": 33,
+      "codigo": "33_PROPIEDAD",
+      "nombre": "North Carolina Avenue",
+      "tipo": "propiedad",
+      "grupo": "Verde",
+      "color": "#1fb25a",
+      "costo_casa": 200,
+      "svg": null,
+      "precio": 300,
+      "hipoteca": 150,
+      "renta": {
+        "sola": 26,
+        "casa_1": 130,
+        "casa_2": 390,
+        "casa_3": 900,
+        "casa_4": 1100,
+        "hotel": 1275,
+        "grupo_completo_sin_construir": 52
+      }
+    },
+    {
+      "pos": 34,
+      "codigo": "34_ARCA_COMUNAL",
+      "nombre": "Arca Comunal",
+      "tipo": "arca_comunal",
+      "svg": "svg/arca_comunal.svg"
+    },
+    {
+      "pos": 35,
+      "codigo": "35_PROPIEDAD",
+      "nombre": "Pennsylvania Avenue",
+      "tipo": "propiedad",
+      "grupo": "Verde",
+      "color": "#1fb25a",
+      "costo_casa": 200,
+      "svg": null,
+      "precio": 320,
+      "hipoteca": 160,
+      "renta": {
+        "sola": 28,
+        "casa_1": 150,
+        "casa_2": 450,
+        "casa_3": 1000,
+        "casa_4": 1200,
+        "hotel": 1400,
+        "grupo_completo_sin_construir": 56
+      }
+    },
+    {
+      "pos": 36,
+      "codigo": "36_FERROCARRIL",
+      "nombre": "Short Line",
+      "tipo": "ferrocarril",
+      "svg": "svg/ferrocarril.svg",
+      "precio": 200,
+      "hipoteca": 100,
+      "renta": {
+        "con_1": 25,
+        "con_2": 50,
+        "con_3": 100,
+        "con_4": 200
+      }
+    },
+    {
+      "pos": 37,
+      "codigo": "37_FORTUNA",
+      "nombre": "Fortuna",
+      "tipo": "fortuna",
+      "svg": "svg/fortuna.svg"
+    },
+    {
+      "pos": 38,
+      "codigo": "38_PROPIEDAD",
+      "nombre": "Park Place",
+      "tipo": "propiedad",
+      "grupo": "Azul",
+      "color": "#0072bb",
+      "costo_casa": 200,
+      "svg": null,
+      "precio": 350,
+      "hipoteca": 175,
+      "renta": {
+        "sola": 35,
+        "casa_1": 175,
+        "casa_2": 500,
+        "casa_3": 1100,
+        "casa_4": 1300,
+        "hotel": 1500,
+        "grupo_completo_sin_construir": 70
+      }
+    },
+    {
+      "pos": 39,
+      "codigo": "39_IMPUESTO",
+      "nombre": "Impuesto de Lujo",
+      "tipo": "impuesto",
+      "svg": "svg/imp_lujo.svg",
+      "monto": "75 en ediciones antiguas, 100 en las modernas"
+    },
+    {
+      "pos": 40,
+      "codigo": "40_PROPIEDAD",
+      "nombre": "Boardwalk",
+      "tipo": "propiedad",
+      "grupo": "Azul",
+      "color": "#0072bb",
+      "costo_casa": 200,
+      "svg": null,
+      "precio": 400,
+      "hipoteca": 200,
+      "renta": {
+        "sola": 50,
+        "casa_1": 200,
+        "casa_2": 600,
+        "casa_3": 1400,
+        "casa_4": 1700,
+        "hotel": 2000,
+        "grupo_completo_sin_construir": 100
+      }
+    }
+  ],
+  "cartas": {
+    "fortuna": [
+      "Avanza a la Salida. Cobra 200.",
+      "Avanza a Illinois Avenue. Si pasas por la Salida, cobra 200.",
+      "Avanza a St. Charles Place. Si pasas por la Salida, cobra 200.",
+      "Avanza al servicio mas cercano. Si tiene dueno, tira los dados y paga 10 veces el resultado. Si no, puedes comprarlo.",
+      "Avanza al ferrocarril mas cercano y paga el doble de la renta. Si no tiene dueno, puedes comprarlo.",
+      "Avanza al ferrocarril mas cercano y paga el doble de la renta. Si no tiene dueno, puedes comprarlo.",
+      "Ve al Reading Railroad. Si pasas por la Salida, cobra 200.",
+      "Retrocede tres casillas.",
+      "Ve directo a la carcel. No pasas por la Salida ni cobras 200.",
+      "Sal libre de la carcel. Guardala hasta usarla o venderla.",
+      "Haz reparaciones generales en tus propiedades. Paga 25 por casa y 100 por hotel.",
+      "Multa por exceso de velocidad. Paga 15.",
+      "Te eligieron presidente del directorio. Paga 50 a cada jugador.",
+      "Vence tu credito de construccion. Cobra 150.",
+      "Ganaste un concurso de crucigramas. Cobra 100.",
+      "Paga una multa de 10 o saca una carta de Fortuna."
+    ],
+    "arca_comunal": [
+      "Avanza a la Salida. Cobra 200.",
+      "Error del banco a tu favor. Cobra 200.",
+      "Honorarios del medico. Paga 50.",
+      "Venta de acciones. Cobra 50.",
+      "Sal libre de la carcel. Guardala hasta usarla o venderla.",
+      "Ve directo a la carcel. No pasas por la Salida ni cobras 200.",
+      "Noche de gala en la opera. Cobra 50 de cada jugador.",
+      "Devolucion de impuestos. Cobra 20.",
+      "Es tu cumpleanos. Cobra 10 de cada jugador.",
+      "Vence tu seguro de vida. Cobra 100.",
+      "Gastos hospitalarios. Paga 100.",
+      "Matricula del colegio. Paga 50.",
+      "Honorarios por asesoria. Cobra 25.",
+      "Se te cobra por reparacion de calles. Paga 40 por casa y 115 por hotel.",
+      "Segundo lugar en un concurso de belleza. Cobra 10.",
+      "Recibes una herencia de 100."
+    ]
+  }
+}

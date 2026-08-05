@@ -189,6 +189,16 @@ class GameRepository:
             and game.active_auction.bid_deadline is not None
         ]
 
+    async def list_playing_with_bots(self) -> list[GameState]:
+        statement = select(GameRecord).where(GameRecord.status == "playing")
+        records = (await self.session.scalars(statement)).all()
+        games = [self._to_domain(record) for record in records]
+        return [
+            game
+            for game in games
+            if any(player.is_bot and not player.bankrupt for player in game.players)
+        ]
+
     async def save(self, game: GameState, previous_sequence: int) -> None:
         record = await self.session.get(GameRecord, game.id)
         if record is None:

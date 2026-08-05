@@ -22,6 +22,7 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { activeGameSession, api, ApiError, authToken } from './api'
+import { GameAdvisorChat } from './advisor/GameAdvisorChat'
 import { BoardStudio } from './board-editor/BoardStudio'
 import { AuthDialog, type AuthMode } from './components/AuthDialog'
 import { GameBoard } from './components/GameBoard'
@@ -559,16 +560,24 @@ export default function App() {
           </Stack>
         )}
         {createdGame && gamePack && user && (
-          <GameSessionPanel
-            game={createdGame}
-            pack={gamePack}
-            user={user}
-            zoom={zoom}
-            onChange={applyGameState}
-            onLeave={leaveActiveGame}
-            onLogout={() => void logout()}
-            onSessionExpired={handleSessionExpired}
-          />
+          <>
+            <GameSessionPanel
+              game={createdGame}
+              pack={gamePack}
+              user={user}
+              zoom={zoom}
+              onChange={applyGameState}
+              onLeave={leaveActiveGame}
+              onLogout={() => void logout()}
+              onSessionExpired={handleSessionExpired}
+            />
+            <GameAdvisorChat
+              key={createdGame.id}
+              game={createdGame}
+              pack={gamePack}
+              user={user}
+            />
+          </>
         )}
         {gameError && (
           <Alert

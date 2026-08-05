@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import re
+from hashlib import sha256
 from uuid import UUID, uuid4
+from xml.etree import ElementTree
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.application.pack_loader import PackLoader
 from business_game.domain.board_models import (
+    BoardAsset,
     BoardDraft,
     BoardProjectCreate,
     BoardProjectUpdate,
@@ -17,15 +21,42 @@ from business_game.domain.board_models import (
     PublishBoardRequest,
     PublishedBoardVersion,
 )
-from business_game.domain.errors import ConflictError
+from business_game.domain.errors import ConflictError, DomainError
 from business_game.domain.models import ContentPack, PackManifest
 from business_game.infrastructure.board_repository import BoardProjectRepository
 from business_game.infrastructure.db_models import (
+    BoardAssetRecord,
     BoardProjectRecord,
     BoardVersionRecord,
 )
 
 MAX_DRAFT_BYTES = 2_000_000
+MAX_ASSET_BYTES = 100_000
+MAX_ASSETS_PER_PROJECT = 100
+_ALLOWED_SVG_ELEMENTS = {
+    "svg",
+    "g",
+    "path",
+    "rect",
+    "circle",
+    "ellipse",
+    "line",
+    "polyline",
+    "polygon",
+    "defs",
+    "clipPath",
+    "mask",
+    "linearGradient",
+    "radialGradient",
+    "stop",
+    "title",
+    "desc",
+    "symbol",
+    "use",
+    "text",
+    "tspan",
+    "style",
+}
 
 
 class BoardProjectService:
@@ -107,6 +138,71 @@ class BoardProjectService:
                     "published board projects cannot be deleted"
                 )
             await self._projects.delete(record)
+
+    async def list_assets(
+        self,
+        project_id: UUID,
+        owner_id: UUID,
+    ) -> list[BoardAsset]:
+        await self._projects.get_owned(project_id, owner_id)
+        return [
+            self._to_asset(record)
+            for record in await self._projects.list_assets(project_id)
+        ]
+
+    async def upload_asset(
+        self,
+        project_id: UUID,
+        owner_id: UUID,
+        *,
+        filename: str,
+        content_type: str | None,
+        payload: bytes,
+    ) -> BoardAsset:
+        name, content = self._validate_svg(filename, content_type, payload)
+        async with self._session.begin():
+            await self._projects.get_owned(project_id, owner_id, for_update=True)
+            if await self._projects.count_assets(project_id) >= MAX_ASSETS_PER_PROJECT:
+                raise ConflictError(
+                    f"a board project can store at most {MAX_ASSETS_PER_PROJECT} assets"
+                )
+            record = await self._projects.create_asset(
+                project_id=project_id,
+                name=name,
+                content=content,
+                size_bytes=len(payload),
+                sha256=sha256(payload).hexdigest(),
+            )
+        return self._to_asset(record)
+
+    async def delete_asset(
+        self,
+        project_id: UUID,
+        asset_id: UUID,
+        owner_id: UUID,
+    ) -> None:
+        async with self._session.begin():
+            project = await self._projects.get_owned(
+                project_id,
+                owner_id,
+                for_update=True,
+            )
+            record = await self._projects.get_asset(
+                asset_id,
+                project_id=project_id,
+            )
+            path = self._asset_path(record.id)
+            versions = await self._projects.list_versions(project_id)
+            if self._contains_value(project.document, path) or any(
+                self._contains_value(version.document, path) for version in versions
+            ):
+                raise ConflictError(
+                    "the asset is still used by the draft or a published version"
+                )
+            await self._projects.delete_asset(record)
+
+    async def get_asset_content(self, asset_id: UUID) -> BoardAssetRecord:
+        return await self._projects.get_asset(asset_id)
 
     async def validate(
         self,
@@ -205,6 +301,97 @@ class BoardProjectService:
         if len(cleaned) < 2:
             raise ConflictError("board project name cannot be blank")
         return cleaned
+
+    @staticmethod
+    def _validate_svg(
+        filename: str,
+        content_type: str | None,
+        payload: bytes,
+    ) -> tuple[str, str]:
+        name = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].strip()
+        if not name.lower().endswith(".svg") or not (1 <= len(name) <= 100):
+            raise DomainError("the asset must be an SVG file with a valid name")
+        if content_type not in {None, "", "image/svg+xml", "text/xml"}:
+            raise DomainError("the uploaded file must use the SVG content type")
+        if not payload:
+            raise DomainError("the SVG file is empty")
+        if len(payload) > MAX_ASSET_BYTES:
+            raise DomainError("the SVG file exceeds the 100 KB limit")
+        try:
+            content = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise DomainError("the SVG file must be UTF-8 encoded") from exc
+        lowered = content.lower()
+        if "<!doctype" in lowered or "<!entity" in lowered:
+            raise DomainError("SVG document types and entities are not allowed")
+        try:
+            root = ElementTree.fromstring(content)
+        except ElementTree.ParseError as exc:
+            raise DomainError("the SVG file is not valid XML") from exc
+        if BoardProjectService._local_name(root.tag) != "svg":
+            raise DomainError("the uploaded XML root must be an svg element")
+        for element in root.iter():
+            tag = BoardProjectService._local_name(element.tag)
+            if tag not in _ALLOWED_SVG_ELEMENTS:
+                raise DomainError(f"SVG element '{tag}' is not allowed")
+            if tag == "style":
+                BoardProjectService._validate_svg_value(element.text or "")
+            for attribute, value in element.attrib.items():
+                attribute_name = BoardProjectService._local_name(attribute)
+                if attribute_name.lower().startswith("on"):
+                    raise DomainError("SVG event handlers are not allowed")
+                if attribute_name == "href" and not value.strip().startswith("#"):
+                    raise DomainError("SVG links must reference an element in the same file")
+                BoardProjectService._validate_svg_value(value)
+        return name, content
+
+    @staticmethod
+    def _validate_svg_value(value: str) -> None:
+        lowered = value.lower()
+        if any(
+            token in lowered
+            for token in ("javascript:", "data:", "@import", "@font-face", "expression(")
+        ):
+            raise DomainError("the SVG contains an unsafe reference")
+        for reference in re.findall(r"url\(([^)]+)\)", value, flags=re.IGNORECASE):
+            if not reference.strip().strip("'\"").startswith("#"):
+                raise DomainError("SVG URLs must reference an element in the same file")
+
+    @staticmethod
+    def _local_name(name: str) -> str:
+        return name.rsplit("}", 1)[-1]
+
+    @staticmethod
+    def _contains_value(value: object, target: str) -> bool:
+        if value == target:
+            return True
+        if isinstance(value, dict):
+            return any(
+                BoardProjectService._contains_value(item, target)
+                for item in value.values()
+            )
+        if isinstance(value, list):
+            return any(
+                BoardProjectService._contains_value(item, target) for item in value
+            )
+        return False
+
+    @staticmethod
+    def _asset_path(asset_id: UUID) -> str:
+        return f"/api/v1/board-assets/{asset_id}.svg"
+
+    @staticmethod
+    def _to_asset(record: BoardAssetRecord) -> BoardAsset:
+        return BoardAsset(
+            id=record.id,
+            project_id=record.project_id,
+            name=record.name,
+            content_type="image/svg+xml",
+            size_bytes=record.size_bytes,
+            sha256=record.sha256,
+            path=BoardProjectService._asset_path(record.id),
+            created_at=record.created_at,
+        )
 
     @staticmethod
     def _next_version(existing: list[BoardVersionRecord]) -> str:

@@ -8,11 +8,13 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -122,6 +124,25 @@ class BoardVersionRecord(Base):
     )
 
 
+class BoardAssetRecord(Base):
+    __tablename__ = "board_assets"
+    __table_args__ = (Index("ix_board_assets_project_created", "project_id", "created_at"),)
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("board_projects.id", ondelete="CASCADE"),
+    )
+    name: Mapped[str] = mapped_column(String(100))
+    content_type: Mapped[str] = mapped_column(String(40))
+    content: Mapped[str] = mapped_column(Text)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
 class GameRecord(Base):
     __tablename__ = "games"
 
@@ -166,3 +187,70 @@ class GameEventRecord(Base):
     event_type: Mapped[str] = mapped_column(String(100))
     event_data: Mapped[dict[str, Any]] = mapped_column(JSON)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ChatMessageRecord(Base):
+    __tablename__ = "chat_messages"
+    __table_args__ = (
+        CheckConstraint(
+            "author_kind IN ('player', 'bot', 'system')",
+            name="ck_chat_messages_author_kind",
+        ),
+        Index("ix_chat_messages_game_id", "game_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    game_id: Mapped[UUID] = mapped_column(
+        ForeignKey("games.id", ondelete="CASCADE"),
+    )
+    # Bots are players without a user row, so this cannot reference `users`.
+    # `author_name` keeps the name shown at the time, independent of later renames.
+    author_id: Mapped[UUID | None] = mapped_column(default=None)
+    author_name: Mapped[str] = mapped_column(String(80), default="")
+    author_kind: Mapped[str] = mapped_column(String(10), default="player")
+    body: Mapped[str] = mapped_column(Text)
+    template_key: Mapped[str | None] = mapped_column(String(80), default=None)
+    template_params: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
+class AdvisorMessageRecord(Base):
+    __tablename__ = "advisor_messages"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('user', 'assistant')",
+            name="ck_advisor_messages_role",
+        ),
+        Index(
+            "ix_advisor_messages_game_user_id",
+            "game_id",
+            "user_id",
+            "id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    game_id: Mapped[UUID] = mapped_column(
+        ForeignKey("games.id", ondelete="CASCADE"),
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+    )
+    role: Mapped[str] = mapped_column(String(10))
+    content: Mapped[str] = mapped_column(Text)
+    snapshot_sequence: Mapped[int | None] = mapped_column(Integer, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )

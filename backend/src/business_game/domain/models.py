@@ -45,11 +45,14 @@ class MoveRelativeCardEffect(ContentModel):
     type: Literal["move_relative"]
     steps: int = Field(ge=-116, le=116)
     collect_start: bool = False
+    purchase_discount_percent: int | None = Field(default=None, ge=1, le=100)
 
     @model_validator(mode="after")
     def validate_steps(self) -> MoveRelativeCardEffect:
         if self.steps == 0:
             raise ValueError("relative card movement cannot be zero")
+        if self.purchase_discount_percent is not None and self.steps < 1:
+            raise ValueError("purchase discounts require forward movement")
         return self
 
 
@@ -92,6 +95,31 @@ class GetOutOfJailCardEffect(ContentModel):
     type: Literal["get_out_of_jail"]
 
 
+class MoveToNearestAuctionCardEffect(ContentModel):
+    type: Literal["move_to_nearest_auction"]
+
+
+class CompleteGroupsCashCardEffect(ContentModel):
+    type: Literal["complete_groups_cash"]
+    threshold: int = Field(ge=1, le=40)
+    amount_if_at_least: int
+    amount_otherwise: int
+
+
+class OwnedPropertiesCashCardEffect(ContentModel):
+    type: Literal["owned_properties_cash"]
+    amount_per_property: int
+
+
+class MortgagedPropertiesCashCardEffect(ContentModel):
+    type: Literal["mortgaged_properties_cash"]
+    amount_per_property: int = Field(ge=0)
+
+
+class RefinanceMortgageCardEffect(ContentModel):
+    type: Literal["refinance_mortgage"]
+
+
 CardEffect = Annotated[
     CashCardEffect
     | MoveToCardEffect
@@ -100,7 +128,12 @@ CardEffect = Annotated[
     | RepairsCardEffect
     | CashEachCardEffect
     | GoToJailCardEffect
-    | GetOutOfJailCardEffect,
+    | GetOutOfJailCardEffect
+    | MoveToNearestAuctionCardEffect
+    | CompleteGroupsCashCardEffect
+    | OwnedPropertiesCashCardEffect
+    | MortgagedPropertiesCashCardEffect
+    | RefinanceMortgageCardEffect,
     Field(discriminator="type"),
 ]
 
@@ -112,8 +145,12 @@ def _effect_must_be_terminal(effect: CardEffect) -> bool:
             MoveToCardEffect,
             MoveRelativeCardEffect,
             MoveToNearestCardEffect,
+            MoveToNearestAuctionCardEffect,
             RepairsCardEffect,
             CashEachCardEffect,
+            CompleteGroupsCashCardEffect,
+            OwnedPropertiesCashCardEffect,
+            MortgagedPropertiesCashCardEffect,
             GoToJailCardEffect,
         ),
     ) or (isinstance(effect, CashCardEffect) and effect.amount < 0)
@@ -184,6 +221,14 @@ class TileDefinition(ContentModel):
         "plane",
     ] | None = None
     icon_background: Literal["circle", "rounded", "square", "none"] | None = None
+    asset_path: str | None = Field(
+        default=None,
+        max_length=200,
+        pattern=(
+            r"^(?:/assets/[a-z0-9_-]+(?:/[a-z0-9_-]+)*"
+            r"|/api/v1/board-assets/[0-9a-f-]{36})\.svg$"
+        ),
+    )
     purchasable: bool | None = None
     price: int | None = Field(default=None, ge=0)
     base_rent: int | None = Field(default=None, ge=0)
@@ -202,6 +247,10 @@ class TileDefinition(ContentModel):
     )
     amount: int | None = Field(default=None, ge=0)
     net_worth_percent: int | None = Field(default=None, ge=1, le=100)
+    complete_group_amount: int | None = Field(default=None, ge=0)
+    house_amount: int | None = Field(default=None, ge=0)
+    hotel_amount: int | None = Field(default=None, ge=0)
+    auction_minimum_bid: int | None = Field(default=None, ge=1)
     landing_effects: list[CardEffect] = Field(default_factory=list, max_length=8)
 
     @property
@@ -226,11 +275,17 @@ class TileDefinition(ContentModel):
                 "hotel_cost",
                 "rent_levels",
             },
-            TileKind.TAX: {"amount", "net_worth_percent"},
+            TileKind.TAX: {
+                "amount",
+                "net_worth_percent",
+                "complete_group_amount",
+                "house_amount",
+                "hotel_amount",
+            },
             TileKind.CARD: {"deck_id"},
             TileKind.JAIL: {"landing_effects"},
             TileKind.GO_TO_JAIL: set(),
-            TileKind.FREE: {"landing_effects"},
+            TileKind.FREE: {"auction_minimum_bid", "landing_effects"},
             TileKind.TRANSPORT: {
                 "purchasable",
                 "price",
@@ -261,6 +316,10 @@ class TileDefinition(ContentModel):
             "rent_multipliers": self.rent_multipliers,
             "amount": self.amount,
             "net_worth_percent": self.net_worth_percent,
+            "complete_group_amount": self.complete_group_amount,
+            "house_amount": self.house_amount,
+            "hotel_amount": self.hotel_amount,
+            "auction_minimum_bid": self.auction_minimum_bid,
             "landing_effects": self.landing_effects or None,
         }
         unsupported = sorted(
@@ -336,12 +395,18 @@ class TileDefinition(ContentModel):
             value < 0 for value in self.rent_multipliers
         ):
             raise ValueError("rent multipliers cannot be negative")
-        if self.kind is TileKind.TAX and (
-            (self.amount is None) == (self.net_worth_percent is None)
-        ):
+        tax_modes = (
+            self.amount is not None,
+            self.net_worth_percent is not None,
+            self.complete_group_amount is not None,
+            self.house_amount is not None or self.hotel_amount is not None,
+        )
+        if self.kind is TileKind.TAX and sum(tax_modes) != 1:
             raise ValueError(
-                "tax tiles require exactly one of amount or net_worth_percent"
+                "tax tiles require exactly one fixed, net worth, group or building mode"
             )
+        if (self.house_amount is None) != (self.hotel_amount is None):
+            raise ValueError("building taxes require both house and hotel amounts")
         if self.kind is TileKind.CARD and self.deck_id is None:
             raise ValueError("card tiles require deck_id")
         if self.landing_effects and self.is_purchasable:
@@ -467,15 +532,41 @@ class TokenResponse(BaseModel):
     token_type: Literal["bearer"] = "bearer"
 
 
+class BotPersonality(StrEnum):
+    CONSERVATIVE = "conservative"
+    BALANCED = "balanced"
+    AGGRESSIVE = "aggressive"
+    NEGOTIATOR = "negotiator"
+
+
+class BotController(StrEnum):
+    STANDARD = "standard"
+    AI = "ai"
+
+
 class PlayerState(BaseModel):
     user_id: UUID
     display_name: str
+    is_bot: bool = False
+    bot_personality: BotPersonality | None = None
+    bot_controller: BotController | None = None
     position: int = 0
     balance: int = 1500
     bankrupt: bool = False
     in_jail: bool = False
     jail_failed_rolls: int = Field(default=0, ge=0)
     jail_card_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_controller(self) -> PlayerState:
+        if self.is_bot:
+            if self.bot_personality is None:
+                raise ValueError("bot players require a personality")
+            if self.bot_controller is None:
+                self.bot_controller = BotController.STANDARD
+        elif self.bot_personality is not None or self.bot_controller is not None:
+            raise ValueError("human players cannot have bot configuration")
+        return self
 
 
 class SpectatorState(BaseModel):
@@ -534,6 +625,7 @@ class CardPaymentState(BaseModel):
 
 class AuctionState(BaseModel):
     property_id: str
+    minimum_bid: int = Field(default=1, ge=1)
     current_bid: int = Field(default=0, ge=0)
     current_bidder_id: UUID | None = None
     bid_deadline: datetime | None = None
@@ -575,6 +667,9 @@ class GameState(BaseModel):
     phase: TurnPhase = TurnPhase.WAITING_FOR_ROLL
     owners: dict[str, UUID] = Field(default_factory=dict)
     pending_tile_id: str | None = None
+    pending_purchase_discount_percent: int = Field(default=0, ge=0, le=100)
+    pending_auction_selector_id: UUID | None = None
+    pending_auction_minimum_bid: int | None = Field(default=None, ge=1)
     active_auction: AuctionState | None = None
     active_debt: DebtState | None = None
     pending_card_payments: list[CardPaymentState] = Field(
@@ -634,6 +729,15 @@ class GameState(BaseModel):
             player.user_id == self.active_debt.debtor_id for player in self.players
         ):
             raise ValueError("the debt debtor must be a game participant")
+        if (
+            self.pending_auction_selector_id is not None
+            and self.pending_auction_selector_id not in player_ids
+        ):
+            raise ValueError("the auction selector must be a game participant")
+        if (self.pending_auction_selector_id is None) != (
+            self.pending_auction_minimum_bid is None
+        ):
+            raise ValueError("auction selection requires a selector and minimum bid")
         for payment in self.pending_card_payments:
             if payment.payer_id not in player_ids or payment.recipient_id not in player_ids:
                 raise ValueError("card payments require game participants")
@@ -665,6 +769,11 @@ class BidCommand(BaseModel):
 
 class PassAuctionCommand(BaseModel):
     action: Literal["pass_auction"]
+
+
+class SelectAuctionPropertyCommand(BaseModel):
+    action: Literal["select_auction_property"]
+    property_id: str
 
 
 class PayJailFineCommand(BaseModel):
@@ -753,6 +862,7 @@ GameCommand = Annotated[
     | DeclinePropertyCommand
     | BidCommand
     | PassAuctionCommand
+    | SelectAuctionPropertyCommand
     | PayJailFineCommand
     | UseJailCardCommand
     | MortgagePropertyCommand
@@ -779,6 +889,12 @@ class CreateGameRequest(BaseModel):
         max_length=30,
         pattern=r"^\d+\.\d+\.\d+$",
     )
+
+
+class AddBotRequest(BaseModel):
+    personality: BotPersonality = BotPersonality.BALANCED
+    controller: BotController = BotController.STANDARD
+    display_name: str | None = Field(default=None, min_length=2, max_length=40)
 
 
 class UpdateGameSettingsRequest(BaseModel):

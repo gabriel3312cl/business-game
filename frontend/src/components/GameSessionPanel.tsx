@@ -2,6 +2,7 @@ import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded'
 import AccountCircleRoundedIcon from '@mui/icons-material/AccountCircleRounded'
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
+import ForumRoundedIcon from '@mui/icons-material/ForumRounded'
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
@@ -21,6 +22,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Divider,
   Drawer,
   FormControl,
   IconButton,
@@ -33,21 +35,34 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { io, type Socket } from 'socket.io-client'
 import { api, ApiError, authToken } from '../api'
+import { chatApi } from '../chat/api'
+import { GameChatPanel } from '../chat/GameChatPanel'
+import type { ChatMessage } from '../chat/types'
+import { useGameChat } from '../chat/useGameChat'
 import type {
+  BotController,
+  BotPersonality,
   ContentPack,
   GameCommand,
   GameEvent,
   GameState,
   User,
 } from '../types'
+import { BotManagementPanel } from './BotManagementPanel'
 import { GameActionCenter } from './GameActionCenter'
 import { GameActivityFeed } from './GameActivityFeed'
 import { GameAuctionDialog } from './GameAuctionDialog'
 import { GameBoard } from './GameBoard'
+import { BoardHeatmapControls } from './BoardHeatmapControls'
+import {
+  buildHistoryHeatmap,
+  buildProbabilityHeatmap,
+  type BoardHeatmapMode,
+} from './boardHeatmap'
 import {
   latestMotionSequence,
   type MotionSettlement,
@@ -74,13 +89,20 @@ interface CommandAck {
   error?: string
 }
 
+interface ChatAck {
+  ok: boolean
+  code?: 'AUTH_EXPIRED' | 'DOMAIN_ERROR' | 'RATE_LIMITED'
+  error?: string
+  message?: ChatMessage
+}
+
 type ConnectionState =
   | 'connecting'
   | 'connected'
   | 'reconnecting'
   | 'disconnected'
 
-type MobilePanel = 'room' | 'players' | 'manage' | 'activity' | null
+type MobilePanel = 'room' | 'players' | 'manage' | 'activity' | 'chat' | null
 
 export function GameSessionPanel({
   game,
@@ -105,6 +127,15 @@ export function GameSessionPanel({
   const [confirmResignation, setConfirmResignation] = useState(false)
   const [sideTab, setSideTab] = useState(0)
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null)
+  const chat = useGameChat(game.id)
+  const receiveChatMessage = chat.receive
+  const [heatmapMode, setHeatmapMode] = useState<BoardHeatmapMode>('off')
+  const [heatmapPlayerId, setHeatmapPlayerId] = useState<string | null>(null)
+  const [heatmapRange, setHeatmapRange] = useState<{
+    gameId: string
+    from: number
+    to: number | null
+  }>(() => ({ gameId: game.id, from: 1, to: null }))
   const [motionSyncKey, setMotionSyncKey] = useState(0)
   const prefersReducedMotion = useMediaQuery(
     '(prefers-reduced-motion: reduce)',
@@ -126,6 +157,64 @@ export function GameSessionPanel({
         (event) => event.sequence <= motionSettlement.sequence,
       )
     : game.events
+  const maximumHeatmapSequence =
+    visibleEvents[visibleEvents.length - 1]?.sequence ?? 1
+  const selectedHeatmapPlayerId = game.players.some(
+    (player) => player.user_id === heatmapPlayerId,
+  )
+    ? heatmapPlayerId
+    : null
+  const currentPlayer = game.players[game.current_player_index]
+  const probabilityHeatmapAvailable =
+    game.status === 'playing' &&
+    game.phase === 'waiting_for_roll' &&
+    game.pending_auction_selector_id === null &&
+    game.active_auction === null &&
+    game.active_debt === null &&
+    currentPlayer !== undefined &&
+    !motionPending
+  const activeRange =
+    heatmapRange.gameId === game.id
+      ? heatmapRange
+      : { gameId: game.id, from: 1, to: null }
+  const resolvedHeatmapRange = useMemo<[number, number]>(
+    () => [
+      Math.min(Math.max(1, activeRange.from), maximumHeatmapSequence),
+      Math.min(
+        Math.max(activeRange.from, activeRange.to ?? maximumHeatmapSequence),
+        maximumHeatmapSequence,
+      ),
+    ],
+    [activeRange.from, activeRange.to, maximumHeatmapSequence],
+  )
+  const boardHeatmap = useMemo(() => {
+    if (heatmapMode === 'history') {
+      return buildHistoryHeatmap(
+        visibleEvents,
+        pack.manifest.tile_count,
+        selectedHeatmapPlayerId,
+        resolvedHeatmapRange[0],
+        resolvedHeatmapRange[1],
+      )
+    }
+    if (
+      heatmapMode === 'probability' &&
+      probabilityHeatmapAvailable &&
+      currentPlayer
+    ) {
+      return buildProbabilityHeatmap(game, pack, currentPlayer)
+    }
+    return null
+  }, [
+    currentPlayer,
+    game,
+    heatmapMode,
+    pack,
+    probabilityHeatmapAvailable,
+    resolvedHeatmapRange,
+    selectedHeatmapPlayerId,
+    visibleEvents,
+  ])
   const handleMotionSettled = useCallback((settlement: MotionSettlement) => {
     setMotionSettlement((current) =>
       current.gameId === settlement.gameId &&
@@ -139,6 +228,18 @@ export function GameSessionPanel({
   useEffect(() => {
     if ((!isTablet || isWide) && sideTab > 1) setSideTab(0)
   }, [isTablet, isWide, sideTab])
+
+  useEffect(() => {
+    setHeatmapMode('off')
+    setHeatmapPlayerId(null)
+    setHeatmapRange({ gameId: game.id, from: 1, to: null })
+  }, [game.id])
+
+  useEffect(() => {
+    if (heatmapMode === 'probability' && !probabilityHeatmapAvailable) {
+      setHeatmapMode('off')
+    }
+  }, [heatmapMode, probabilityHeatmapAvailable])
 
   useEffect(() => {
     const token = authToken.get()
@@ -232,6 +333,7 @@ export function GameSessionPanel({
       setConnectionState('connected')
       onChange(nextGame)
     })
+    socket.on('chat_message', receiveChatMessage)
     socket.on('disconnect', (reason) => {
       if (reason !== 'io client disconnect') {
         setConnectionState('reconnecting')
@@ -262,7 +364,7 @@ export function GameSessionPanel({
       socketRef.current = null
       refreshingSocketRef.current = false
     }
-  }, [game.id, onChange, onSessionExpired, t])
+  }, [game.id, onChange, onSessionExpired, receiveChatMessage, t])
 
   const playerName = (playerId: string | null) =>
     game.players.find((player) => player.user_id === playerId)?.display_name ??
@@ -280,16 +382,18 @@ export function GameSessionPanel({
       if (snapToSnapshot) {
         setMotionSyncKey((value) => value + 1)
       }
+      return true
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 401) {
         onSessionExpired()
-        return
+        return false
       }
       setError(
         requestError instanceof Error
           ? requestError.message
           : t('operationRejected'),
       )
+      return false
     } finally {
       setBusy(false)
     }
@@ -349,6 +453,51 @@ export function GameSessionPanel({
             return
           }
           setBusy(false)
+          resolve(true)
+        },
+      )
+    })
+  }
+
+  const sendChatMessage = async (body: string): Promise<boolean> => {
+    const socket = socketRef.current
+    if (!socket?.connected) {
+      // Chat must not depend on the socket being up; the room broadcast still
+      // reaches everyone else, and `receive` dedupes our own copy by id.
+      try {
+        receiveChatMessage(await chatApi.send(game.id, body))
+        return true
+      } catch (requestError) {
+        if (requestError instanceof ApiError && requestError.status === 401) {
+          onSessionExpired()
+        }
+        return false
+      }
+    }
+    return new Promise<boolean>((resolve) => {
+      socket.timeout(8000).emit(
+        'chat_message',
+        { game_id: game.id, body },
+        (timeoutError: Error | null, ack?: ChatAck) => {
+          if (timeoutError) {
+            setConnectionState('reconnecting')
+            resolve(false)
+            return
+          }
+          if (!ack?.ok) {
+            if (ack && isAuthenticationError(ack.code, ack.error)) {
+              socket.disconnect()
+              socket.connect()
+            }
+            setError(
+              ack?.code === 'RATE_LIMITED'
+                ? t('chat.rateLimited')
+                : (ack?.error ?? t('chat.sendFailed')),
+            )
+            resolve(false)
+            return
+          }
+          if (ack.message) receiveChatMessage(ack.message)
           resolve(true)
         },
       )
@@ -542,15 +691,32 @@ export function GameSessionPanel({
           </Stack>
 
           {game.status === 'lobby' && (
-            <LobbySettingsPanel
-              game={game}
-              pack={pack}
-              isHost={isHost}
-              busy={busy}
-              onUpdate={(data) =>
-                void run(() => api.updateGameSettings(game.id, data))
-              }
-            />
+            <Stack spacing={2}>
+              <LobbySettingsPanel
+                game={game}
+                pack={pack}
+                isHost={isHost}
+                busy={busy}
+                onUpdate={(data) =>
+                  void run(() => api.updateGameSettings(game.id, data))
+                }
+              />
+              <BotManagementPanel
+                game={game}
+                isHost={isHost}
+                busy={busy}
+                onAdd={(
+                  controller: BotController,
+                  personality: BotPersonality,
+                  displayName?: string,
+                ) =>
+                  run(() =>
+                    api.addBot(game.id, controller, personality, displayName),
+                  )
+                }
+                onRemove={(botId) => run(() => api.removeBot(game.id, botId))}
+              />
+            </Stack>
           )}
         </Stack>
       </CardContent>
@@ -563,11 +729,48 @@ export function GameSessionPanel({
       sx={{ borderColor: 'rgba(255,255,255,.08)', minWidth: 0 }}
     >
       <CardContent>
+        <BoardHeatmapControls
+          mode={heatmapMode}
+          playerId={selectedHeatmapPlayerId}
+          players={game.players}
+          range={resolvedHeatmapRange}
+          maximumSequence={maximumHeatmapSequence}
+          probabilityAvailable={probabilityHeatmapAvailable}
+          onModeChange={setHeatmapMode}
+          onPlayerChange={setHeatmapPlayerId}
+          onRangeChange={([from, to]) =>
+            setHeatmapRange({
+              gameId: game.id,
+              from,
+              to: to >= maximumHeatmapSequence ? null : to,
+            })
+          }
+          onShowAllHistory={() =>
+            setHeatmapRange({ gameId: game.id, from: 1, to: null })
+          }
+        />
+        <Divider sx={{ my: 2 }} />
         <GameActivityFeed
           events={visibleEvents}
           players={game.players}
           spectators={game.spectators}
           pack={pack}
+        />
+      </CardContent>
+    </Card>
+  )
+
+  const chatContent = (
+    <Card
+      variant="outlined"
+      sx={{ borderColor: 'rgba(255,255,255,.08)', minWidth: 0 }}
+    >
+      <CardContent>
+        <GameChatPanel
+          game={game}
+          user={user}
+          chat={chat}
+          onSend={sendChatMessage}
         />
       </CardContent>
     </Card>
@@ -579,7 +782,11 @@ export function GameSessionPanel({
       sx={{ borderColor: 'rgba(255,255,255,.08)', minWidth: 0 }}
     >
       <CardContent sx={{ p: 1.25, '&:last-child': { pb: 1.25 } }}>
-        <GamePlayersPanel game={game} user={user} />
+        <GamePlayersPanel
+          game={game}
+          user={user}
+          useAssetTokens={pack.board.tiles.some((tile) => tile.asset_path)}
+        />
       </CardContent>
     </Card>
   )
@@ -617,7 +824,9 @@ export function GameSessionPanel({
         ? tradesContent
         : sideTab === 2
           ? roomContent
-          : activityContent
+          : sideTab === 3
+            ? activityContent
+            : chatContent
 
   const managementContent = (
     <Card
@@ -661,6 +870,14 @@ export function GameSessionPanel({
             id="game-panel-tab-3"
             aria-controls="game-panel-3"
             label={t('activity.title')}
+          />
+        )}
+        {isTablet && !isWide && (
+          <Tab
+            value={4}
+            id="game-panel-tab-4"
+            aria-controls="game-panel-4"
+            label={t('chat.short')}
           />
         )}
       </Tabs>
@@ -768,10 +985,12 @@ export function GameSessionPanel({
               overflow: 'auto',
               p: 1,
               borderRight: '1px solid rgba(255,255,255,.08)',
+              '& > *': { flexShrink: 0 },
             }}
           >
             {roomContent}
             {activityContent}
+            {chatContent}
           </Stack>
         )}
 
@@ -823,6 +1042,9 @@ export function GameSessionPanel({
               syncMotionKey={motionSyncKey}
               onMotionSettled={handleMotionSettled}
               motionPending={motionPending}
+              busy={busy}
+              onCommand={sendCommand}
+              heatmap={boardHeatmap}
               centerContent={
                 <GameActionCenter
                   game={game}
@@ -832,7 +1054,13 @@ export function GameSessionPanel({
                   motionPending={motionPending}
                   visibleEvents={visibleEvents}
                   isHost={isHost}
+                  probabilityHeatmapVisible={heatmapMode === 'probability'}
                   onCommand={sendCommand}
+                  onToggleProbabilityHeatmap={() =>
+                    setHeatmapMode((mode) =>
+                      mode === 'probability' ? 'off' : 'probability',
+                    )
+                  }
                   onStart={() => void run(() => api.startGame(game.id))}
                 />
               }
@@ -897,6 +1125,12 @@ export function GameSessionPanel({
               icon={<HistoryRoundedIcon />}
               onClick={() => setMobilePanel('activity')}
             />
+            <BottomNavigationAction
+              value="chat"
+              label={t('chat.short')}
+              icon={<ForumRoundedIcon />}
+              onClick={() => setMobilePanel('chat')}
+            />
           </BottomNavigation>
           <Drawer
             anchor="bottom"
@@ -930,6 +1164,7 @@ export function GameSessionPanel({
               {mobilePanel === 'players' && playersContent}
               {mobilePanel === 'manage' && managementContent}
               {mobilePanel === 'activity' && activityContent}
+              {mobilePanel === 'chat' && chatContent}
             </Box>
           </Drawer>
         </>

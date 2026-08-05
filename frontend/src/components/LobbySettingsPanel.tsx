@@ -39,8 +39,8 @@ export function LobbySettingsPanel({
       <Typography fontWeight={800} sx={{ mb: 1 }}>
         {t('roomSettings')}
       </Typography>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-        <FormControl size="small" sx={{ minWidth: 180 }}>
+      <Stack spacing={1.25}>
+        <FormControl size="small" sx={{ width: '100%', minWidth: 0 }}>
           <InputLabel>{t('maximumPlayers')}</InputLabel>
           <Select
             value={maximum}
@@ -68,8 +68,20 @@ export function LobbySettingsPanel({
           </Select>
         </FormControl>
         <FormControlLabel
+          labelPlacement="start"
+          sx={{
+            m: 0,
+            width: '100%',
+            justifyContent: 'space-between',
+            gap: 1,
+            '& .MuiFormControlLabel-label': {
+              minWidth: 0,
+              overflowWrap: 'anywhere',
+            },
+          }}
           control={
             <Switch
+              sx={{ flexShrink: 0 }}
               checked={game.settings.allow_spectators}
               disabled={!isHost || busy || game.spectators.length > 0}
               onChange={(_, checked) =>
@@ -86,8 +98,20 @@ export function LobbySettingsPanel({
           {pack.manifest.configurable_rules.map((ruleName) => (
             <FormControlLabel
               key={ruleName}
+              labelPlacement="start"
+              sx={{
+                m: 0,
+                width: '100%',
+                justifyContent: 'space-between',
+                gap: 1,
+                '& .MuiFormControlLabel-label': {
+                  minWidth: 0,
+                  overflowWrap: 'anywhere',
+                },
+              }}
               control={
                 <Switch
+                  sx={{ flexShrink: 0 }}
                   checked={game.settings.rules[ruleName]}
                   disabled={!isHost || busy}
                   onChange={(_, checked) =>

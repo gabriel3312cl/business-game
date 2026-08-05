@@ -60,7 +60,12 @@ export interface PackManifest {
 export type CardEffect =
   | { type: 'cash'; amount: number }
   | { type: 'move_to'; tile_id: string; collect_start: boolean }
-  | { type: 'move_relative'; steps: number; collect_start: boolean }
+  | {
+      type: 'move_relative'
+      steps: number
+      collect_start: boolean
+      purchase_discount_percent?: number | null
+    }
   | {
       type: 'move_to_nearest'
       tile_kind: 'transport' | 'utility'
@@ -72,6 +77,16 @@ export type CardEffect =
   | { type: 'cash_each'; amount: number }
   | { type: 'go_to_jail' }
   | { type: 'get_out_of_jail' }
+  | { type: 'move_to_nearest_auction' }
+  | {
+      type: 'complete_groups_cash'
+      threshold: number
+      amount_if_at_least: number
+      amount_otherwise: number
+    }
+  | { type: 'owned_properties_cash'; amount_per_property: number }
+  | { type: 'mortgaged_properties_cash'; amount_per_property: number }
+  | { type: 'refinance_mortgage' }
 
 export interface CardDefinition {
   id: string
@@ -96,6 +111,7 @@ export interface TileDefinition {
   color?: string
   icon?: TileIcon
   icon_background?: TileIconBackground
+  asset_path?: string
   purchasable?: boolean
   price?: number
   base_rent?: number
@@ -106,6 +122,10 @@ export interface TileDefinition {
   rent_multipliers?: number[]
   amount?: number
   net_worth_percent?: number
+  complete_group_amount?: number
+  house_amount?: number
+  hotel_amount?: number
+  auction_minimum_bid?: number
   landing_effects?: CardEffect[]
 }
 
@@ -134,9 +154,20 @@ export interface TokenResponse {
   token_type: 'bearer'
 }
 
+export type BotPersonality =
+  | 'conservative'
+  | 'balanced'
+  | 'aggressive'
+  | 'negotiator'
+
+export type BotController = 'standard' | 'ai'
+
 export interface PlayerState {
   user_id: string
   display_name: string
+  is_bot: boolean
+  bot_personality: BotPersonality | null
+  bot_controller: BotController | null
   position: number
   balance: number
   bankrupt: boolean
@@ -173,6 +204,7 @@ export interface CardPaymentState {
 
 export interface AuctionState {
   property_id: string
+  minimum_bid: number
   current_bid: number
   current_bidder_id: string | null
   bid_deadline: string | null
@@ -262,6 +294,7 @@ export type GameCommand =
   | { action: 'end_turn' }
   | { action: 'bid'; amount: number }
   | { action: 'pass_auction' }
+  | { action: 'select_auction_property'; property_id: string }
   | { action: 'pay_jail_fine' }
   | { action: 'use_jail_card' }
   | { action: 'mortgage_property'; property_id: string }
@@ -295,6 +328,9 @@ export interface GameState {
   phase: 'waiting_for_roll' | 'buy_decision' | 'waiting_for_end'
   owners: Record<string, string>
   pending_tile_id: string | null
+  pending_purchase_discount_percent: number
+  pending_auction_selector_id: string | null
+  pending_auction_minimum_bid: number | null
   active_auction: AuctionState | null
   active_debt: DebtState | null
   pending_card_payments: CardPaymentState[]

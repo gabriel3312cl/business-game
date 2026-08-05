@@ -2,8 +2,19 @@ import CasinoRoundedIcon from '@mui/icons-material/CasinoRounded'
 import DoneRoundedIcon from '@mui/icons-material/DoneRounded'
 import GavelRoundedIcon from '@mui/icons-material/GavelRounded'
 import LocalPoliceRoundedIcon from '@mui/icons-material/LocalPoliceRounded'
+import QueryStatsRoundedIcon from '@mui/icons-material/QueryStatsRounded'
 import ShoppingCartRoundedIcon from '@mui/icons-material/ShoppingCartRounded'
-import { Box, Button, Chip, Stack, Typography } from '@mui/material'
+import {
+  Box,
+  Button,
+  Chip,
+  FormControl,
+  MenuItem,
+  Select,
+  Stack,
+  Typography,
+} from '@mui/material'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ContentPack, GameCommand, GameState, User } from '../types'
 import { Dice3D } from './Dice3D'
@@ -17,7 +28,9 @@ interface Props {
   motionPending: boolean
   visibleEvents: GameState['events']
   isHost: boolean
+  probabilityHeatmapVisible: boolean
   onCommand: (command: GameCommand) => Promise<boolean>
+  onToggleProbabilityHeatmap: () => void
   onStart: () => void
 }
 
@@ -29,7 +42,9 @@ export function GameActionCenter({
   motionPending,
   visibleEvents,
   isHost,
+  probabilityHeatmapVisible,
   onCommand,
+  onToggleProbabilityHeatmap,
   onStart,
 }: Props) {
   const { t } = useTranslation()
@@ -37,6 +52,20 @@ export function GameActionCenter({
   const isCurrentPlayer = currentPlayer?.user_id === user.id
   const pendingTile = pack.board.tiles.find(
     (tile) => tile.id === game.pending_tile_id,
+  )
+  const [auctionPropertyId, setAuctionPropertyId] = useState('')
+  const auctionCandidates = pack.board.tiles.filter(
+    (tile) =>
+      (tile.kind === 'property' ||
+        tile.kind === 'transport' ||
+        tile.kind === 'utility') &&
+      tile.purchasable !== false &&
+      game.owners[tile.id] === undefined,
+  )
+  const isSelectingAuction = game.pending_auction_selector_id === user.id
+  const pendingPrice = pendingTile?.price ?? 0
+  const discountedPrice = Math.floor(
+    (pendingPrice * (100 - game.pending_purchase_discount_percent)) / 100,
   )
   const latestDice = latestDiceResult(game)
 
@@ -127,7 +156,45 @@ export function GameActionCenter({
               flexWrap="wrap"
               justifyContent="center"
             >
-              {game.phase === 'waiting_for_roll' && (
+              {isSelectingAuction && (
+                <>
+                  <FormControl size="small" sx={{ minWidth: 210 }}>
+                    <Select
+                      value={auctionPropertyId}
+                      displayEmpty
+                      aria-label={t('selectAuctionProperty')}
+                      onChange={(event) => setAuctionPropertyId(event.target.value)}
+                    >
+                      <MenuItem value="" disabled>
+                        {t('selectAuctionProperty')}
+                      </MenuItem>
+                      {auctionCandidates.map((tile) => (
+                        <MenuItem key={tile.id} value={tile.id}>
+                          {pack.messages[tile.name_key]} · ${tile.price ?? 0}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    startIcon={<GavelRoundedIcon />}
+                    disabled={busy || auctionPropertyId === ''}
+                    onClick={() =>
+                      void onCommand({
+                        action: 'select_auction_property',
+                        property_id: auctionPropertyId,
+                      })
+                    }
+                    sx={{ minHeight: 44 }}
+                  >
+                    {t('startSelectedAuction', {
+                      amount: game.pending_auction_minimum_bid ?? 10,
+                    })}
+                  </Button>
+                </>
+              )}
+              {!isSelectingAuction && game.phase === 'waiting_for_roll' && (
                 <>
                   <Button
                     variant="contained"
@@ -144,6 +211,19 @@ export function GameActionCenter({
                     sx={{ minHeight: 44 }}
                   >
                     {currentPlayer.in_jail ? t('tryDoubles') : t('rollDice')}
+                  </Button>
+                  <Button
+                    variant={probabilityHeatmapVisible ? 'contained' : 'outlined'}
+                    color="info"
+                    size="small"
+                    startIcon={<QueryStatsRoundedIcon />}
+                    disabled={busy}
+                    onClick={onToggleProbabilityHeatmap}
+                    sx={{ minHeight: 44 }}
+                  >
+                    {probabilityHeatmapVisible
+                      ? t('heatmap.hideProbability')
+                      : t('heatmap.showProbability')}
                   </Button>
                   {currentPlayer.in_jail &&
                     currentPlayer.balance >= pack.manifest.jail_fine && (
@@ -177,7 +257,7 @@ export function GameActionCenter({
                     )}
                 </>
               )}
-              {game.phase === 'buy_decision' && (
+              {!isSelectingAuction && game.phase === 'buy_decision' && (
                 <>
                   <Button
                     variant="contained"
@@ -189,7 +269,7 @@ export function GameActionCenter({
                     }
                     sx={{ minHeight: 44 }}
                   >
-                    {t('buyFor', { price: pendingTile?.price ?? 0 })}
+                    {t('buyFor', { price: discountedPrice })}
                   </Button>
                   <Button
                     variant="outlined"
@@ -205,7 +285,7 @@ export function GameActionCenter({
                   </Button>
                 </>
               )}
-              {game.phase === 'waiting_for_end' && (
+              {!isSelectingAuction && game.phase === 'waiting_for_end' && (
                 <Button
                   variant="contained"
                   size="small"

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
@@ -18,13 +19,17 @@ from business_game.domain.models import (
     DeclareBankruptcyCommand,
     DeclinePropertyCommand,
     EndTurnCommand,
+    GameState,
+    GameStatus,
     MortgagePropertyCommand,
     OptionalRulesUpdate,
     PassAuctionCommand,
     PayDebtCommand,
     PayJailFineCommand,
+    PlayerState,
     ProposeTradeCommand,
     RollCommand,
+    SelectAuctionPropertyCommand,
     SellBuildingCommand,
     TurnPhase,
     UnmortgagePropertyCommand,
@@ -406,7 +411,7 @@ async def test_mortgage_and_unmortgage_use_pack_values(
             property_id="property_03",
         ),
     )
-    assert game.players[0].balance == balance_after_purchase + 45
+    assert game.players[0].balance == balance_after_purchase + 30
     assert game.mortgaged_property_ids == ["property_03"]
 
     game = await games.execute(
@@ -417,7 +422,7 @@ async def test_mortgage_and_unmortgage_use_pack_values(
             property_id="property_03",
         ),
     )
-    assert game.players[0].balance == balance_after_purchase - 5
+    assert game.players[0].balance == balance_after_purchase - 3
     assert game.mortgaged_property_ids == []
 
 
@@ -435,7 +440,7 @@ async def test_buildings_must_be_bought_and_sold_evenly(
     group_ids = [
         tile.id
         for tile in packs.load("classic-demo").board.tiles
-        if tile.group == "group_2"
+        if tile.group == "light_blue"
     ]
     async with session.begin():
         persisted = await GameRepository(session).get(game.id, for_update=True)
@@ -486,26 +491,21 @@ async def test_debt_can_be_paid_after_mortgaging_assets(
     await games.start(game.id, first.id)
     async with session.begin():
         persisted = await GameRepository(session).get(game.id, for_update=True)
-        persisted.players[0].balance = 50
+        persisted.players[0].balance = 5
         persisted.owners["property_01"] = first.id
-        persisted.owners["property_02"] = first.id
+        persisted.owners["property_03"] = first.id
         await GameRepository(session).save(persisted, len(persisted.events))
 
     game = await games.execute(game.id, first.id, RollCommand(action="roll"))
     assert game.active_debt is not None
-    assert game.active_debt.amount == 104
+    assert game.active_debt.amount == 12
 
-    await games.execute(
+    game = await games.execute(
         game.id,
         first.id,
         MortgagePropertyCommand(action="mortgage_property", property_id="property_01"),
     )
-    game = await games.execute(
-        game.id,
-        first.id,
-        MortgagePropertyCommand(action="mortgage_property", property_id="property_02"),
-    )
-    assert game.players[0].balance == 125
+    assert game.players[0].balance == 35
 
     game = await games.execute(
         game.id,
@@ -513,7 +513,7 @@ async def test_debt_can_be_paid_after_mortgaging_assets(
         PayDebtCommand(action="pay_debt"),
     )
     assert game.active_debt is None
-    assert game.players[0].balance == 21
+    assert game.players[0].balance == 23
 
 
 async def test_bankruptcy_transfers_assets_and_finishes_two_player_game(
@@ -645,8 +645,19 @@ async def test_card_draw_order_and_effect_are_persisted(
     games = GameService(
         session,
         PackLoader(packs_dir),
-        dice_roller=lambda: (4, 4),
-        card_shuffler=lambda card_ids: card_ids,
+        dice_roller=lambda: (3, 4),
+        card_shuffler=lambda card_ids: (
+            [
+                "opportunity_crossword",
+                *[
+                    card_id
+                    for card_id in card_ids
+                    if card_id != "opportunity_crossword"
+                ],
+            ]
+            if "opportunity_crossword" in card_ids
+            else card_ids
+        ),
     )
     game = await games.create("classic-demo", first)
     await games.join(game.id, second)
@@ -655,7 +666,7 @@ async def test_card_draw_order_and_effect_are_persisted(
     game = await games.execute(game.id, first.id, RollCommand(action="roll"))
     persisted = await games.get(game.id, first.id)
 
-    assert game.last_card_id == "opportunity_bonus"
+    assert game.last_card_id == "opportunity_crossword"
     assert game.players[0].balance == 1600
     assert persisted.deck_cursors["opportunity"] == 1
     assert persisted.events[-2].type == "card.drawn"
@@ -676,7 +687,7 @@ async def test_building_inventory_is_consumed_and_returned(
     group_ids = [
         tile.id
         for tile in packs.load("classic-demo").board.tiles
-        if tile.group == "group_2"
+        if tile.group == "light_blue"
     ]
     async with session.begin():
         persisted = await GameRepository(session).get(game.id, for_update=True)
@@ -730,7 +741,7 @@ async def test_bankruptcy_to_bank_starts_sequential_property_auctions(
         persisted = await GameRepository(session).get(game.id, for_update=True)
         persisted.players[0].balance = 0
         persisted.owners["property_01"] = debtor.id
-        persisted.owners["property_02"] = debtor.id
+        persisted.owners["property_03"] = debtor.id
         persisted.active_debt = DebtState(
             debtor_id=debtor.id,
             amount=500,
@@ -746,7 +757,7 @@ async def test_bankruptcy_to_bank_starts_sequential_property_auctions(
     )
     assert game.active_auction is not None
     assert game.active_auction.property_id == "property_01"
-    assert game.bank_auction_queue == ["property_02"]
+    assert game.bank_auction_queue == ["property_03"]
 
     await games.execute(
         game.id,
@@ -759,7 +770,7 @@ async def test_bankruptcy_to_bank_starts_sequential_property_auctions(
         PassAuctionCommand(action="pass_auction"),
     )
     assert game.active_auction is not None
-    assert game.active_auction.property_id == "property_02"
+    assert game.active_auction.property_id == "property_03"
 
     await games.execute(
         game.id,
@@ -779,7 +790,7 @@ async def test_bankruptcy_to_bank_starts_sequential_property_auctions(
     assert game is not None
     assert game.active_auction is None
     assert game.bank_auction_queue == []
-    assert game.owners["property_02"] == bidder.id
+    assert game.owners["property_03"] == bidder.id
 
 
 async def test_lobby_settings_control_players_and_spectators(
@@ -874,7 +885,7 @@ async def test_resignation_liquidates_assets_and_advances_the_turn(
         persisted = await GameRepository(session).get(game.id, for_update=True)
         persisted.players[0].balance = 0
         persisted.owners["property_01"] = first.id
-        persisted.owners["property_02"] = first.id
+        persisted.owners["property_03"] = first.id
         await GameRepository(session).save(persisted, len(persisted.events))
 
     game = await games.leave(game.id, first.id)
@@ -883,7 +894,7 @@ async def test_resignation_liquidates_assets_and_advances_the_turn(
     assert game.current_player.user_id == second.id
     assert game.active_auction is not None
     assert game.active_auction.property_id == "property_01"
-    assert game.bank_auction_queue == ["property_02"]
+    assert game.bank_auction_queue == ["property_03"]
     assert any(event.type == "player.resigned" for event in game.events)
 
 
@@ -1046,9 +1057,9 @@ async def test_repairs_card_uses_owned_house_and_hotel_counts(
         persisted = await GameRepository(session).get(game.id, for_update=True)
         previous_sequence = len(persisted.events)
         persisted.owners["property_01"] = first.id
-        persisted.owners["property_02"] = first.id
+        persisted.owners["property_03"] = first.id
         persisted.building_levels["property_01"] = 2
-        persisted.building_levels["property_02"] = 5
+        persisted.building_levels["property_03"] = 5
         persisted.deck_orders["community"] = [
             "community_repairs",
             *[
@@ -1210,8 +1221,119 @@ async def test_percentage_tax_uses_total_player_net_worth(
         await GameRepository(session).save(persisted, previous_sequence)
 
     game = await games.get(game.id, first.id)
-    assert game.players[0].balance == 883
-    assert game.events[-1].data["amount"] == 117
+    assert game.players[0].balance == 884
+    assert game.events[-1].data["amount"] == 116
+
+
+async def test_extended_board_auction_taxes_and_discounted_card_purchase(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    packs = PackLoader(packs_dir)
+    pack = packs.load("extended-demo")
+    first_id = uuid4()
+    second_id = uuid4()
+    first = PlayerState(user_id=first_id, display_name="First", balance=2800)
+    second = PlayerState(user_id=second_id, display_name="Second", balance=2800)
+    game = GameState(
+        host_user_id=first_id,
+        pack_id="extended-demo",
+        pack_version="2.0.0",
+        status=GameStatus.PLAYING,
+        players=[first, second],
+        houses_remaining=48,
+        hotels_remaining=18,
+    )
+    games = GameService(session, packs)
+
+    for property_id in ("property_01", "property_03", "property_05"):
+        game.owners[property_id] = first_id
+    game.building_levels["property_01"] = 2
+    game.building_levels["property_03"] = 5
+    assert games._tax_amount(game, first, pack.board.tiles[44]) == 50
+    assert games._tax_amount(game, first, pack.board.tiles[61]) == 125
+
+    games._resolve_landed_tile(game, first, "auction_13", 7)
+    assert game.pending_auction_selector_id == first_id
+    games._select_auction_property(game, first_id, "property_07")
+    assert game.active_auction is not None
+    assert game.active_auction.minimum_bid == 10
+    with pytest.raises(ConflictError, match="below the auction minimum"):
+        games._bid(game, first_id, 9)
+    games._bid(game, first_id, 10)
+    assert game.active_auction.current_bid == 10
+
+    game.active_auction = None
+    game.owners.clear()
+    first.balance = 2800
+    first.position = 0
+    advance_card = next(
+        card
+        for deck in pack.board.decks
+        for card in deck.cards
+        if card.id == "opportunity_advance_five"
+    )
+    games._remaining_effects = 8
+    games._apply_effect(
+        game,
+        first,
+        advance_card.resolved_effects()[0],
+        source_id=advance_card.id,
+    )
+    assert game.pending_tile_id == "property_05"
+    assert game.pending_purchase_discount_percent == 10
+    games._buy_property(game, first)
+    assert first.balance == 2728
+    assert game.owners["property_05"] == first_id
+
+
+async def test_extended_portfolio_cards_use_authoritative_owned_state(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    packs = PackLoader(packs_dir)
+    pack = packs.load("extended-demo")
+    player_id = uuid4()
+    player = PlayerState(user_id=player_id, display_name="Owner", balance=2800)
+    game = GameState(
+        host_user_id=player_id,
+        pack_id="extended-demo",
+        pack_version="2.0.0",
+        status=GameStatus.PLAYING,
+        players=[player],
+        owners={"property_01": player_id, "property_03": player_id},
+        mortgaged_property_ids=["property_03"],
+    )
+    games = GameService(session, packs)
+    cards = {
+        card.id: card
+        for deck in pack.board.decks
+        for card in deck.cards
+    }
+
+    games._remaining_effects = 8
+    games._apply_effect(
+        game,
+        player,
+        cards["community_audit"].resolved_effects()[0],
+        source_id="community_audit",
+    )
+    assert player.balance == 2750
+    games._apply_effect(
+        game,
+        player,
+        cards["community_renewal_subsidy"].resolved_effects()[0],
+        source_id="community_renewal_subsidy",
+    )
+    assert player.balance == 2800
+    games._apply_effect(
+        game,
+        player,
+        cards["community_refinance"].resolved_effects()[0],
+        source_id="community_refinance",
+    )
+    assert player.balance == 2770
+    assert game.mortgaged_property_ids == []
 
 
 @pytest.mark.parametrize("pack_id", ["classic-demo", "extended-demo"])
@@ -1239,7 +1361,24 @@ async def test_complete_match_reaches_a_winner_using_public_commands(
     )
     game = await games.create(pack_id, first)
     game = await games.join(game.id, second)
+    extra_players = [
+        await create_user(
+            session,
+            f"complete-extra-{index}-{pack_id}@example.com",
+            f"Extra {index}",
+        )
+        for index in range(2, packs.load(pack_id).manifest.min_players)
+    ]
+    for extra_player in extra_players:
+        game = await games.join(game.id, extra_player)
     game = await games.start(game.id, first.id)
+    if extra_players:
+        async with session.begin():
+            persisted = await GameRepository(session).get(game.id, for_update=True)
+            for player in persisted.players[2:]:
+                player.bankrupt = True
+            await GameRepository(session).save(persisted, len(persisted.events))
+            game = persisted
     tiles = {tile.id: tile for tile in packs.load(pack_id).board.tiles}
 
     for _command_number in range(2500):
@@ -1269,6 +1408,21 @@ async def test_complete_match_reaches_a_winner_using_public_commands(
                 game.id,
                 bidder_id,
                 PassAuctionCommand(action="pass_auction"),
+            )
+            continue
+        if game.pending_auction_selector_id is not None:
+            property_id = next(
+                tile.id
+                for tile in tiles.values()
+                if tile.is_purchasable and tile.id not in game.owners
+            )
+            game = await games.execute(
+                game.id,
+                game.pending_auction_selector_id,
+                SelectAuctionPropertyCommand(
+                    action="select_auction_property",
+                    property_id=property_id,
+                ),
             )
             continue
 

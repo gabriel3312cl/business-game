@@ -1,10 +1,8 @@
-import { Box, Typography } from '@mui/material'
+import { Box, Tooltip, Typography } from '@mui/material'
+import type { ReactNode } from 'react'
 import type { TileDefinition } from '../types'
-import {
-  defaultTileColor,
-  tileIconBackgroundStyle,
-  tileIconComponent,
-} from './tilePresentation'
+import { AssetGlyph, TileVisual } from './AssetVisual'
+import { defaultTileColor, tileIconBackgroundStyle } from './tilePresentation'
 
 interface BoardTileProps {
   tile: TileDefinition
@@ -15,6 +13,9 @@ interface BoardTileProps {
   compact: boolean
   tokens?: BoardToken[]
   owner?: BoardOwner
+  heatmap?: BoardTileHeatmap
+  tooltip: ReactNode
+  onClick: () => void
 }
 
 export type BoardEdge = 'top' | 'right' | 'bottom' | 'left' | 'corner'
@@ -24,6 +25,7 @@ export interface BoardToken {
   playerNumber: number
   displayName: string
   color: string
+  assetPath?: string
   active: boolean
   currentUser: boolean
 }
@@ -32,6 +34,13 @@ export interface BoardOwner {
   playerNumber: number
   displayName: string
   color: string
+  ariaLabel: string
+}
+
+export interface BoardTileHeatmap {
+  intensity: number
+  color: string
+  valueLabel: string
   ariaLabel: string
 }
 
@@ -44,18 +53,29 @@ export function BoardTile({
   compact,
   tokens = [],
   owner,
+  heatmap,
+  tooltip,
+  onClick,
 }: BoardTileProps) {
-  const Icon = tileIconComponent(tile.kind, tile.icon)
   const accent = tile.color ?? defaultTileColor(tile.kind)
   const verticalEdge = edge === 'left' || edge === 'right'
+  const propertyColorBand = tile.kind === 'property' && !tile.asset_path
   const priceLabel = tile.price != null ? `, $${tile.price}` : ''
   const ownerLabel = owner ? `, ${owner.ariaLabel}` : ''
+  const heatmapLabel = heatmap ? `, ${heatmap.ariaLabel}` : ''
 
   return (
+    <Tooltip
+      title={tooltip}
+      arrow
+      enterTouchDelay={300}
+      leaveTouchDelay={2500}
+    >
     <Box
-      role="group"
-      aria-label={`${name}${priceLabel}${ownerLabel}`}
-      title={name}
+      component="button"
+      type="button"
+      aria-label={`${name}${priceLabel}${ownerLabel}${heatmapLabel}`}
+      onClick={onClick}
       sx={{
         gridColumn,
         gridRow,
@@ -75,8 +95,65 @@ export function BoardTile({
           'inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)',
         position: 'relative',
         isolation: 'isolate',
+        p: 0,
+        color: 'inherit',
+        font: 'inherit',
+        cursor: 'pointer',
+        '&:focus-visible': {
+          outline: '2px solid #b8ff3d',
+          outlineOffset: -2,
+          zIndex: 5,
+        },
+        '&:hover': {
+          filter: 'brightness(1.12)',
+          zIndex: 4,
+        },
       }}
     >
+      {heatmap && (
+        <>
+          <Box
+            aria-hidden
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 2,
+              pointerEvents: 'none',
+              bgcolor: heatmap.color,
+              opacity: 0.12 + heatmap.intensity * 0.52,
+              boxShadow: `inset 0 0 0 2px ${heatmap.color}`,
+            }}
+          />
+          <Typography
+            component="span"
+            aria-hidden
+            sx={{
+              position: 'absolute',
+              top: { xs: 1, sm: 3 },
+              left: { xs: 1, sm: 3 },
+              zIndex: 4,
+              minWidth: { xs: 13, sm: 20 },
+              px: { xs: 0.2, sm: 0.45 },
+              py: 0.1,
+              borderRadius: 1,
+              bgcolor: 'rgba(9,7,17,.82)',
+              color: '#fff',
+              fontSize: {
+                xs: compact ? 5 : 6,
+                sm: compact ? 7 : 8,
+                md: compact ? 8 : 10,
+              },
+              lineHeight: 1.2,
+              fontWeight: 900,
+              textAlign: 'center',
+              pointerEvents: 'none',
+            }}
+          >
+            {heatmap.valueLabel}
+          </Typography>
+        </>
+      )}
+
       {owner && (
         <Box
           aria-hidden
@@ -119,17 +196,27 @@ export function BoardTile({
           aria-hidden
           sx={{
             flex: '0 0 auto',
-            width: {
-              xs: compact ? 12 : 14,
-              sm: verticalEdge ? (compact ? 16 : 19) : compact ? 18 : 23,
-              md: verticalEdge ? (compact ? 19 : 23) : compact ? 23 : 30,
-            },
-            height: {
-              xs: compact ? 12 : 14,
-              sm: verticalEdge ? (compact ? 16 : 19) : compact ? 18 : 23,
-              md: verticalEdge ? (compact ? 19 : 23) : compact ? 23 : 30,
-            },
-            ...tileIconBackgroundStyle(tile.icon_background, accent),
+            width: propertyColorBand
+              ? '100%'
+              : {
+                  xs: compact ? 12 : 14,
+                  sm: verticalEdge ? (compact ? 16 : 19) : compact ? 18 : 23,
+                  md: verticalEdge ? (compact ? 19 : 23) : compact ? 23 : 30,
+                },
+            height: propertyColorBand
+              ? { xs: 5, sm: compact ? 7 : 9, md: compact ? 9 : 12 }
+              : {
+                  xs: compact ? 12 : 14,
+                  sm: verticalEdge ? (compact ? 16 : 19) : compact ? 18 : 23,
+                  md: verticalEdge ? (compact ? 19 : 23) : compact ? 23 : 30,
+                },
+            ...(propertyColorBand
+              ? {
+                  bgcolor: accent,
+                  borderRadius: 0.5,
+                  boxShadow: 'inset 0 0 0 1px rgba(0,0,0,.18)',
+                }
+              : tileIconBackgroundStyle(tile.icon_background, accent)),
             display: 'grid',
             placeItems: 'center',
             '& svg': {
@@ -141,7 +228,13 @@ export function BoardTile({
             },
           }}
         >
-          <Icon fontSize="small" />
+          {!propertyColorBand && (
+            <TileVisual
+              kind={tile.kind}
+              icon={tile.icon}
+              assetPath={tile.asset_path}
+            />
+          )}
         </Box>
 
         <Typography
@@ -246,12 +339,17 @@ export function BoardTile({
                 },
               }}
             >
-              {token.playerNumber}
+              {token.assetPath ? (
+                <AssetGlyph path={token.assetPath} size="78%" />
+              ) : (
+                token.playerNumber
+              )}
             </Box>
           ))}
         </Box>
       )}
     </Box>
+    </Tooltip>
   )
 }
 

@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from business_game.application.board_service import BoardProjectService, PackResolver
 from business_game.application.pack_loader import PackLoader
 from business_game.application.services import GameService, UserService
-from business_game.domain.board_models import BoardProjectCreate, PublishBoardRequest
+from business_game.domain.board_models import (
+    BoardProjectCreate,
+    BoardProjectUpdate,
+    PublishBoardRequest,
+)
 from business_game.domain.models import (
     BidCommand,
     DeclinePropertyCommand,
@@ -121,7 +125,7 @@ async def test_postgres_persists_an_authoritative_auction(packs_dir: Path) -> No
             assert persisted.settings.max_players == 6
             assert persisted.settings.allow_spectators is True
             assert persisted.settings.rules.auction_unpurchased_properties
-            assert persisted.pack_version == "1.3.0"
+            assert persisted.pack_version == "2.0.0"
             assert persisted.spectators[0].user_id == spectator.id
             assert persisted.houses_remaining == 32
             assert persisted.hotels_remaining == 12
@@ -154,6 +158,7 @@ async def test_postgres_publishes_and_snapshots_a_custom_board(
     user_id = None
     project_id = None
     game_id = None
+    asset_id = None
     suffix = uuid4().hex
     try:
         async with sessions() as session:
@@ -180,6 +185,23 @@ async def test_postgres_publishes_and_snapshots_a_custom_board(
                 ),
             )
             project_id = draft.id
+            asset = await projects.upload_asset(
+                draft.id,
+                user.id,
+                filename="postgres.svg",
+                content_type="image/svg+xml",
+                payload=(
+                    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+                    b'<circle cx="5" cy="5" r="4"/></svg>'
+                ),
+            )
+            asset_id = asset.id
+            document_tiles[0]["asset_path"] = asset.path
+            draft = await projects.update(
+                draft.id,
+                user.id,
+                BoardProjectUpdate(revision=draft.revision, document=document),
+            )
             published = await projects.publish(
                 draft.id,
                 user.id,
@@ -207,6 +229,9 @@ async def test_postgres_publishes_and_snapshots_a_custom_board(
             assert persisted.pack_snapshot.manifest.schema_version == 5
             assert persisted.pack_snapshot.manifest.side_length == 5
             assert persisted.pack_snapshot.manifest.tile_count == 16
+            assert persisted.pack_snapshot.board.tiles[0].asset_path == (
+                f"/api/v1/board-assets/{asset_id}.svg"
+            )
             snapshot_tiles = {
                 tile.id: tile for tile in persisted.pack_snapshot.board.tiles
             }
@@ -221,6 +246,11 @@ async def test_postgres_publishes_and_snapshots_a_custom_board(
             )
             assert resolved.messages["pack.name"] == "Mi tablero"
             assert resolved.board.tiles[1].hotel_cost == 275
+            stored_asset = await BoardProjectService(session).get_asset_content(
+                asset_id
+            )
+            assert stored_asset.content_type == "image/svg+xml"
+            assert stored_asset.name == "postgres.svg"
     finally:
         if game_id is not None:
             async with sessions.begin() as session:
