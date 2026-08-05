@@ -17,7 +17,8 @@ interface Props {
   pack: ContentPack
   user: User
   busy: boolean
-  onCommand: (command: GameCommand) => Promise<void>
+  onCommand: (command: GameCommand) => Promise<boolean>
+  embedded?: boolean
 }
 
 export function PropertyManagementPanel({
@@ -26,6 +27,7 @@ export function PropertyManagementPanel({
   user,
   busy,
   onCommand,
+  embedded = false,
 }: Props) {
   const { t } = useTranslation()
   const propertyIds = Object.entries(game.owners)
@@ -36,7 +38,7 @@ export function PropertyManagementPanel({
 
   return (
     <Box>
-      <Divider sx={{ mb: 2 }} />
+      {!embedded && <Divider sx={{ mb: 2 }} />}
       <Typography fontWeight={800} sx={{ mb: 1 }}>
         <ApartmentRoundedIcon fontSize="small" sx={{ verticalAlign: 'middle', mr: 1 }} />
         {t('propertyManagement')}
@@ -56,9 +58,8 @@ export function PropertyManagementPanel({
           return (
             <Paper key={propertyId} variant="outlined" sx={{ p: 1.5 }}>
               <Stack
-                direction={{ xs: 'column', md: 'row' }}
+                direction="column"
                 spacing={1}
-                alignItems={{ md: 'center' }}
               >
                 <Box sx={{ flexGrow: 1 }}>
                   <Typography fontWeight={700}>
@@ -79,63 +80,74 @@ export function PropertyManagementPanel({
                     )}
                   </Stack>
                 </Box>
-                {mortgaged ? (
-                  <Button
-                    size="small"
-                    disabled={busy || game.active_debt !== null}
-                    onClick={() =>
-                      void onCommand({
-                        action: 'unmortgage_property',
-                        property_id: propertyId,
-                      })
-                    }
-                  >
-                    {t('unmortgage')}
-                  </Button>
-                ) : (
-                  <Button
-                    size="small"
-                    disabled={busy || level > 0}
-                    onClick={() =>
-                      void onCommand({
-                        action: 'mortgage_property',
-                        property_id: propertyId,
-                      })
-                    }
-                  >
-                    {t('mortgageFor', { amount: tile.mortgage_value ?? 0 })}
-                  </Button>
-                )}
-                {tile.kind === 'property' && (
-                  <>
+                <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+                  {mortgaged ? (
                     <Button
                       size="small"
-                      disabled={busy || mortgaged || level >= 5 || game.active_debt !== null}
+                      disabled={busy || game.active_debt !== null}
                       onClick={() =>
                         void onCommand({
-                          action: 'build_property',
+                          action: 'unmortgage_property',
                           property_id: propertyId,
                         })
                       }
                     >
-                      {level === 4
-                        ? t('buyHotel', { amount: tile.build_cost ?? 0 })
-                        : t('buyHouse', { amount: tile.build_cost ?? 0 })}
+                      {t('unmortgage')}
                     </Button>
+                  ) : (
                     <Button
                       size="small"
-                      disabled={busy || level === 0}
+                      disabled={busy || level > 0}
                       onClick={() =>
                         void onCommand({
-                          action: 'sell_building',
+                          action: 'mortgage_property',
                           property_id: propertyId,
                         })
                       }
                     >
-                      {t('sellBuilding')}
+                      {t('mortgageFor', {
+                        amount: tile.mortgage_value ?? 0,
+                      })}
                     </Button>
-                  </>
-                )}
+                  )}
+                  {tile.kind === 'property' && (
+                    <>
+                      <Button
+                        size="small"
+                        disabled={
+                          busy ||
+                          mortgaged ||
+                          level >= 5 ||
+                          game.active_debt !== null
+                        }
+                        onClick={() =>
+                          void onCommand({
+                            action: 'build_property',
+                            property_id: propertyId,
+                          })
+                        }
+                      >
+                        {level === 4
+                          ? t('buyHotel', {
+                              amount: tile.hotel_cost ?? tile.build_cost ?? 0,
+                            })
+                          : t('buyHouse', { amount: tile.build_cost ?? 0 })}
+                      </Button>
+                      <Button
+                        size="small"
+                        disabled={busy || level === 0}
+                        onClick={() =>
+                          void onCommand({
+                            action: 'sell_building',
+                            property_id: propertyId,
+                          })
+                        }
+                      >
+                        {t('sellBuilding')}
+                      </Button>
+                    </>
+                  )}
+                </Stack>
               </Stack>
             </Paper>
           )

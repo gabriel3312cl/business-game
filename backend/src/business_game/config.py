@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     )
     jwt_secret: str = "development-only-change-this-secret"
     access_token_minutes: int = 30
+    session_days: int = 30
+    session_cookie_name: str = "business_game_session"
     packs_dir: Path = Path(__file__).resolve().parents[3] / "content" / "packs"
 
     @model_validator(mode="after")

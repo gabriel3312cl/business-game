@@ -14,6 +14,8 @@ Esta primera entrega contiene:
 
 - API FastAPI con CRUD básico de usuarios.
 - Registro e inicio de sesión con JWT y contraseñas Argon2.
+- Sesiones persistentes y revocables mediante cookie HttpOnly, con renovación
+  automática del token de acceso.
 - Salas configurables con límite de jugadores, espectadores de solo lectura,
   transferencia de anfitrión, salida del lobby y renuncia durante una partida.
 - Secuencia jugable: entrar, iniciar, lanzar dados, comprar y terminar turno.
@@ -32,9 +34,20 @@ Esta primera entrega contiene:
 - PostgreSQL con migraciones Alembic, snapshots y eventos append-only.
 - Contrato validado para paquetes de tablero, reglas, mazos e i18n.
 - Paquetes demostrativos de 40 y 64 casillas con nombres ficticios.
-- Interfaz React/MUI con fichas sincronizadas, historial localizado, recuperación
-  de la partida tras recargar, selector de tablero, zoom, sala, subastas,
-  espectadores, intercambios y gestión de propiedades.
+- Creador visual de tableros cuadrados de 5×5 a 30×30. Un tablero N×N
+  contiene `4N - 4` casillas porque las cuatro esquinas son compartidas:
+  10×10 genera 36 casillas y 30×30 genera 116.
+- Borradores privados persistentes con guardado por revisión, validación cruzada,
+  versiones publicadas inmutables y selección del paquete publicado al crear una
+  partida.
+- Edición de economía, grupos, propiedades, transportes, servicios, esquinas,
+  mazos y efectos declarativos de cartas o casillas, sin ejecutar código
+  proporcionado por el usuario.
+- Interfaz React/MUI responsive con el tablero como área central, fichas
+  sincronizadas, recuperación de la partida tras recargar o reconectar, railes
+  laterales en escritorio y paneles inferiores en móvil.
+- Dados 3D, movimiento de fichas casilla por casilla y acciones de aterrizaje
+  reveladas solamente cuando termina la animación visible.
 
 ## Desarrollo
 

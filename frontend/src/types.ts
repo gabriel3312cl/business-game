@@ -11,8 +11,28 @@ export type TileKind =
   | 'transport'
   | 'utility'
 
+export type TileIcon =
+  | 'flag'
+  | 'bank'
+  | 'gavel'
+  | 'question'
+  | 'police'
+  | 'weekend'
+  | 'train'
+  | 'bolt'
+  | 'ticket'
+  | 'star'
+  | 'money'
+  | 'home'
+  | 'store'
+  | 'gift'
+  | 'car'
+  | 'plane'
+
+export type TileIconBackground = 'circle' | 'rounded' | 'square' | 'none'
+
 export interface PackManifest {
-  schema_version: 4
+  schema_version: 4 | 5
   id: string
   version: string
   name_key: string
@@ -56,11 +76,14 @@ export type CardEffect =
 export interface CardDefinition {
   id: string
   message_key: string
-  effect: CardEffect
+  title_key?: string
+  effect?: CardEffect
+  effects?: CardEffect[]
 }
 
 export interface CardDeckDefinition {
   id: string
+  name_key?: string
   cards: CardDefinition[]
 }
 
@@ -71,13 +94,19 @@ export interface TileDefinition {
   deck_id?: string
   group?: string
   color?: string
+  icon?: TileIcon
+  icon_background?: TileIconBackground
+  purchasable?: boolean
   price?: number
   base_rent?: number
   mortgage_value?: number
   build_cost?: number
+  hotel_cost?: number
   rent_levels?: number[]
   rent_multipliers?: number[]
   amount?: number
+  net_worth_percent?: number
+  landing_effects?: CardEffect[]
 }
 
 export interface ContentPack {
@@ -85,6 +114,7 @@ export interface ContentPack {
   board: {
     tiles: TileDefinition[]
     decks: CardDeckDefinition[]
+    groups?: Array<{ id: string; name_key: string; color: string }>
   }
   messages: Record<string, string>
 }
@@ -100,6 +130,7 @@ export interface User {
 
 export interface TokenResponse {
   access_token: string
+  user_id: string
   token_type: 'bearer'
 }
 
@@ -144,6 +175,7 @@ export interface AuctionState {
   property_id: string
   current_bid: number
   current_bidder_id: string | null
+  bid_deadline: string | null
   eligible_player_ids: string[]
   passed_player_ids: string[]
 }

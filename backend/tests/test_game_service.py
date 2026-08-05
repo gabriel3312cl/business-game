@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,13 @@ async def test_first_playable_turn(
     game = await games.execute(game.id, first.id, RollCommand(action="roll"))
     assert game.players[0].position == 3
     assert game.pending_tile_id == "property_03"
+    roll_event = game.events[-1]
+    assert roll_event.type == "dice.rolled"
+    assert roll_event.data["from_position"] == 0
+    assert roll_event.data["to_position"] == 3
+    assert roll_event.data["position"] == 3
+    assert roll_event.data["steps"] == 3
+    assert roll_event.data["movement"] == "step"
 
     previous_balance = game.players[0].balance
     game = await games.execute(
@@ -135,9 +143,15 @@ async def test_declined_property_is_sold_by_authoritative_auction(
     packs_dir: Path,
     session: AsyncSession,
 ) -> None:
+    current_time = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
     first = await create_user(session, "auctioneer@example.com", "Auctioneer")
     second = await create_user(session, "bidder@example.com", "Bidder")
-    games = GameService(session, PackLoader(packs_dir), dice_roller=lambda: (1, 2))
+    games = GameService(
+        session,
+        PackLoader(packs_dir),
+        dice_roller=lambda: (1, 2),
+        clock=lambda: current_time,
+    )
     game = await games.create("classic-demo", first)
     await games.join(game.id, second)
     await games.start(game.id, first.id)
@@ -156,17 +170,132 @@ async def test_declined_property_is_sold_by_authoritative_auction(
         second.id,
         BidCommand(action="bid", amount=90),
     )
+    assert game.active_auction is not None
+    deadline = game.active_auction.bid_deadline
+    assert deadline == current_time + timedelta(seconds=5)
     game = await games.execute(
         game.id,
         first.id,
         PassAuctionCommand(action="pass_auction"),
     )
+    assert game.active_auction is not None
 
+    current_time += timedelta(seconds=5)
+    game = await games.settle_expired_auction(game.id, deadline)
+    assert game is not None
     assert game.active_auction is None
     assert game.owners["property_03"] == second.id
     assert next(player for player in game.players if player.user_id == second.id).balance == 1410
     assert game.current_player.user_id == first.id
     assert game.phase.value == "waiting_for_end"
+
+
+async def test_new_bid_resets_auction_deadline_and_stale_timer_cannot_settle(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    current_time = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
+    first = await create_user(session, "reset-host@example.com", "Host")
+    second = await create_user(session, "reset-bidder@example.com", "Bidder")
+    games = GameService(
+        session,
+        PackLoader(packs_dir),
+        dice_roller=lambda: (1, 2),
+        clock=lambda: current_time,
+    )
+    game = await games.create("classic-demo", first)
+    await games.join(game.id, second)
+    await games.start(game.id, first.id)
+    await games.execute(game.id, first.id, RollCommand(action="roll"))
+    await games.execute(
+        game.id,
+        first.id,
+        DeclinePropertyCommand(action="decline_property"),
+    )
+
+    game = await games.execute(
+        game.id,
+        second.id,
+        BidCommand(action="bid", amount=50),
+    )
+    assert game.active_auction is not None
+    first_deadline = game.active_auction.bid_deadline
+    assert first_deadline is not None
+
+    current_time += timedelta(seconds=4)
+    game = await games.execute(
+        game.id,
+        first.id,
+        BidCommand(action="bid", amount=60),
+    )
+    assert game.active_auction is not None
+    second_deadline = game.active_auction.bid_deadline
+    assert second_deadline == first_deadline + timedelta(seconds=4)
+
+    current_time += timedelta(seconds=1)
+    assert await games.settle_expired_auction(game.id, first_deadline) is None
+    persisted = await games.get(game.id, first.id)
+    assert persisted.active_auction is not None
+    assert persisted.active_auction.current_bidder_id == first.id
+    assert "property_03" not in persisted.owners
+    await session.rollback()
+
+    current_time += timedelta(seconds=4)
+    settled = await games.settle_expired_auction(game.id, second_deadline)
+    assert settled is not None
+    assert settled.active_auction is None
+    assert settled.owners["property_03"] == first.id
+    assert settled.players[0].balance == 1440
+    bids = [event for event in settled.events if event.type == "auction.bid_placed"]
+    assert [(event.data["player_id"], event.data["amount"]) for event in bids] == [
+        (str(second.id), 50),
+        (str(first.id), 60),
+    ]
+
+
+async def test_bid_at_or_after_deadline_is_rejected(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    current_time = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
+    first = await create_user(session, "late-host@example.com", "Host")
+    second = await create_user(session, "late-bidder@example.com", "Bidder")
+    games = GameService(
+        session,
+        PackLoader(packs_dir),
+        dice_roller=lambda: (1, 2),
+        clock=lambda: current_time,
+    )
+    game = await games.create("classic-demo", first)
+    await games.join(game.id, second)
+    await games.start(game.id, first.id)
+    await games.execute(game.id, first.id, RollCommand(action="roll"))
+    await games.execute(
+        game.id,
+        first.id,
+        DeclinePropertyCommand(action="decline_property"),
+    )
+    game = await games.execute(
+        game.id,
+        second.id,
+        BidCommand(action="bid", amount=50),
+    )
+    assert game.active_auction is not None
+    deadline = game.active_auction.bid_deadline
+    assert deadline is not None
+
+    current_time = deadline
+    with pytest.raises(ConflictError, match="bidding window has expired"):
+        await games.execute(
+            game.id,
+            first.id,
+            BidCommand(action="bid", amount=60),
+        )
+
+    settled = await games.settle_expired_auction(game.id, deadline)
+    assert settled is not None
+    assert settled.owners["property_03"] == second.id
+    assert settled.players[1].balance == 1450
 
 
 async def test_auction_can_finish_without_a_bid(
@@ -451,8 +580,20 @@ async def test_three_consecutive_doubles_send_player_to_jail(
     assert game.players[0].in_jail
     assert game.players[0].position == 10
     assert game.phase.value == "waiting_for_end"
+    roll_event = game.events[-2]
+    assert roll_event.type == "dice.rolled"
+    assert roll_event.data["from_position"] == 20
+    assert roll_event.data["to_position"] == 20
+    assert roll_event.data["position"] == 20
+    assert roll_event.data["steps"] == 0
+    assert roll_event.data["movement"] == "step"
     assert game.events[-1].type == "jail.entered"
     assert game.events[-1].data["reason"] == "consecutive_doubles"
+    assert game.events[-1].data["from_position"] == 20
+    assert game.events[-1].data["to_position"] == 10
+    assert game.events[-1].data["position"] == 10
+    assert game.events[-1].data["steps"] == 0
+    assert game.events[-1].data["movement"] == "teleport"
 
 
 async def test_jail_can_be_left_with_fine_or_held_card(
@@ -572,10 +713,15 @@ async def test_bankruptcy_to_bank_starts_sequential_property_auctions(
     packs_dir: Path,
     session: AsyncSession,
 ) -> None:
+    current_time = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
     debtor = await create_user(session, "bank-debtor@example.com", "Debtor")
     bidder = await create_user(session, "bank-bidder@example.com", "Bidder")
     other = await create_user(session, "bank-other@example.com", "Other")
-    games = GameService(session, PackLoader(packs_dir))
+    games = GameService(
+        session,
+        PackLoader(packs_dir),
+        clock=lambda: current_time,
+    )
     game = await games.create("classic-demo", debtor)
     await games.join(game.id, bidder)
     await games.join(game.id, other)
@@ -625,6 +771,12 @@ async def test_bankruptcy_to_bank_starts_sequential_property_auctions(
         other.id,
         PassAuctionCommand(action="pass_auction"),
     )
+    assert game.active_auction is not None
+    deadline = game.active_auction.bid_deadline
+    assert deadline is not None
+    current_time += timedelta(seconds=5)
+    game = await games.settle_expired_auction(game.id, deadline)
+    assert game is not None
     assert game.active_auction is None
     assert game.bank_auction_queue == []
     assert game.owners["property_02"] == bidder.id
@@ -829,6 +981,17 @@ async def test_card_movement_supports_relative_and_nearest_destinations(
     assert game.players[0].position == 5
     assert game.players[0].balance == 1650
     assert game.players[1].balance == 1550
+    nearest_move = next(
+        event
+        for event in reversed(game.events)
+        if event.type == "card.player_moved"
+        and event.data["card_id"] == "opportunity_nearest_transport"
+    )
+    assert nearest_move.data["from_position"] == 38
+    assert nearest_move.data["to_position"] == 5
+    assert nearest_move.data["position"] == 5
+    assert nearest_move.data["steps"] == 7
+    assert nearest_move.data["movement"] == "step"
 
     await session.rollback()
     async with session.begin():
@@ -849,6 +1012,17 @@ async def test_card_movement_supports_relative_and_nearest_destinations(
 
     game = await games.get(game.id, first.id)
     assert game.players[0].position == 5
+    backward_move = next(
+        event
+        for event in reversed(game.events)
+        if event.type == "card.player_moved"
+        and event.data["card_id"] == "opportunity_back"
+    )
+    assert backward_move.data["from_position"] == 8
+    assert backward_move.data["to_position"] == 5
+    assert backward_move.data["position"] == 5
+    assert backward_move.data["steps"] == -3
+    assert backward_move.data["movement"] == "step"
 
 
 async def test_repairs_card_uses_owned_house_and_hotel_counts(
@@ -991,6 +1165,53 @@ async def test_free_parking_rule_collects_bank_charges(
     assert game.bank_pot == 0
     assert game.players[0].balance == 1500
     assert game.events[-1].type == "free_parking.collected"
+
+
+async def test_percentage_tax_uses_total_player_net_worth(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    first = await create_user(session, "net-worth-tax@example.com", "Taxpayer")
+    second = await create_user(session, "net-worth-tax-guest@example.com", "Guest")
+    games = GameService(session, PackLoader(packs_dir))
+    game = await games.create("classic-demo", first)
+    await games.join(game.id, second)
+    await games.start(game.id, first.id)
+
+    async with session.begin():
+        persisted = await GameRepository(session).get(game.id, for_update=True)
+        pack = games._pack(persisted)
+        tax_tile = next(tile for tile in pack.board.tiles if tile.id == "tax_04")
+        percentage_tax = tax_tile.model_copy(
+            update={"amount": None, "net_worth_percent": 10}
+        )
+        persisted.pack_snapshot = pack.model_copy(
+            update={
+                "board": pack.board.model_copy(
+                    update={
+                        "tiles": [
+                            percentage_tax if tile.id == tax_tile.id else tile
+                            for tile in pack.board.tiles
+                        ]
+                    }
+                )
+            }
+        )
+        persisted.players[0].balance = 1000
+        persisted.owners["property_01"] = first.id
+        persisted.building_levels["property_01"] = 2
+        previous_sequence = len(persisted.events)
+        games._resolve_landed_tile(
+            persisted,
+            persisted.players[0],
+            "tax_04",
+            0,
+        )
+        await GameRepository(session).save(persisted, previous_sequence)
+
+    game = await games.get(game.id, first.id)
+    assert game.players[0].balance == 883
+    assert game.events[-1].data["amount"] == 117
 
 
 @pytest.mark.parametrize("pack_id", ["classic-demo", "extended-demo"])

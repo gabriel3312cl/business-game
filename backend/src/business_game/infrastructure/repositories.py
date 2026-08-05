@@ -1,11 +1,13 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.domain.errors import NotFoundError
-from business_game.domain.models import GameEvent, GameState, User
+from business_game.domain.models import ContentPack, GameEvent, GameState, User
 from business_game.infrastructure.db_models import (
+    AuthSessionRecord,
     GameEventRecord,
     GameRecord,
     UserRecord,
@@ -80,6 +82,50 @@ class UserRepository:
         )
 
 
+class AuthSessionRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(
+        self,
+        *,
+        user_id: UUID,
+        token_hash: str,
+        expires_at: datetime,
+    ) -> None:
+        self.session.add(
+            AuthSessionRecord(
+                user_id=user_id,
+                token_hash=token_hash,
+                expires_at=expires_at,
+            )
+        )
+        await self.session.flush()
+
+    async def get_active(self, token_hash: str) -> AuthSessionRecord | None:
+        statement = (
+            select(AuthSessionRecord)
+            .where(
+                AuthSessionRecord.token_hash == token_hash,
+                AuthSessionRecord.revoked_at.is_(None),
+                AuthSessionRecord.expires_at > datetime.now(UTC),
+            )
+            .with_for_update()
+        )
+        return await self.session.scalar(statement)
+
+    async def touch(self, record: AuthSessionRecord) -> None:
+        record.last_used_at = datetime.now(UTC)
+        await self.session.flush()
+
+    async def revoke(self, token_hash: str) -> None:
+        record = await self.get_active(token_hash)
+        if record is None:
+            return
+        record.revoked_at = datetime.now(UTC)
+        await self.session.flush()
+
+
 class GameRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -91,6 +137,11 @@ class GameRepository:
             pack_version=game.pack_version,
             status=game.status.value,
             state=game.model_dump(mode="json"),
+            pack_snapshot=(
+                game.pack_snapshot.model_dump(mode="json")
+                if game.pack_snapshot is not None
+                else None
+            ),
         )
         self.session.add(record)
         await self.session.flush()
@@ -104,7 +155,39 @@ class GameRepository:
         record = await self.session.scalar(statement)
         if record is None:
             raise NotFoundError("game was not found")
-        return GameState.model_validate(record.state)
+        game = GameState.model_validate(record.state)
+        if record.pack_snapshot is not None:
+            game.pack_snapshot = ContentPack.model_validate(record.pack_snapshot)
+        return game
+
+    async def list_active_for_user(self, user_id: UUID) -> list[GameState]:
+        statement = (
+            select(GameRecord)
+            .where(GameRecord.status.in_(("lobby", "playing")))
+            .order_by(GameRecord.updated_at.desc(), GameRecord.id)
+        )
+        records = (await self.session.scalars(statement)).all()
+        games = [self._to_domain(record) for record in records]
+        return [
+            game
+            for game in games
+            if any(
+                player.user_id == user_id and not player.bankrupt
+                for player in game.players
+            )
+            or any(spectator.user_id == user_id for spectator in game.spectators)
+        ]
+
+    async def list_with_scheduled_auctions(self) -> list[GameState]:
+        statement = select(GameRecord).where(GameRecord.status == "playing")
+        records = (await self.session.scalars(statement)).all()
+        games = [self._to_domain(record) for record in records]
+        return [
+            game
+            for game in games
+            if game.active_auction is not None
+            and game.active_auction.bid_deadline is not None
+        ]
 
     async def save(self, game: GameState, previous_sequence: int) -> None:
         record = await self.session.get(GameRecord, game.id)
@@ -112,12 +195,24 @@ class GameRepository:
             raise NotFoundError("game was not found")
         record.status = game.status.value
         record.state = game.model_dump(mode="json")
+        record.pack_snapshot = (
+            game.pack_snapshot.model_dump(mode="json")
+            if game.pack_snapshot is not None
+            else None
+        )
         record.version += 1
         self._add_events(
             game.id,
             [event for event in game.events if event.sequence > previous_sequence],
         )
         await self.session.flush()
+
+    @staticmethod
+    def _to_domain(record: GameRecord) -> GameState:
+        game = GameState.model_validate(record.state)
+        if record.pack_snapshot is not None:
+            game.pack_snapshot = ContentPack.model_validate(record.pack_snapshot)
+        return game
 
     def _add_events(self, game_id: UUID, events: list[GameEvent]) -> None:
         self.session.add_all(

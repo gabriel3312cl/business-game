@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -39,3 +41,11 @@ def decode_access_token(token: str) -> UUID:
         return UUID(payload["sub"])
     except (InvalidTokenError, KeyError, TypeError, ValueError) as exc:
         raise UnauthorizedError("invalid or expired access token") from exc
+
+
+def create_session_token() -> str:
+    return secrets.token_urlsafe(48)
+
+
+def hash_session_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

@@ -1,3 +1,5 @@
+import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -40,3 +42,32 @@ def test_loads_classic_and_extended_topologies(packs_dir: Path) -> None:
 def test_rejects_an_unavailable_pack_version(packs_dir: Path) -> None:
     with pytest.raises(NotFoundError, match="version '0.9.0'"):
         PackLoader(packs_dir).load("classic-demo", version="0.9.0")
+
+
+def test_optional_deck_and_card_i18n_keys_are_validated_and_preserved(
+    packs_dir: Path,
+    tmp_path: Path,
+) -> None:
+    pack_dir = tmp_path / "classic-demo"
+    shutil.copytree(packs_dir / "classic-demo", pack_dir)
+    board_path = pack_dir / "board.json"
+    board = json.loads(board_path.read_text())
+    deck = board["decks"][0]
+    deck["name_key"] = "deck.custom.name"
+    deck["cards"][0]["title_key"] = "card.custom.title"
+    board_path.write_text(json.dumps(board))
+
+    messages_path = pack_dir / "locales" / "es.json"
+    messages = json.loads(messages_path.read_text())
+    messages["deck.custom.name"] = "Mazo personalizado"
+    messages_path.write_text(json.dumps(messages))
+
+    with pytest.raises(ValueError, match="card.custom.title"):
+        PackLoader(tmp_path).load("classic-demo", locale="es")
+
+    messages["card.custom.title"] = "Título personalizado"
+    messages_path.write_text(json.dumps(messages))
+    loaded = PackLoader(tmp_path).load("classic-demo", locale="es")
+
+    assert loaded.board.decks[0].name_key == "deck.custom.name"
+    assert loaded.board.decks[0].cards[0].title_key == "card.custom.title"

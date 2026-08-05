@@ -1,16 +1,20 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Query, Response, status
+from fastapi import APIRouter, Body, Depends, Query, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from business_game.api.dependencies import (
     get_current_user,
     get_game_service,
+    get_pack_resolver,
+    get_session_service,
     get_user_service,
-    pack_loader,
 )
-from business_game.application.services import GameService, UserService
+from business_game.application.board_service import PackResolver
+from business_game.application.services import GameService, SessionService, UserService
+from business_game.config import settings
+from business_game.domain.errors import UnauthorizedError
 from business_game.domain.models import (
     ContentPack,
     CreateGameRequest,
@@ -23,7 +27,7 @@ from business_game.domain.models import (
     UserCreate,
     UserUpdate,
 )
-from business_game.realtime import sio
+from business_game.realtime import sio, sync_auction_timer
 from business_game.security import create_access_token
 
 router = APIRouter(prefix="/api/v1")
@@ -35,16 +39,20 @@ def health() -> dict[str, str]:
 
 
 @router.get("/packs", response_model=list[PackManifest])
-def list_packs() -> list[PackManifest]:
-    return pack_loader.list()
+async def list_packs(
+    packs: Annotated[PackResolver, Depends(get_pack_resolver)],
+) -> list[PackManifest]:
+    return await packs.list()
 
 
 @router.get("/packs/{pack_id}", response_model=ContentPack)
-def get_pack(
+async def get_pack(
     pack_id: str,
+    packs: Annotated[PackResolver, Depends(get_pack_resolver)],
     locale: Annotated[str | None, Query()] = None,
+    version: Annotated[str | None, Query(pattern=r"^\d+\.\d+\.\d+$")] = None,
 ) -> ContentPack:
-    return pack_loader.load(pack_id, locale)
+    return await packs.load(pack_id, locale=locale, version=version)
 
 
 @router.post(
@@ -62,10 +70,52 @@ async def register(
 @router.post("/auth/token", response_model=TokenResponse)
 async def login(
     form: Annotated[OAuth2PasswordRequestForm, Depends()],
+    response: Response,
     users: Annotated[UserService, Depends(get_user_service)],
+    sessions: Annotated[SessionService, Depends(get_session_service)],
 ) -> TokenResponse:
     user = await users.authenticate(form.username, form.password)
-    return TokenResponse(access_token=create_access_token(user.id))
+    session_token = await sessions.create(user.id)
+    _set_session_cookie(response, session_token)
+    return TokenResponse(
+        access_token=create_access_token(user.id),
+        user_id=user.id,
+    )
+
+
+@router.post("/auth/refresh", response_model=TokenResponse)
+async def refresh_session(
+    request: Request,
+    sessions: Annotated[SessionService, Depends(get_session_service)],
+) -> TokenResponse:
+    session_token = request.cookies.get(settings.session_cookie_name)
+    if not session_token:
+        raise UnauthorizedError("persistent session is required")
+    user = await sessions.resolve(session_token)
+    return TokenResponse(
+        access_token=create_access_token(user.id),
+        user_id=user.id,
+    )
+
+
+@router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    request: Request,
+    response: Response,
+    sessions: Annotated[SessionService, Depends(get_session_service)],
+) -> Response:
+    session_token = request.cookies.get(settings.session_cookie_name)
+    if session_token:
+        await sessions.revoke(session_token)
+    response.delete_cookie(
+        settings.session_cookie_name,
+        path="/",
+        secure=settings.environment == "production",
+        httponly=True,
+        samesite="strict",
+    )
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
 
 
 @router.get("/auth/me", response_model=User)
@@ -97,7 +147,15 @@ async def create_game(
     current_user: Annotated[User, Depends(get_current_user)],
     games: Annotated[GameService, Depends(get_game_service)],
 ) -> GameState:
-    return await games.create(data.pack_id, current_user)
+    return await games.create(data.pack_id, current_user, data.version)
+
+
+@router.get("/games/me/active", response_model=list[GameState])
+async def list_active_games(
+    current_user: Annotated[User, Depends(get_current_user)],
+    games: Annotated[GameService, Depends(get_game_service)],
+) -> list[GameState]:
+    return await games.list_active(current_user.id)
 
 
 @router.get("/games/{game_id}", response_model=GameState)
@@ -118,6 +176,18 @@ async def join_game(
     game = await games.join(game_id, current_user)
     await sio.emit("game_state", game.model_dump(mode="json"), room=str(game_id))
     return game
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        settings.session_cookie_name,
+        token,
+        max_age=settings.session_days * 24 * 60 * 60,
+        path="/",
+        secure=settings.environment == "production",
+        httponly=True,
+        samesite="strict",
+    )
 
 
 @router.post("/games/{game_id}/spectators", response_model=GameState)
@@ -150,6 +220,7 @@ async def leave_game(
     games: Annotated[GameService, Depends(get_game_service)],
 ) -> GameState:
     game = await games.leave(game_id, current_user.id)
+    sync_auction_timer(game)
     await sio.emit("game_state", game.model_dump(mode="json"), room=str(game_id))
     return game
 
@@ -173,5 +244,6 @@ async def execute_command(
     games: Annotated[GameService, Depends(get_game_service)],
 ) -> GameState:
     game = await games.execute(game_id, current_user.id, command)
+    sync_auction_timer(game)
     await sio.emit("game_state", game.model_dump(mode="json"), room=str(game_id))
     return game

@@ -1,42 +1,59 @@
-import GavelRoundedIcon from '@mui/icons-material/GavelRounded'
+import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded'
+import AccountCircleRoundedIcon from '@mui/icons-material/AccountCircleRounded'
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
+import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
+import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
+import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
+import MenuRoundedIcon from '@mui/icons-material/MenuRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
-import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded'
 import {
   Alert,
+  BottomNavigation,
+  BottomNavigationAction,
   Box,
   Button,
   Card,
   CardContent,
-  Checkbox,
   Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogContentText,
   DialogTitle,
-  Divider,
+  Drawer,
   FormControl,
-  InputLabel,
-  ListItemText,
+  IconButton,
   MenuItem,
   Select,
   Stack,
-  TextField,
+  Tab,
+  Tabs,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { io, type Socket } from 'socket.io-client'
-import { api, authToken } from '../api'
+import { api, ApiError, authToken } from '../api'
 import type {
   ContentPack,
   GameCommand,
+  GameEvent,
   GameState,
-  TradeOffer,
   User,
 } from '../types'
+import { GameActionCenter } from './GameActionCenter'
 import { GameActivityFeed } from './GameActivityFeed'
+import { GameAuctionDialog } from './GameAuctionDialog'
+import { GameBoard } from './GameBoard'
+import {
+  latestMotionSequence,
+  type MotionSettlement,
+} from './gameMotion'
+import { GamePlayersPanel } from './GamePlayersPanel'
+import { GameTradePanel } from './GameTradePanel'
 import { LobbySettingsPanel } from './LobbySettingsPanel'
 import { PropertyManagementPanel } from './PropertyManagementPanel'
 
@@ -44,12 +61,16 @@ interface Props {
   game: GameState
   pack: ContentPack
   user: User
+  zoom: number
   onChange: (game: GameState) => void
   onLeave: () => void
+  onLogout: () => void
+  onSessionExpired: () => void
 }
 
 interface CommandAck {
   ok: boolean
+  code?: 'AUTH_EXPIRED' | 'DOMAIN_ERROR'
   error?: string
 }
 
@@ -59,26 +80,65 @@ type ConnectionState =
   | 'reconnecting'
   | 'disconnected'
 
+type MobilePanel = 'room' | 'players' | 'manage' | 'activity' | null
+
 export function GameSessionPanel({
   game,
   pack,
   user,
+  zoom,
   onChange,
   onLeave,
+  onLogout,
+  onSessionExpired,
 }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const theme = useTheme()
+  const isTablet = useMediaQuery(theme.breakpoints.up('md'))
+  const isWide = useMediaQuery(theme.breakpoints.up('xl'))
   const socketRef = useRef<Socket | null>(null)
+  const refreshingSocketRef = useRef(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('connecting')
-  const [bid, setBid] = useState(1)
-  const [recipientId, setRecipientId] = useState('')
-  const [offeredCash, setOfferedCash] = useState(0)
-  const [requestedCash, setRequestedCash] = useState(0)
-  const [offeredPropertyIds, setOfferedPropertyIds] = useState<string[]>([])
-  const [requestedPropertyIds, setRequestedPropertyIds] = useState<string[]>([])
   const [confirmResignation, setConfirmResignation] = useState(false)
+  const [sideTab, setSideTab] = useState(0)
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null)
+  const [motionSyncKey, setMotionSyncKey] = useState(0)
+  const prefersReducedMotion = useMediaQuery(
+    '(prefers-reduced-motion: reduce)',
+  )
+  const [motionSettlement, setMotionSettlement] = useState<MotionSettlement>(
+    () => ({
+      gameId: game.id,
+      sequence: latestMotionSequence(game),
+      syncMotionKey: 0,
+    }),
+  )
+  const motionPending =
+    !prefersReducedMotion &&
+    motionSettlement.gameId === game.id &&
+    Object.is(motionSettlement.syncMotionKey, motionSyncKey) &&
+    latestMotionSequence(game) > motionSettlement.sequence
+  const visibleEvents = motionPending
+    ? game.events.filter(
+        (event) => event.sequence <= motionSettlement.sequence,
+      )
+    : game.events
+  const handleMotionSettled = useCallback((settlement: MotionSettlement) => {
+    setMotionSettlement((current) =>
+      current.gameId === settlement.gameId &&
+      current.sequence === settlement.sequence &&
+      Object.is(current.syncMotionKey, settlement.syncMotionKey)
+        ? current
+        : settlement,
+    )
+  }, [])
+
+  useEffect(() => {
+    if ((!isTablet || isWide) && sideTab > 1) setSideTab(0)
+  }, [isTablet, isWide, sideTab])
 
   useEffect(() => {
     const token = authToken.get()
@@ -98,24 +158,72 @@ export function GameSessionPanel({
     })
     socketRef.current = socket
 
-    const joinRoom = () => {
-      socket.emit(
+    async function renewSocketSession() {
+      if (refreshingSocketRef.current) return
+      refreshingSocketRef.current = true
+      try {
+        const refreshed = await api.refreshSession()
+        socket.auth = { token: refreshed.access_token }
+        if (socket.connected) {
+          joinRoom()
+        } else {
+          socket.connect()
+        }
+      } catch (requestError) {
+        if (requestError instanceof ApiError && requestError.status === 401) {
+          setConnectionState('disconnected')
+          onSessionExpired()
+        } else {
+          setConnectionState('reconnecting')
+        }
+      } finally {
+        refreshingSocketRef.current = false
+      }
+    }
+
+    function joinRoom() {
+      socket.timeout(8000).emit(
         'room_join',
         { game_id: game.id },
-        (ack: CommandAck) => {
+        (timeoutError: Error | null, ack?: CommandAck) => {
+          if (timeoutError) {
+            setConnectionState('reconnecting')
+            setError(t('realtimeError'))
+            return
+          }
+          if (!ack) {
+            setConnectionState('reconnecting')
+            return
+          }
           if (ack.ok) {
             setConnectionState('connected')
             setError(null)
+            setMotionSyncKey((value) => value + 1)
           } else {
             setConnectionState('disconnected')
             setError(ack.error ?? t('realtimeError'))
+            if (isAuthenticationError(ack.code, ack.error)) {
+              void renewSocketSession()
+            }
           }
         },
       )
     }
-    const resyncVisibleGame = () => {
-      if (document.visibilityState === 'visible' && socket.connected) {
+
+    function resyncVisibleGame() {
+      if (document.visibilityState !== 'visible') return
+      if (socket.connected) {
         joinRoom()
+      } else if (navigator.onLine) {
+        socket.connect()
+      }
+    }
+
+    function reconnectOnline() {
+      if (socket.connected) {
+        joinRoom()
+      } else {
+        socket.connect()
       }
     }
 
@@ -127,66 +235,124 @@ export function GameSessionPanel({
     socket.on('disconnect', (reason) => {
       if (reason !== 'io client disconnect') {
         setConnectionState('reconnecting')
+        if (reason === 'io server disconnect') socket.connect()
       }
     })
-    socket.on('connect_error', () => {
+    socket.on('connect_error', (connectionError) => {
       setConnectionState('reconnecting')
       setError(t('realtimeError'))
+      if (
+        navigator.onLine &&
+        isAuthenticationError(
+          socketErrorCode(connectionError),
+          connectionError.message,
+        )
+      ) {
+        void renewSocketSession()
+      }
     })
     socket.io.on('reconnect_attempt', () => setConnectionState('reconnecting'))
-    window.addEventListener('online', joinRoom)
+    window.addEventListener('online', reconnectOnline)
     document.addEventListener('visibilitychange', resyncVisibleGame)
 
     return () => {
-      window.removeEventListener('online', joinRoom)
+      window.removeEventListener('online', reconnectOnline)
       document.removeEventListener('visibilitychange', resyncVisibleGame)
       socket.disconnect()
       socketRef.current = null
+      refreshingSocketRef.current = false
     }
-  }, [game.id, onChange, t])
+  }, [game.id, onChange, onSessionExpired, t])
 
   const playerName = (playerId: string | null) =>
-    game.players.find((player) => player.user_id === playerId)?.display_name ?? t('bank')
+    game.players.find((player) => player.user_id === playerId)?.display_name ??
+    t('bank')
 
-  const run = async (operation: () => Promise<GameState>) => {
+  const run = async (
+    operation: () => Promise<GameState>,
+    snapToSnapshot = false,
+  ) => {
     setBusy(true)
     setError(null)
     try {
-      onChange(await operation())
+      const nextGame = await operation()
+      onChange(nextGame)
+      if (snapToSnapshot) {
+        setMotionSyncKey((value) => value + 1)
+      }
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : t('operationRejected'))
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        onSessionExpired()
+        return
+      }
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : t('operationRejected'),
+      )
     } finally {
       setBusy(false)
     }
   }
 
-  const sendCommand = async (command: GameCommand) => {
+  const sendCommand = async (command: GameCommand): Promise<boolean> => {
     const socket = socketRef.current
     if (!socket?.connected) {
-      await run(() => api.executeCommand(game.id, command))
-      return
+      setBusy(true)
+      setError(null)
+      try {
+        onChange(await api.executeCommand(game.id, command))
+        return true
+      } catch (requestError) {
+        if (requestError instanceof ApiError && requestError.status === 401) {
+          onSessionExpired()
+        } else {
+          setError(
+            requestError instanceof Error
+              ? requestError.message
+              : t('operationRejected'),
+          )
+        }
+        return false
+      } finally {
+        setBusy(false)
+      }
     }
     setBusy(true)
     setError(null)
-    socket.timeout(8000).emit(
-      'game_command',
-      { game_id: game.id, command },
-      (timeoutError: Error | null, ack?: CommandAck) => {
-        if (timeoutError) {
-          setError(t('realtimeError'))
-          setConnectionState('reconnecting')
+    return new Promise<boolean>((resolve) => {
+      socket.timeout(8000).emit(
+        'game_command',
+        { game_id: game.id, command },
+        (timeoutError: Error | null, ack?: CommandAck) => {
+          if (timeoutError) {
+            setError(t('realtimeError'))
+            setConnectionState('reconnecting')
+            setBusy(false)
+            resolve(false)
+            return
+          }
+          if (!ack) {
+            setError(t('commandRejected'))
+            setBusy(false)
+            resolve(false)
+            return
+          }
+          if (!ack.ok) {
+            setError(ack.error ?? t('commandRejected'))
+            if (isAuthenticationError(ack.code, ack.error)) {
+              socket.disconnect()
+              socket.connect()
+            }
+            setBusy(false)
+            resolve(false)
+            return
+          }
           setBusy(false)
-          return
-        }
-        if (!ack) {
-          setError(t('commandRejected'))
-          setBusy(false)
-          return
-        }
-        if (!ack.ok) setError(ack.error ?? t('commandRejected'))
-        setBusy(false)
-      },
-    )
+          resolve(true)
+        },
+      )
+    })
   }
 
   const leaveGame = async () => {
@@ -207,55 +373,110 @@ export function GameSessionPanel({
     }
   }
 
-  const currentPlayer = game.players[game.current_player_index]
-  const isParticipant = game.players.some((player) => player.user_id === user.id)
+  const isParticipant = game.players.some(
+    (player) => player.user_id === user.id,
+  )
   const isSpectator = game.spectators.some(
     (spectator) => spectator.user_id === user.id,
   )
   const isHost = game.host_user_id === user.id
-  const isCurrentPlayer = currentPlayer?.user_id === user.id
-  const otherPlayers = game.players.filter((player) => player.user_id !== user.id)
-  const ownPropertyIds = Object.entries(game.owners)
-    .filter(
-      ([propertyId, ownerId]) =>
-        ownerId === user.id && (game.building_levels[propertyId] ?? 0) === 0,
-    )
-    .map(([propertyId]) => propertyId)
-  const recipientPropertyIds = Object.entries(game.owners)
-    .filter(
-      ([propertyId, ownerId]) =>
-        ownerId === recipientId && (game.building_levels[propertyId] ?? 0) === 0,
-    )
-    .map(([propertyId]) => propertyId)
-  const propertyName = (propertyId: string) => {
-    const tile = pack.board.tiles.find((candidate) => candidate.id === propertyId)
-    return tile ? pack.messages[tile.name_key] : propertyId
-  }
-  const pendingTrades = game.trades.filter(
-    (trade) =>
-      trade.status === 'pending' &&
-      (trade.proposer_id === user.id || trade.recipient_id === user.id),
-  )
-  const pendingTile = pack.board.tiles.find((tile) => tile.id === game.pending_tile_id)
-  const auctionTile = pack.board.tiles.find(
-    (tile) => tile.id === game.active_auction?.property_id,
-  )
+  const hasProperties = Object.values(game.owners).includes(user.id)
+  const currentCardId = currentTurnCardId(game.events)
   const lastCard = pack.board.decks
     .flatMap((deck) => deck.cards)
-    .find((card) => card.id === game.last_card_id)
+    .find((card) => card.id === currentCardId)
 
-  return (
-    <Card sx={{ mb: 2, border: '1px solid rgba(255,255,255,.09)' }}>
+  const roomContent = (
+    <Card
+      variant="outlined"
+      sx={{ borderColor: 'rgba(255,255,255,.08)', minWidth: 0 }}
+    >
       <CardContent>
-        <Stack spacing={2}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="center">
-            <Box sx={{ flexGrow: 1 }}>
-              <Typography variant="h6">{t('room')} {game.id.slice(0, 8)}</Typography>
-              <Typography variant="caption" color="text.secondary">
-                {game.id}
+        <Stack spacing={1.5}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            spacing={1}
+          >
+            <Typography fontWeight={900} sx={{ letterSpacing: '-0.03em' }}>
+              BUSINESS<span style={{ color: '#b8ff3d' }}>GAME</span>
+            </Typography>
+            <FormControl size="small">
+              <Select
+                value={i18n.language}
+                onChange={(event) =>
+                  void i18n.changeLanguage(event.target.value)
+                }
+                aria-label="Language"
+                sx={{ minWidth: 68 }}
+              >
+                <MenuItem value="es">ES</MenuItem>
+                <MenuItem value="en">EN</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
+
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            spacing={1}
+            sx={{
+              p: 1,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,255,255,.045)',
+            }}
+          >
+            <Stack direction="row" alignItems="center" spacing={0.75} minWidth={0}>
+              <AccountCircleRoundedIcon color="secondary" />
+              <Typography
+                variant="body2"
+                fontWeight={750}
+                noWrap
+                title={user.display_name}
+              >
+                {user.display_name}
               </Typography>
-            </Box>
+            </Stack>
+            <Button
+              size="small"
+              color="inherit"
+              startIcon={<LogoutRoundedIcon />}
+              onClick={onLogout}
+            >
+              {t('logout')}
+            </Button>
+          </Stack>
+
+          <Box>
+            <Typography variant="overline" color="secondary.light">
+              {t('room')}
+            </Typography>
+            <Stack direction="row" alignItems="center" spacing={0.5}>
+              <Typography
+                fontWeight={850}
+                sx={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {game.id.slice(0, 8)}
+              </Typography>
+              <IconButton
+                size="small"
+                aria-label={t('copyRoomId')}
+                onClick={() => void navigator.clipboard.writeText(game.id)}
+              >
+                <ContentCopyRoundedIcon fontSize="small" />
+              </IconButton>
+            </Stack>
+          </Box>
+
+          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
             <Chip
+              size="small"
               label={t(`gameStatus.${game.status}`)}
               color={game.status === 'playing' ? 'success' : 'default'}
             />
@@ -265,16 +486,23 @@ export function GameSessionPanel({
               label={t(`connection.${connectionState}`)}
               color={connectionColor(connectionState)}
             />
+          </Stack>
+
+          <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
             <Button
+              size="small"
               startIcon={<RefreshRoundedIcon />}
               disabled={busy}
-              onClick={() => void run(() => api.getGame(game.id))}
+              onClick={() => void run(() => api.getGame(game.id), true)}
             >
               {t('refresh')}
             </Button>
             {(isParticipant || isSpectator) && (
               <Button
-                color={game.status === 'playing' && isParticipant ? 'error' : 'inherit'}
+                size="small"
+                color={
+                  game.status === 'playing' && isParticipant ? 'error' : 'inherit'
+                }
                 startIcon={<LogoutRoundedIcon />}
                 disabled={busy}
                 onClick={() => {
@@ -290,38 +518,22 @@ export function GameSessionPanel({
                   : t('leaveRoom')}
               </Button>
             )}
-            {game.status === 'lobby' && isHost && (
-              <Button
-                variant="contained"
-                disabled={busy || game.players.length < pack.manifest.min_players}
-                onClick={() => void run(() => api.startGame(game.id))}
-              >
-                {t('startGame')}
-              </Button>
-            )}
           </Stack>
 
-          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-            {game.players.map((player, index) => (
-              <Chip
-                key={player.user_id}
-                color={index === game.current_player_index ? 'secondary' : 'default'}
-                label={`${player.display_name} · $${player.balance}${
-                  player.in_jail ? ` · ${t('detained')}` : ''
-                }`}
-              />
-            ))}
-            {game.spectators.map((spectator) => (
-              <Chip
-                key={spectator.user_id}
-                variant="outlined"
-                label={`${spectator.display_name} · ${t('spectator')}`}
-              />
-            ))}
-            <Chip variant="outlined" label={t('houseSupply', { count: game.houses_remaining })} />
-            <Chip variant="outlined" label={t('hotelSupply', { count: game.hotels_remaining })} />
+          <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+            <Chip
+              size="small"
+              variant="outlined"
+              label={t('houseSupply', { count: game.houses_remaining })}
+            />
+            <Chip
+              size="small"
+              variant="outlined"
+              label={t('hotelSupply', { count: game.hotels_remaining })}
+            />
             {game.settings.rules.free_parking_jackpot && (
               <Chip
+                size="small"
                 color={game.bank_pot > 0 ? 'secondary' : 'default'}
                 variant="outlined"
                 label={t('bankPot', { amount: game.bank_pot })}
@@ -340,348 +552,400 @@ export function GameSessionPanel({
               }
             />
           )}
-
-          {error && <Alert severity="warning" onClose={() => setError(null)}>{error}</Alert>}
-          {lastCard && (
-            <Alert severity="info">
-              {t('drawnCard', { message: pack.messages[lastCard.message_key] })}
-            </Alert>
-          )}
-
-          {game.active_debt && (
-            <Alert
-              severity="error"
-              action={
-                game.active_debt.debtor_id === user.id ? (
-                  <Stack direction="row">
-                    <Button
-                      color="inherit"
-                      disabled={busy}
-                      onClick={() => void sendCommand({ action: 'pay_debt' })}
-                    >
-                      {t('payDebt')}
-                    </Button>
-                    <Button
-                      color="inherit"
-                      disabled={busy}
-                      onClick={() =>
-                        void sendCommand({ action: 'declare_bankruptcy' })
-                      }
-                    >
-                      {t('declareBankruptcy')}
-                    </Button>
-                  </Stack>
-                ) : undefined
-              }
-            >
-              {t('debtSummary', {
-                debtor: playerName(game.active_debt.debtor_id),
-                amount: game.active_debt.amount,
-                creditor: playerName(game.active_debt.creditor_id),
-              })}
-            </Alert>
-          )}
-
-          {game.status === 'playing' &&
-            !game.active_auction &&
-            !game.active_debt &&
-            isCurrentPlayer && (
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-              {game.phase === 'waiting_for_roll' && (
-                <>
-                  <Button
-                    variant="contained"
-                    disabled={busy}
-                    onClick={() => void sendCommand({ action: 'roll' })}
-                  >
-                    {currentPlayer.in_jail ? t('tryDoubles') : t('rollDice')}
-                  </Button>
-                  {currentPlayer.in_jail && (
-                    <>
-                      <Button
-                        variant="outlined"
-                        disabled={busy || currentPlayer.balance < pack.manifest.jail_fine}
-                        onClick={() => void sendCommand({ action: 'pay_jail_fine' })}
-                      >
-                        {t('payJailFine', { amount: pack.manifest.jail_fine })}
-                      </Button>
-                      {currentPlayer.jail_card_ids.length > 0 && (
-                        <Button
-                          variant="outlined"
-                          disabled={busy}
-                          onClick={() => void sendCommand({ action: 'use_jail_card' })}
-                        >
-                          {t('useJailCard')}
-                        </Button>
-                      )}
-                      <Chip
-                        label={t('jailAttempts', {
-                          count: currentPlayer.jail_failed_rolls,
-                        })}
-                      />
-                    </>
-                  )}
-                </>
-              )}
-              {game.phase === 'buy_decision' && (
-                <>
-                  <Button
-                    variant="contained"
-                    disabled={busy}
-                    onClick={() => void sendCommand({ action: 'buy_property' })}
-                  >
-                    {t('buyFor', { price: pendingTile?.price ?? 0 })}
-                  </Button>
-                  <Button
-                    startIcon={<GavelRoundedIcon />}
-                    disabled={busy}
-                    onClick={() => void sendCommand({ action: 'decline_property' })}
-                  >
-                    {t('auction')}
-                  </Button>
-                </>
-              )}
-              {game.phase === 'waiting_for_end' && (
-                <Button
-                  variant="outlined"
-                  disabled={busy}
-                  onClick={() => void sendCommand({ action: 'end_turn' })}
-                >
-                  {t('endTurn')}
-                </Button>
-              )}
-            </Stack>
-          )}
-
-          {game.active_auction && (
-            <Box>
-              <Divider sx={{ mb: 2 }} />
-              <Typography fontWeight={800}>
-                {t('auction')}: {auctionTile ? pack.messages[auctionTile.name_key] : game.active_auction.property_id}
-              </Typography>
-              <Typography color="text.secondary" sx={{ mb: 1 }}>
-                {t('currentBid', { amount: game.active_auction.current_bid })} ·{' '}
-                {playerName(game.active_auction.current_bidder_id)}
-              </Typography>
-              {game.active_auction.eligible_player_ids.includes(user.id) &&
-                !game.active_auction.passed_player_ids.includes(user.id) && (
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <TextField
-                      size="small"
-                      type="number"
-                      label={t('bid')}
-                      value={bid}
-                      onChange={(event) => setBid(Math.max(1, Number(event.target.value)))}
-                      slotProps={{ htmlInput: { min: game.active_auction.current_bid + 1 } }}
-                    />
-                    <Button
-                      variant="contained"
-                      disabled={busy || bid <= game.active_auction.current_bid}
-                      onClick={() => void sendCommand({ action: 'bid', amount: bid })}
-                    >
-                      {t('placeBid')}
-                    </Button>
-                    {game.active_auction.current_bidder_id !== user.id && (
-                      <Button
-                        disabled={busy}
-                        onClick={() => void sendCommand({ action: 'pass_auction' })}
-                      >
-                        {t('pass')}
-                      </Button>
-                    )}
-                  </Stack>
-                )}
-            </Box>
-          )}
-
-          {isParticipant && (
-            <PropertyManagementPanel
-              game={game}
-              pack={pack}
-              user={user}
-              busy={busy}
-              onCommand={sendCommand}
-            />
-          )}
-
-          {game.status === 'playing' &&
-            isParticipant &&
-            !game.active_auction &&
-            !game.active_debt &&
-            otherPlayers.length > 0 && (
-            <Box>
-              <Divider sx={{ mb: 2 }} />
-              <Typography fontWeight={800} sx={{ mb: 1 }}>
-                <SwapHorizRoundedIcon fontSize="small" sx={{ verticalAlign: 'middle', mr: 1 }} />
-                {t('proposeTrade')}
-              </Typography>
-              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
-                <FormControl size="small" sx={{ minWidth: 180 }}>
-                  <InputLabel>{t('player')}</InputLabel>
-                  <Select
-                    label={t('player')}
-                    value={recipientId}
-                    onChange={(event) => {
-                      setRecipientId(event.target.value)
-                      setRequestedPropertyIds([])
-                    }}
-                  >
-                    {otherPlayers.map((player) => (
-                      <MenuItem key={player.user_id} value={player.user_id}>
-                        {player.display_name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <TextField
-                  size="small"
-                  type="number"
-                  label={t('cashOffered')}
-                  value={offeredCash}
-                  onChange={(event) => setOfferedCash(Math.max(0, Number(event.target.value)))}
-                />
-                <TextField
-                  size="small"
-                  type="number"
-                  label={t('cashRequested')}
-                  value={requestedCash}
-                  onChange={(event) => setRequestedCash(Math.max(0, Number(event.target.value)))}
-                />
-                <FormControl size="small" sx={{ minWidth: 180 }}>
-                  <InputLabel>{t('propertiesOffered')}</InputLabel>
-                  <Select
-                    multiple
-                    label={t('propertiesOffered')}
-                    value={offeredPropertyIds}
-                    onChange={(event) =>
-                      setOfferedPropertyIds(
-                        typeof event.target.value === 'string'
-                          ? event.target.value.split(',')
-                          : event.target.value,
-                      )
-                    }
-                    renderValue={(selected) =>
-                      t('selectedProperties', { count: selected.length })
-                    }
-                  >
-                    {ownPropertyIds.map((propertyId) => (
-                      <MenuItem key={propertyId} value={propertyId}>
-                        <Checkbox checked={offeredPropertyIds.includes(propertyId)} />
-                        <ListItemText primary={propertyName(propertyId)} />
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControl size="small" sx={{ minWidth: 180 }}>
-                  <InputLabel>{t('propertiesRequested')}</InputLabel>
-                  <Select
-                    multiple
-                    disabled={!recipientId}
-                    label={t('propertiesRequested')}
-                    value={requestedPropertyIds}
-                    onChange={(event) =>
-                      setRequestedPropertyIds(
-                        typeof event.target.value === 'string'
-                          ? event.target.value.split(',')
-                          : event.target.value,
-                      )
-                    }
-                    renderValue={(selected) =>
-                      t('selectedProperties', { count: selected.length })
-                    }
-                  >
-                    {recipientPropertyIds.map((propertyId) => (
-                      <MenuItem key={propertyId} value={propertyId}>
-                        <Checkbox checked={requestedPropertyIds.includes(propertyId)} />
-                        <ListItemText primary={propertyName(propertyId)} />
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <Button
-                  variant="outlined"
-                  disabled={
-                    busy ||
-                    !recipientId ||
-                    (offeredCash === 0 &&
-                      requestedCash === 0 &&
-                      offeredPropertyIds.length === 0 &&
-                      requestedPropertyIds.length === 0)
-                  }
-                  onClick={() =>
-                    void sendCommand({
-                      action: 'propose_trade',
-                      recipient_id: recipientId,
-                      offered_cash: offeredCash,
-                      requested_cash: requestedCash,
-                      offered_property_ids: offeredPropertyIds,
-                      requested_property_ids: requestedPropertyIds,
-                    })
-                  }
-                >
-                  {t('sendOffer')}
-                </Button>
-              </Stack>
-            </Box>
-          )}
-
-          {pendingTrades.map((trade: TradeOffer) => (
-            <Alert
-              key={trade.id}
-              severity={trade.recipient_id === user.id ? 'info' : 'success'}
-              action={
-                trade.recipient_id === user.id ? (
-                  <Stack direction="row">
-                    <Button
-                      disabled={busy}
-                      onClick={() =>
-                        void sendCommand({ action: 'accept_trade', trade_id: trade.id })
-                      }
-                    >
-                      {t('accept')}
-                    </Button>
-                    <Button
-                      disabled={busy}
-                      onClick={() =>
-                        void sendCommand({ action: 'reject_trade', trade_id: trade.id })
-                      }
-                    >
-                      {t('reject')}
-                    </Button>
-                  </Stack>
-                ) : (
-                  <Button
-                    disabled={busy}
-                    onClick={() =>
-                      void sendCommand({ action: 'cancel_trade', trade_id: trade.id })
-                    }
-                  >
-                    {t('cancel')}
-                  </Button>
-                )
-              }
-            >
-              {t('tradeSummary', {
-                proposer: playerName(trade.proposer_id),
-                offered: trade.offered_cash,
-                requested: trade.requested_cash,
-                recipient: playerName(trade.recipient_id),
-              })}{' '}
-              {t('tradePropertySummary', {
-                offered: trade.offered_property_ids.length,
-                requested: trade.requested_property_ids.length,
-              })}
-            </Alert>
-          ))}
-
-          <GameActivityFeed
-            events={game.events}
-            players={game.players}
-            spectators={game.spectators}
-            pack={pack}
-          />
         </Stack>
       </CardContent>
+    </Card>
+  )
+
+  const activityContent = (
+    <Card
+      variant="outlined"
+      sx={{ borderColor: 'rgba(255,255,255,.08)', minWidth: 0 }}
+    >
+      <CardContent>
+        <GameActivityFeed
+          events={visibleEvents}
+          players={game.players}
+          spectators={game.spectators}
+          pack={pack}
+        />
+      </CardContent>
+    </Card>
+  )
+
+  const playersContent = (
+    <Card
+      variant="outlined"
+      sx={{ borderColor: 'rgba(255,255,255,.08)', minWidth: 0 }}
+    >
+      <CardContent sx={{ p: 1.25, '&:last-child': { pb: 1.25 } }}>
+        <GamePlayersPanel game={game} user={user} />
+      </CardContent>
+    </Card>
+  )
+
+  const propertiesContent = hasProperties ? (
+    <PropertyManagementPanel
+      embedded
+      game={game}
+      pack={pack}
+      user={user}
+      busy={busy}
+      onCommand={sendCommand}
+    />
+  ) : (
+    <Typography color="text.secondary" variant="body2">
+      {t('noProperties')}
+    </Typography>
+  )
+
+  const tradesContent = (
+    <GameTradePanel
+      game={game}
+      pack={pack}
+      user={user}
+      busy={busy}
+      error={error}
+      onCommand={sendCommand}
+    />
+  )
+
+  const tabContent =
+    sideTab === 0
+      ? propertiesContent
+      : sideTab === 1
+        ? tradesContent
+        : sideTab === 2
+          ? roomContent
+          : activityContent
+
+  const managementContent = (
+    <Card
+      variant="outlined"
+      sx={{
+        borderColor: 'rgba(255,255,255,.08)',
+        minWidth: 0,
+        overflow: 'hidden',
+      }}
+    >
+      <Tabs
+        value={sideTab}
+        onChange={(_, value: number) => setSideTab(value)}
+        variant="scrollable"
+        scrollButtons={false}
+        aria-label={t('gamePanels')}
+      >
+        <Tab
+          value={0}
+          id="game-panel-tab-0"
+          aria-controls="game-panel-0"
+          label={t('properties')}
+        />
+        <Tab
+          value={1}
+          id="game-panel-tab-1"
+          aria-controls="game-panel-1"
+          label={t('trades')}
+        />
+        {isTablet && !isWide && (
+          <Tab
+            value={2}
+            id="game-panel-tab-2"
+            aria-controls="game-panel-2"
+            label={t('room')}
+          />
+        )}
+        {isTablet && !isWide && (
+          <Tab
+            value={3}
+            id="game-panel-tab-3"
+            aria-controls="game-panel-3"
+            label={t('activity.title')}
+          />
+        )}
+      </Tabs>
+      <CardContent
+        role="tabpanel"
+        id={`game-panel-${sideTab}`}
+        aria-labelledby={`game-panel-tab-${sideTab}`}
+      >
+        {tabContent}
+      </CardContent>
+    </Card>
+  )
+
+  const criticalAlerts = (
+    <>
+      {error && (
+        <Alert severity="warning" onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+      {!motionPending && lastCard && (
+        <Alert severity="info">
+          {t('drawnCard', { message: pack.messages[lastCard.message_key] })}
+        </Alert>
+      )}
+      {!motionPending && game.active_debt && (
+        <Alert
+          severity="error"
+          sx={{
+            flexDirection: { xs: 'column', sm: 'row' },
+            '& .MuiAlert-action': {
+              ml: { xs: 0, sm: 2 },
+              mt: { xs: 1, sm: 0 },
+              alignSelf: { xs: 'stretch', sm: 'center' },
+            },
+          }}
+          action={
+            game.active_debt.debtor_id === user.id ? (
+              <Stack direction="row" useFlexGap flexWrap="wrap">
+                <Button
+                  color="inherit"
+                  disabled={busy}
+                  onClick={() => void sendCommand({ action: 'pay_debt' })}
+                >
+                  {t('payDebt')}
+                </Button>
+                <Button
+                  color="inherit"
+                  disabled={busy}
+                  onClick={() =>
+                    void sendCommand({ action: 'declare_bankruptcy' })
+                  }
+                >
+                  {t('declareBankruptcy')}
+                </Button>
+              </Stack>
+            ) : undefined
+          }
+        >
+          {t('debtSummary', {
+            debtor: playerName(game.active_debt.debtor_id),
+            amount: game.active_debt.amount,
+            creditor: playerName(game.active_debt.creditor_id),
+          })}
+        </Alert>
+      )}
+    </>
+  )
+
+  return (
+    <Box
+      data-testid="game-workspace"
+      sx={{
+        width: '100vw',
+        height: '100dvh',
+        overflow: 'hidden',
+      }}
+    >
+      <Box
+        sx={{
+          display: 'grid',
+          width: '100%',
+          height: '100%',
+          gridTemplateColumns: {
+            xs: 'minmax(0, 1fr)',
+            md: 'minmax(0, 1fr) clamp(240px, 25vw, 280px)',
+            lg: 'minmax(0, 1fr) clamp(280px, 25vw, 330px)',
+            xl: 'clamp(230px, 16vw, 280px) minmax(0, 1fr) clamp(310px, 22vw, 360px)',
+          },
+          gridTemplateAreas: {
+            xs: '"board"',
+            md: '"board right"',
+            xl: '"left board right"',
+          },
+          gap: 0,
+          alignItems: 'stretch',
+        }}
+      >
+        {isWide && (
+          <Stack
+            gridArea="left"
+            spacing={1.25}
+            sx={{
+              height: '100dvh',
+              overflow: 'auto',
+              p: 1,
+              borderRight: '1px solid rgba(255,255,255,.08)',
+            }}
+          >
+            {roomContent}
+            {activityContent}
+          </Stack>
+        )}
+
+        <Stack
+          gridArea="board"
+          spacing={0}
+          sx={{
+            minWidth: 0,
+            minHeight: 0,
+            width: '100%',
+            height: '100%',
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative',
+            overflow: 'hidden',
+          }}
+        >
+          <Stack
+            spacing={0.75}
+            sx={{
+              position: 'absolute',
+              top: 8,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: 'min(92%, 760px)',
+              zIndex: 8,
+              pointerEvents: 'none',
+              '& .MuiAlert-root': { pointerEvents: 'auto' },
+            }}
+          >
+            {criticalAlerts}
+          </Stack>
+          <Box
+            sx={{
+              width: '100%',
+              height: '100%',
+              minWidth: 0,
+              overflow: 'auto',
+              display: 'flex',
+              justifyContent: zoom > 1 ? 'flex-start' : 'center',
+              alignItems: 'flex-start',
+            }}
+          >
+            <GameBoard
+              pack={pack}
+              zoom={zoom}
+              game={game}
+              currentUserId={user.id}
+              syncMotionKey={motionSyncKey}
+              onMotionSettled={handleMotionSettled}
+              motionPending={motionPending}
+              centerContent={
+                <GameActionCenter
+                  game={game}
+                  pack={pack}
+                  user={user}
+                  busy={busy}
+                  motionPending={motionPending}
+                  visibleEvents={visibleEvents}
+                  isHost={isHost}
+                  onCommand={sendCommand}
+                  onStart={() => void run(() => api.startGame(game.id))}
+                />
+              }
+            />
+          </Box>
+        </Stack>
+
+        {isTablet && (
+          <Stack
+            gridArea="right"
+            spacing={1.25}
+            sx={{
+              height: '100dvh',
+              overflow: 'auto',
+              p: 1,
+              borderLeft: '1px solid rgba(255,255,255,.08)',
+            }}
+          >
+            {playersContent}
+            {managementContent}
+          </Stack>
+        )}
+      </Box>
+
+      {!isTablet && (
+        <>
+          <BottomNavigation
+            showLabels
+            value={mobilePanel}
+            sx={{
+              position: 'fixed',
+              left: 8,
+              right: 8,
+              bottom: 'max(8px, env(safe-area-inset-bottom))',
+              zIndex: 1200,
+              borderRadius: 3,
+              border: '1px solid rgba(255,255,255,.1)',
+              boxShadow: '0 12px 36px rgba(0,0,0,.5)',
+            }}
+          >
+            <BottomNavigationAction
+              value="room"
+              label={t('room')}
+              icon={<MenuRoundedIcon />}
+              onClick={() => setMobilePanel('room')}
+            />
+            <BottomNavigationAction
+              value="players"
+              label={t('playersPanel')}
+              icon={<GroupsRoundedIcon />}
+              onClick={() => setMobilePanel('players')}
+            />
+            <BottomNavigationAction
+              value="manage"
+              label={t('manage')}
+              icon={<ApartmentRoundedIcon />}
+              onClick={() => setMobilePanel('manage')}
+            />
+            <BottomNavigationAction
+              value="activity"
+              label={t('activity.short')}
+              icon={<HistoryRoundedIcon />}
+              onClick={() => setMobilePanel('activity')}
+            />
+          </BottomNavigation>
+          <Drawer
+            anchor="bottom"
+            open={mobilePanel !== null}
+            onClose={() => setMobilePanel(null)}
+            slotProps={{
+              paper: {
+                sx: {
+                  maxHeight: 'min(78dvh, 720px)',
+                  borderRadius: '20px 20px 0 0',
+                  p: 1.5,
+                  pb: 'max(16px, env(safe-area-inset-bottom))',
+                },
+              },
+            }}
+          >
+            <Stack
+              direction="row"
+              justifyContent="flex-end"
+              sx={{ position: 'sticky', top: 0, zIndex: 1 }}
+            >
+              <IconButton
+                aria-label={t('close')}
+                onClick={() => setMobilePanel(null)}
+              >
+                <CloseRoundedIcon />
+              </IconButton>
+            </Stack>
+            <Box sx={{ overflow: 'auto' }}>
+              {mobilePanel === 'room' && roomContent}
+              {mobilePanel === 'players' && playersContent}
+              {mobilePanel === 'manage' && managementContent}
+              {mobilePanel === 'activity' && activityContent}
+            </Box>
+          </Drawer>
+        </>
+      )}
+
+      {!motionPending && (
+        <GameAuctionDialog
+          game={game}
+          pack={pack}
+          user={user}
+          busy={busy}
+          error={error}
+          onCommand={sendCommand}
+        />
+      )}
+
       <Dialog
         open={confirmResignation}
         onClose={() => setConfirmResignation(false)}
@@ -691,10 +955,7 @@ export function GameSessionPanel({
           <DialogContentText>{t('confirmResignBody')}</DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button
-            disabled={busy}
-            onClick={() => setConfirmResignation(false)}
-          >
+          <Button disabled={busy} onClick={() => setConfirmResignation(false)}>
             {t('cancel')}
           </Button>
           <Button
@@ -707,8 +968,47 @@ export function GameSessionPanel({
           </Button>
         </DialogActions>
       </Dialog>
-    </Card>
+    </Box>
   )
+}
+
+function isAuthenticationError(code?: string, error?: string): boolean {
+  return code === 'AUTH_EXPIRED' || error === 'authentication required'
+}
+
+function currentTurnCardId(events: GameEvent[]): string | null {
+  let latestBoundarySequence = 0
+  let latestCardEvent: GameEvent | null = null
+
+  for (const event of events) {
+    if (
+      event.type === 'turn.started' ||
+      event.type === 'turn.extra_roll' ||
+      event.type === 'game.finished'
+    ) {
+      latestBoundarySequence = Math.max(latestBoundarySequence, event.sequence)
+    } else if (
+      event.type === 'card.drawn' &&
+      (latestCardEvent === null ||
+        event.sequence > latestCardEvent.sequence)
+    ) {
+      latestCardEvent = event
+    }
+  }
+
+  if (
+    latestCardEvent === null ||
+    latestCardEvent.sequence <= latestBoundarySequence
+  ) {
+    return null
+  }
+  const cardId = latestCardEvent.data.card_id
+  return typeof cardId === 'string' ? cardId : null
+}
+
+function socketErrorCode(error: Error): string | undefined {
+  const data = (error as Error & { data?: { code?: unknown } }).data
+  return typeof data?.code === 'string' ? data.code : undefined
 }
 
 function connectionColor(

@@ -5,7 +5,11 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+
+
+class ContentModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class TileKind(StrEnum):
@@ -26,20 +30,20 @@ class BoardMode(StrEnum):
     CUSTOM = "custom"
 
 
-class CashCardEffect(BaseModel):
+class CashCardEffect(ContentModel):
     type: Literal["cash"]
     amount: int
 
 
-class MoveToCardEffect(BaseModel):
+class MoveToCardEffect(ContentModel):
     type: Literal["move_to"]
     tile_id: str
     collect_start: bool = True
 
 
-class MoveRelativeCardEffect(BaseModel):
+class MoveRelativeCardEffect(ContentModel):
     type: Literal["move_relative"]
-    steps: int = Field(ge=-96, le=96)
+    steps: int = Field(ge=-116, le=116)
     collect_start: bool = False
 
     @model_validator(mode="after")
@@ -49,7 +53,7 @@ class MoveRelativeCardEffect(BaseModel):
         return self
 
 
-class MoveToNearestCardEffect(BaseModel):
+class MoveToNearestCardEffect(ContentModel):
     type: Literal["move_to_nearest"]
     tile_kind: Literal["transport", "utility"]
     collect_start: bool = True
@@ -63,13 +67,13 @@ class MoveToNearestCardEffect(BaseModel):
         return self
 
 
-class RepairsCardEffect(BaseModel):
+class RepairsCardEffect(ContentModel):
     type: Literal["repairs"]
     house_amount: int = Field(ge=0)
     hotel_amount: int = Field(ge=0)
 
 
-class CashEachCardEffect(BaseModel):
+class CashEachCardEffect(ContentModel):
     type: Literal["cash_each"]
     amount: int
 
@@ -80,11 +84,11 @@ class CashEachCardEffect(BaseModel):
         return self
 
 
-class GoToJailCardEffect(BaseModel):
+class GoToJailCardEffect(ContentModel):
     type: Literal["go_to_jail"]
 
 
-class GetOutOfJailCardEffect(BaseModel):
+class GetOutOfJailCardEffect(ContentModel):
     type: Literal["get_out_of_jail"]
 
 
@@ -101,28 +105,91 @@ CardEffect = Annotated[
 ]
 
 
-class CardDefinition(BaseModel):
+def _effect_must_be_terminal(effect: CardEffect) -> bool:
+    return isinstance(
+        effect,
+        (
+            MoveToCardEffect,
+            MoveRelativeCardEffect,
+            MoveToNearestCardEffect,
+            RepairsCardEffect,
+            CashEachCardEffect,
+            GoToJailCardEffect,
+        ),
+    ) or (isinstance(effect, CashCardEffect) and effect.amount < 0)
+
+
+def _validate_effect_order(effects: list[CardEffect]) -> None:
+    if any(_effect_must_be_terminal(effect) for effect in effects[:-1]):
+        raise ValueError(
+            "movement, charging, repairs and go_to_jail effects must be terminal"
+        )
+
+
+class CardDefinition(ContentModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
     message_key: str
-    effect: CardEffect
+    title_key: str | None = Field(default=None, min_length=1)
+    effect: CardEffect | None = None
+    effects: list[CardEffect] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_effects(self) -> CardDefinition:
+        if self.effect is None and not self.effects:
+            raise ValueError("cards require at least one effect")
+        if self.effect is not None and self.effects:
+            raise ValueError("use either effect or effects, not both")
+        _validate_effect_order(self.resolved_effects())
+        return self
+
+    def resolved_effects(self) -> list[CardEffect]:
+        return self.effects or ([self.effect] if self.effect is not None else [])
 
 
-class CardDeckDefinition(BaseModel):
+class CardDeckDefinition(ContentModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    name_key: str | None = Field(default=None, min_length=1)
     cards: list[CardDefinition] = Field(min_length=1, max_length=100)
 
 
-class TileDefinition(BaseModel):
+class PropertyGroupDefinition(ContentModel):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    name_key: str
+    color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class TileDefinition(ContentModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
     kind: TileKind
     name_key: str
     deck_id: str | None = None
     group: str | None = None
     color: str | None = None
+    icon: Literal[
+        "flag",
+        "bank",
+        "gavel",
+        "question",
+        "police",
+        "weekend",
+        "train",
+        "bolt",
+        "ticket",
+        "star",
+        "money",
+        "home",
+        "store",
+        "gift",
+        "car",
+        "plane",
+    ] | None = None
+    icon_background: Literal["circle", "rounded", "square", "none"] | None = None
+    purchasable: bool | None = None
     price: int | None = Field(default=None, ge=0)
     base_rent: int | None = Field(default=None, ge=0)
     mortgage_value: int | None = Field(default=None, ge=0)
     build_cost: int | None = Field(default=None, ge=0)
+    hotel_cost: int | None = Field(default=None, ge=0)
     rent_levels: list[int] | None = Field(
         default=None,
         min_length=1,
@@ -134,17 +201,101 @@ class TileDefinition(BaseModel):
         max_length=12,
     )
     amount: int | None = Field(default=None, ge=0)
+    net_worth_percent: int | None = Field(default=None, ge=1, le=100)
+    landing_effects: list[CardEffect] = Field(default_factory=list, max_length=8)
+
+    @property
+    def is_purchasable(self) -> bool:
+        if self.kind is TileKind.PROPERTY:
+            return True
+        if self.kind in {TileKind.TRANSPORT, TileKind.UTILITY}:
+            return self.purchasable is not False
+        return False
 
     @model_validator(mode="after")
     def validate_economic_fields(self) -> TileDefinition:
-        purchasable = {
-            TileKind.PROPERTY,
-            TileKind.TRANSPORT,
-            TileKind.UTILITY,
+        fields_by_kind: dict[TileKind, set[str]] = {
+            TileKind.START: {"landing_effects"},
+            TileKind.PROPERTY: {
+                "group",
+                "purchasable",
+                "price",
+                "base_rent",
+                "mortgage_value",
+                "build_cost",
+                "hotel_cost",
+                "rent_levels",
+            },
+            TileKind.TAX: {"amount", "net_worth_percent"},
+            TileKind.CARD: {"deck_id"},
+            TileKind.JAIL: {"landing_effects"},
+            TileKind.GO_TO_JAIL: set(),
+            TileKind.FREE: {"landing_effects"},
+            TileKind.TRANSPORT: {
+                "purchasable",
+                "price",
+                "base_rent",
+                "mortgage_value",
+                "rent_levels",
+                "landing_effects",
+            },
+            TileKind.UTILITY: {
+                "purchasable",
+                "price",
+                "base_rent",
+                "mortgage_value",
+                "rent_multipliers",
+                "landing_effects",
+            },
         }
-        if self.kind in purchasable and (self.price is None or self.base_rent is None):
+        optional_values: dict[str, object | None] = {
+            "deck_id": self.deck_id,
+            "group": self.group,
+            "purchasable": self.purchasable,
+            "price": self.price,
+            "base_rent": self.base_rent,
+            "mortgage_value": self.mortgage_value,
+            "build_cost": self.build_cost,
+            "hotel_cost": self.hotel_cost,
+            "rent_levels": self.rent_levels,
+            "rent_multipliers": self.rent_multipliers,
+            "amount": self.amount,
+            "net_worth_percent": self.net_worth_percent,
+            "landing_effects": self.landing_effects or None,
+        }
+        unsupported = sorted(
+            field
+            for field, value in optional_values.items()
+            if value is not None and field not in fields_by_kind[self.kind]
+        )
+        if unsupported:
+            fields = ", ".join(unsupported)
+            raise ValueError(
+                f"'{self.kind.value}' tiles cannot define: {fields}"
+            )
+        if self.kind is TileKind.PROPERTY and self.purchasable is False:
+            raise ValueError("properties cannot disable purchasing")
+        if (
+            self.kind in {TileKind.TRANSPORT, TileKind.UTILITY}
+            and not self.is_purchasable
+            and any(
+                value is not None
+                for value in (
+                    self.price,
+                    self.base_rent,
+                    self.mortgage_value,
+                    self.rent_levels,
+                    self.rent_multipliers,
+                )
+            )
+        ):
+            raise ValueError(
+                "non-purchasable transports and utilities cannot define "
+                "economic fields"
+            )
+        if self.is_purchasable and (self.price is None or self.base_rent is None):
             raise ValueError("purchasable tiles require price and base_rent")
-        if self.kind in purchasable and self.mortgage_value is None:
+        if self.is_purchasable and self.mortgage_value is None:
             raise ValueError("purchasable tiles require mortgage_value")
         if self.kind is TileKind.PROPERTY and (
             self.group is None
@@ -155,9 +306,17 @@ class TileDefinition(BaseModel):
             raise ValueError(
                 "properties require group, build_cost and six rent levels"
             )
-        if self.kind is TileKind.TRANSPORT and self.rent_levels is None:
+        if (
+            self.kind is TileKind.TRANSPORT
+            and self.is_purchasable
+            and self.rent_levels is None
+        ):
             raise ValueError("transports require rent_levels")
-        if self.kind is TileKind.UTILITY and self.rent_multipliers is None:
+        if (
+            self.kind is TileKind.UTILITY
+            and self.is_purchasable
+            and self.rent_multipliers is None
+        ):
             raise ValueError("utilities require rent_multipliers")
         if self.rent_levels is not None:
             if any(value < 0 for value in self.rent_levels):
@@ -177,10 +336,33 @@ class TileDefinition(BaseModel):
             value < 0 for value in self.rent_multipliers
         ):
             raise ValueError("rent multipliers cannot be negative")
-        if self.kind is TileKind.TAX and self.amount is None:
-            raise ValueError("tax tiles require amount")
+        if self.kind is TileKind.TAX and (
+            (self.amount is None) == (self.net_worth_percent is None)
+        ):
+            raise ValueError(
+                "tax tiles require exactly one of amount or net_worth_percent"
+            )
         if self.kind is TileKind.CARD and self.deck_id is None:
             raise ValueError("card tiles require deck_id")
+        if self.landing_effects and self.is_purchasable:
+            raise ValueError("purchasable tiles cannot define landing_effects")
+        if self.landing_effects and self.kind in {
+            TileKind.CARD,
+            TileKind.GO_TO_JAIL,
+            TileKind.TAX,
+        }:
+            raise ValueError(
+                f"'{self.kind.value}' tiles use fixed landing behavior and cannot "
+                "define landing_effects"
+            )
+        if any(
+            isinstance(effect, GetOutOfJailCardEffect)
+            for effect in self.landing_effects
+        ):
+            raise ValueError(
+                "get_out_of_jail is only valid inside a card definition"
+            )
+        _validate_effect_order(self.landing_effects)
         return self
 
 
@@ -190,7 +372,7 @@ class RuleOptionName(StrEnum):
     DOUBLE_SALARY_ON_START = "double_salary_on_start"
 
 
-class OptionalRules(BaseModel):
+class OptionalRules(ContentModel):
     auction_unpurchased_properties: bool = True
     free_parking_jackpot: bool = False
     double_salary_on_start: bool = False
@@ -208,14 +390,14 @@ class OptionalRulesUpdate(BaseModel):
         return self
 
 
-class PackManifest(BaseModel):
-    schema_version: Literal[4]
+class PackManifest(ContentModel):
+    schema_version: Literal[4, 5]
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
     version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
     name_key: str
     board_mode: BoardMode
-    side_length: int = Field(ge=3, le=25)
-    tile_count: int = Field(ge=8, le=96)
+    side_length: int = Field(ge=3, le=30)
+    tile_count: int = Field(ge=8, le=116)
     default_locale: str
     locales: list[str] = Field(min_length=1)
     min_players: int = Field(default=2, ge=2, le=12)
@@ -246,9 +428,10 @@ class PackManifest(BaseModel):
         return self
 
 
-class BoardDefinition(BaseModel):
+class BoardDefinition(ContentModel):
     tiles: list[TileDefinition]
     decks: list[CardDeckDefinition] = Field(default_factory=list, max_length=20)
+    groups: list[PropertyGroupDefinition] = Field(default_factory=list, max_length=40)
 
 
 class ContentPack(BaseModel):
@@ -280,6 +463,7 @@ class UserUpdate(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    user_id: UUID
     token_type: Literal["bearer"] = "bearer"
 
 
@@ -352,6 +536,7 @@ class AuctionState(BaseModel):
     property_id: str
     current_bid: int = Field(default=0, ge=0)
     current_bidder_id: UUID | None = None
+    bid_deadline: datetime | None = None
     eligible_player_ids: list[UUID] = Field(min_length=2, max_length=12)
     passed_player_ids: list[UUID] = Field(default_factory=list, max_length=12)
 
@@ -381,6 +566,7 @@ class GameState(BaseModel):
     host_user_id: UUID
     pack_id: str
     pack_version: str
+    pack_snapshot: ContentPack | None = Field(default=None, exclude=True)
     status: GameStatus = GameStatus.LOBBY
     players: list[PlayerState] = Field(default_factory=list)
     spectators: list[SpectatorState] = Field(default_factory=list, max_length=50)
@@ -584,7 +770,15 @@ GameCommand = Annotated[
 
 
 class CreateGameRequest(BaseModel):
-    pack_id: str
+    pack_id: str = Field(
+        max_length=80,
+        pattern=r"^[a-z0-9][a-z0-9_-]*$",
+    )
+    version: str | None = Field(
+        default=None,
+        max_length=30,
+        pattern=r"^\d+\.\d+\.\d+$",
+    )
 
 
 class UpdateGameSettingsRequest(BaseModel):

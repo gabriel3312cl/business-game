@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from business_game.application.board_service import PackResolver
 from business_game.application.pack_loader import PackLoader
+from business_game.config import settings
 from business_game.domain.errors import (
     ConflictError,
     ForbiddenError,
+    NotFoundError,
     UnauthorizedError,
 )
 from business_game.domain.models import (
@@ -63,11 +66,23 @@ from business_game.domain.models import (
     UserCreate,
     UserUpdate,
 )
-from business_game.infrastructure.repositories import GameRepository, UserRepository
-from business_game.security import hash_password, verify_password
+from business_game.infrastructure.repositories import (
+    AuthSessionRepository,
+    GameRepository,
+    UserRepository,
+)
+from business_game.security import (
+    create_session_token,
+    hash_password,
+    hash_session_token,
+    verify_password,
+)
 
 DiceRoller = Callable[[], tuple[int, int]]
 CardShuffler = Callable[[list[str]], list[str]]
+Clock = Callable[[], datetime]
+AUCTION_BID_WINDOW = timedelta(seconds=5)
+MAX_EFFECTS_PER_COMMAND = 32
 
 
 class UserService:
@@ -132,16 +147,52 @@ class UserService:
         )
 
 
+class SessionService:
+    def __init__(self, session: AsyncSession):
+        self._session = session
+        self._sessions = AuthSessionRepository(session)
+        self._users = UserRepository(session)
+
+    async def create(self, user_id: UUID) -> str:
+        token = create_session_token()
+        async with self._session.begin():
+            await self._sessions.create(
+                user_id=user_id,
+                token_hash=hash_session_token(token),
+                expires_at=datetime.now(UTC) + timedelta(days=settings.session_days),
+            )
+        return token
+
+    async def resolve(self, token: str) -> User:
+        async with self._session.begin():
+            record = await self._sessions.get_active(hash_session_token(token))
+            if record is None:
+                raise UnauthorizedError("session is invalid or expired")
+            try:
+                user = await self._users.get(record.user_id)
+            except NotFoundError as exc:
+                raise UnauthorizedError("session user is invalid or inactive") from exc
+            await self._sessions.touch(record)
+            return user
+
+    async def revoke(self, token: str) -> None:
+        async with self._session.begin():
+            await self._sessions.revoke(hash_session_token(token))
+
+
 class GameService:
     def __init__(
         self,
         session: AsyncSession,
         packs: PackLoader,
+        pack_resolver: PackResolver | None = None,
         dice_roller: DiceRoller | None = None,
         card_shuffler: CardShuffler | None = None,
+        clock: Clock | None = None,
     ) -> None:
         self._session = session
         self._packs = packs
+        self._pack_resolver = pack_resolver
         self._games = GameRepository(session)
         secure_random = random.SystemRandom()
         self._dice_roller = dice_roller or (
@@ -150,30 +201,42 @@ class GameService:
         self._card_shuffler = card_shuffler or (
             lambda card_ids: secure_random.sample(card_ids, k=len(card_ids))
         )
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._remaining_effects = MAX_EFFECTS_PER_COMMAND
 
-    async def create(self, pack_id: str, actor: User) -> GameState:
-        pack = self._packs.load(pack_id)
-        game = GameState(
-            host_user_id=actor.id,
-            pack_id=pack.manifest.id,
-            pack_version=pack.manifest.version,
-            settings=GameSettings(
-                max_players=pack.manifest.max_players,
-                rules=pack.manifest.default_rules.model_copy(deep=True),
-            ),
-            houses_remaining=pack.manifest.house_supply,
-            hotels_remaining=pack.manifest.hotel_supply,
-            players=[
-                PlayerState(
-                    user_id=actor.id,
-                    display_name=actor.display_name,
-                    balance=pack.manifest.starting_balance,
-                )
-            ],
-        )
-        self._append_event(game, "game.created", {"pack_id": pack_id})
-        self._append_event(game, "player.joined", {"player_id": str(actor.id)})
+    async def create(
+        self,
+        pack_id: str,
+        actor: User,
+        version: str | None = None,
+    ) -> GameState:
         async with self._session.begin():
+            pack = (
+                await self._pack_resolver.load(pack_id, version=version)
+                if self._pack_resolver is not None
+                else self._packs.load(pack_id, version=version)
+            )
+            game = GameState(
+                host_user_id=actor.id,
+                pack_id=pack.manifest.id,
+                pack_version=pack.manifest.version,
+                pack_snapshot=pack if pack.manifest.schema_version == 5 else None,
+                settings=GameSettings(
+                    max_players=pack.manifest.max_players,
+                    rules=pack.manifest.default_rules.model_copy(deep=True),
+                ),
+                houses_remaining=pack.manifest.house_supply,
+                hotels_remaining=pack.manifest.hotel_supply,
+                players=[
+                    PlayerState(
+                        user_id=actor.id,
+                        display_name=actor.display_name,
+                        balance=pack.manifest.starting_balance,
+                    )
+                ],
+            )
+            self._append_event(game, "game.created", {"pack_id": pack_id})
+            self._append_event(game, "player.joined", {"player_id": str(actor.id)})
             await self._games.create(game)
         return game
 
@@ -181,6 +244,12 @@ class GameService:
         game = await self._games.get(game_id)
         self._require_member(game, actor_id)
         return game
+
+    async def list_active(self, actor_id: UUID) -> list[GameState]:
+        return await self._games.list_active_for_user(actor_id)
+
+    async def list_scheduled_auctions(self) -> list[GameState]:
+        return await self._games.list_with_scheduled_auctions()
 
     async def join(self, game_id: UUID, actor: User) -> GameState:
         async with self._session.begin():
@@ -379,6 +448,7 @@ class GameService:
                 if auction.current_bidder_id == actor_id:
                     auction.current_bidder_id = None
                     auction.current_bid = 0
+                    auction.bid_deadline = None
                 self._resolve_auction_if_finished(game)
             if (
                 game.current_player is not None
@@ -435,6 +505,7 @@ class GameService:
         actor_id: UUID,
         command: GameCommand,
     ) -> GameState:
+        self._remaining_effects = MAX_EFFECTS_PER_COMMAND
         async with self._session.begin():
             game = await self._games.get(game_id, for_update=True)
             self._require_participant(game, actor_id)
@@ -484,6 +555,26 @@ class GameService:
                 raise ConflictError("there is no active auction")
             else:
                 self._execute_turn_command(game, actor_id, command)
+            await self._games.save(game, previous_sequence)
+            return game
+
+    async def settle_expired_auction(
+        self,
+        game_id: UUID,
+        expected_deadline: datetime,
+    ) -> GameState | None:
+        async with self._session.begin():
+            game = await self._games.get(game_id, for_update=True)
+            auction = game.active_auction
+            if (
+                auction is None
+                or auction.bid_deadline is None
+                or auction.bid_deadline != expected_deadline
+                or auction.bid_deadline > self._clock()
+            ):
+                return None
+            previous_sequence = len(game.events)
+            self._complete_auction(game)
             await self._games.save(game, previous_sequence)
             return game
 
@@ -537,13 +628,18 @@ class GameService:
         is_double = dice[0] == dice[1]
         game.consecutive_doubles = game.consecutive_doubles + 1 if is_double else 0
         if game.consecutive_doubles >= pack.manifest.max_consecutive_doubles:
+            position = player.position
             self._append_event(
                 game,
                 "dice.rolled",
                 {
                     "player_id": str(player.user_id),
                     "dice": list(dice),
-                    "position": player.position,
+                    "from_position": position,
+                    "to_position": position,
+                    "position": position,
+                    "steps": 0,
+                    "movement": "step",
                     "consecutive_doubles": game.consecutive_doubles,
                 },
             )
@@ -551,12 +647,11 @@ class GameService:
             return
 
         game.extra_roll_pending = is_double
-        self._move_forward(game, player, sum(dice))
+        from_position = player.position
+        steps = sum(dice)
+        self._move_forward(game, player, steps)
         tile = pack.board.tiles[player.position]
-        if (
-            tile.kind in {TileKind.PROPERTY, TileKind.TRANSPORT, TileKind.UTILITY}
-            and tile.id not in game.owners
-        ):
+        if tile.is_purchasable and tile.id not in game.owners:
             game.pending_tile_id = tile.id
             game.phase = TurnPhase.BUY_DECISION
         else:
@@ -567,7 +662,11 @@ class GameService:
             {
                 "player_id": str(player.user_id),
                 "dice": list(dice),
+                "from_position": from_position,
+                "to_position": player.position,
                 "position": player.position,
+                "steps": steps,
+                "movement": "step",
                 "tile_id": tile.id,
                 "is_double": is_double,
             },
@@ -583,13 +682,24 @@ class GameService:
     ) -> None:
         pack = self._pack(game)
         is_double = dice[0] == dice[1]
+        from_position = player.position
+        will_move = (
+            is_double
+            or player.jail_failed_rolls + 1 >= pack.manifest.jail_max_failed_rolls
+        )
+        steps = sum(dice) if will_move else 0
+        to_position = (from_position + steps) % pack.manifest.tile_count
         self._append_event(
             game,
             "dice.rolled",
             {
                 "player_id": str(player.user_id),
                 "dice": list(dice),
-                "position": player.position,
+                "from_position": from_position,
+                "to_position": to_position,
+                "position": to_position,
+                "steps": steps,
+                "movement": "step",
                 "jail_attempt": True,
                 "is_double": is_double,
             },
@@ -635,10 +745,7 @@ class GameService:
         game.extra_roll_pending = False
         self._move_forward(game, player, sum(dice))
         tile = pack.board.tiles[player.position]
-        if (
-            tile.kind in {TileKind.PROPERTY, TileKind.TRANSPORT, TileKind.UTILITY}
-            and tile.id not in game.owners
-        ):
+        if tile.is_purchasable and tile.id not in game.owners:
             game.pending_tile_id = tile.id
             game.phase = TurnPhase.BUY_DECISION
         else:
@@ -721,14 +828,23 @@ class GameService:
             self._draw_card(game, player, tile.deck_id or "")
             return
         if tile.kind is TileKind.TAX:
+            amount = tile.amount
+            if tile.net_worth_percent is not None:
+                amount = (
+                    self._player_net_worth(game, player)
+                    * tile.net_worth_percent
+                    // 100
+                )
             self._charge_player(
                 game,
                 player,
-                amount=tile.amount or 0,
+                amount=amount or 0,
                 creditor_id=None,
                 reason=DebtReason.TAX,
                 tile_id=tile.id,
             )
+            if game.active_debt is None:
+                self._apply_landing_effects(game, player, tile)
             return
         if (
             tile.kind is TileKind.FREE
@@ -747,6 +863,8 @@ class GameService:
                     "tile_id": tile.id,
                 },
             )
+        if not tile.is_purchasable:
+            self._apply_landing_effects(game, player, tile)
             return
         owner_id = game.owners.get(tile.id)
         if (
@@ -764,6 +882,25 @@ class GameService:
             reason=DebtReason.RENT,
             tile_id=tile.id,
         )
+
+    def _apply_landing_effects(
+        self,
+        game: GameState,
+        player: PlayerState,
+        tile: TileDefinition,
+    ) -> None:
+        for effect in tile.landing_effects:
+            self._apply_effect(
+                game,
+                player,
+                effect,
+                source_id=tile.id,
+            )
+            if (
+                game.active_debt is not None
+                or isinstance(effect, GoToJailCardEffect)
+            ):
+                return
 
     def _draw_card(
         self,
@@ -807,7 +944,28 @@ class GameService:
                 "card_id": card.id,
             },
         )
-        effect = card.effect
+        for effect in card.resolved_effects():
+            self._apply_effect(
+                game,
+                player,
+                effect,
+                source_id=card.id,
+            )
+            if game.active_debt is not None or isinstance(effect, GoToJailCardEffect):
+                break
+
+    def _apply_effect(
+        self,
+        game: GameState,
+        player: PlayerState,
+        effect: object,
+        *,
+        source_id: str,
+    ) -> bool:
+        if self._remaining_effects <= 0:
+            raise ConflictError("the configured effect chain exceeds the safe limit")
+        self._remaining_effects -= 1
+        pack = self._pack(game)
         if isinstance(effect, CashCardEffect):
             if effect.amount >= 0:
                 player.balance += effect.amount
@@ -816,7 +974,7 @@ class GameService:
                     "card.cash_applied",
                     {
                         "player_id": str(player.user_id),
-                        "card_id": card.id,
+                        "card_id": source_id,
                         "amount": effect.amount,
                     },
                 )
@@ -827,32 +985,49 @@ class GameService:
                     amount=abs(effect.amount),
                     creditor_id=None,
                     reason=DebtReason.CARD,
-                    tile_id=card.id,
+                    tile_id=source_id,
                 )
-            return
+            return False
         if isinstance(effect, MoveToCardEffect):
+            from_position = player.position
             target_position = next(
                 index
                 for index, tile in enumerate(pack.board.tiles)
                 if tile.id == effect.tile_id
             )
-            steps = (target_position - player.position) % pack.manifest.tile_count
+            steps = (target_position - from_position) % pack.manifest.tile_count
             if effect.collect_start:
                 self._move_forward(game, player, steps)
             else:
                 player.position = target_position
-            self._resolve_card_destination(game, player, card.id)
-            return
+            self._resolve_card_destination(
+                game,
+                player,
+                source_id,
+                from_position=from_position,
+                steps=steps if effect.collect_start else 0,
+                movement="step" if effect.collect_start else "teleport",
+            )
+            return True
         if isinstance(effect, MoveRelativeCardEffect):
+            from_position = player.position
             if effect.steps > 0 and effect.collect_start:
                 self._move_forward(game, player, effect.steps)
             else:
                 player.position = (
                     player.position + effect.steps
                 ) % pack.manifest.tile_count
-            self._resolve_card_destination(game, player, card.id)
-            return
+            self._resolve_card_destination(
+                game,
+                player,
+                source_id,
+                from_position=from_position,
+                steps=effect.steps,
+                movement="step",
+            )
+            return True
         if isinstance(effect, MoveToNearestCardEffect):
+            from_position = player.position
             target_kind = TileKind(effect.tile_kind)
             candidates = [
                 index
@@ -866,12 +1041,12 @@ class GameService:
             target_position = min(
                 candidates,
                 key=lambda index: (
-                    (index - player.position) % pack.manifest.tile_count
+                    (index - from_position) % pack.manifest.tile_count
                     or pack.manifest.tile_count
                 ),
             )
             steps = (
-                target_position - player.position
+                target_position - from_position
             ) % pack.manifest.tile_count or pack.manifest.tile_count
             if effect.collect_start:
                 self._move_forward(game, player, steps)
@@ -880,10 +1055,13 @@ class GameService:
             self._resolve_nearest_card_destination(
                 game,
                 player,
-                card.id,
+                source_id,
                 effect,
+                from_position=from_position,
+                steps=steps if effect.collect_start else 0,
+                movement="step" if effect.collect_start else "teleport",
             )
-            return
+            return True
         if isinstance(effect, RepairsCardEffect):
             house_count = sum(
                 level if level < 5 else 0
@@ -904,7 +1082,7 @@ class GameService:
                 "card.repairs_assessed",
                 {
                     "player_id": str(player.user_id),
-                    "card_id": card.id,
+                    "card_id": source_id,
                     "houses": house_count,
                     "hotels": hotel_count,
                     "amount": amount,
@@ -916,9 +1094,9 @@ class GameService:
                 amount=amount,
                 creditor_id=None,
                 reason=DebtReason.CARD,
-                tile_id=card.id,
+                tile_id=source_id,
             )
-            return
+            return False
         if isinstance(effect, CashEachCardEffect):
             active_others = [
                 candidate
@@ -931,7 +1109,7 @@ class GameService:
                         payer_id=candidate.user_id,
                         recipient_id=player.user_id,
                         amount=effect.amount,
-                        card_id=card.id,
+                        card_id=source_id,
                     )
                     for candidate in active_others
                 ]
@@ -941,24 +1119,30 @@ class GameService:
                         payer_id=player.user_id,
                         recipient_id=candidate.user_id,
                         amount=abs(effect.amount),
-                        card_id=card.id,
+                        card_id=source_id,
                     )
                     for candidate in active_others
                 ]
             game.pending_card_payments.extend(payments)
             self._process_card_payments(game)
-            return
+            return False
         if isinstance(effect, GoToJailCardEffect):
             self._send_to_jail(game, player, "card")
-            return
+            return True
         if isinstance(effect, GetOutOfJailCardEffect):
-            player.jail_card_ids.append(card.id)
+            player.jail_card_ids.append(source_id)
+            return False
+        raise ValueError(f"unsupported effect type: {type(effect).__name__}")
 
     def _resolve_card_destination(
         self,
         game: GameState,
         player: PlayerState,
         card_id: str,
+        *,
+        from_position: int,
+        steps: int,
+        movement: str,
     ) -> None:
         target = self._pack(game).board.tiles[player.position]
         game.pending_tile_id = None
@@ -969,20 +1153,19 @@ class GameService:
                 "player_id": str(player.user_id),
                 "card_id": card_id,
                 "tile_id": target.id,
+                "from_position": from_position,
+                "to_position": player.position,
                 "position": player.position,
+                "steps": steps,
+                "movement": movement,
             },
         )
-        if (
-            target.kind
-            in {TileKind.PROPERTY, TileKind.TRANSPORT, TileKind.UTILITY}
-            and target.id not in game.owners
-        ):
+        if target.is_purchasable and target.id not in game.owners:
             game.pending_tile_id = target.id
             game.phase = TurnPhase.BUY_DECISION
             return
         game.phase = TurnPhase.WAITING_FOR_END
-        if target.kind is not TileKind.CARD:
-            self._resolve_landed_tile(game, player, target.id, 0)
+        self._resolve_landed_tile(game, player, target.id, 0)
 
     def _resolve_nearest_card_destination(
         self,
@@ -990,6 +1173,10 @@ class GameService:
         player: PlayerState,
         card_id: str,
         effect: MoveToNearestCardEffect,
+        *,
+        from_position: int,
+        steps: int,
+        movement: str,
     ) -> None:
         tile = self._pack(game).board.tiles[player.position]
         game.pending_tile_id = None
@@ -1000,10 +1187,18 @@ class GameService:
                 "player_id": str(player.user_id),
                 "card_id": card_id,
                 "tile_id": tile.id,
+                "from_position": from_position,
+                "to_position": player.position,
                 "position": player.position,
+                "steps": steps,
+                "movement": movement,
             },
         )
         owner_id = game.owners.get(tile.id)
+        if not tile.is_purchasable:
+            game.phase = TurnPhase.WAITING_FOR_END
+            self._resolve_landed_tile(game, player, tile.id, 0)
+            return
         if owner_id is None:
             game.pending_tile_id = tile.id
             game.phase = TurnPhase.BUY_DECISION
@@ -1118,9 +1313,11 @@ class GameService:
     ) -> None:
         jail_tile = self._jail_tile(game)
         pack = self._pack(game)
-        player.position = next(
+        from_position = player.position
+        to_position = next(
             index for index, tile in enumerate(pack.board.tiles) if tile.id == jail_tile.id
         )
+        player.position = to_position
         player.in_jail = True
         player.jail_failed_rolls = 0
         game.pending_tile_id = None
@@ -1130,7 +1327,15 @@ class GameService:
         self._append_event(
             game,
             "jail.entered",
-            {"player_id": str(player.user_id), "reason": reason},
+            {
+                "player_id": str(player.user_id),
+                "reason": reason,
+                "from_position": from_position,
+                "to_position": to_position,
+                "position": to_position,
+                "steps": 0,
+                "movement": "teleport",
+            },
         )
 
     def _calculate_rent(
@@ -1166,6 +1371,26 @@ class GameService:
             multipliers = tile.rent_multipliers or [1]
             return dice_total * multipliers[min(owned_kind_count, len(multipliers)) - 1]
         return 0
+
+    def _player_net_worth(self, game: GameState, player: PlayerState) -> int:
+        pack = self._pack(game)
+        tiles_by_id = {tile.id: tile for tile in pack.board.tiles}
+        owned_tiles = {
+            tile_id: tiles_by_id[tile_id]
+            for tile_id, owner_id in game.owners.items()
+            if owner_id == player.user_id and tile_id in tiles_by_id
+        }
+        property_value = sum(tile.price or 0 for tile in owned_tiles.values())
+        building_value = 0
+        for tile_id, level in game.building_levels.items():
+            tile = owned_tiles.get(tile_id)
+            if tile is None:
+                continue
+            house_cost = tile.build_cost or 0
+            building_value += house_cost * min(level, 4)
+            if level == 5:
+                building_value += tile.hotel_cost or house_cost
+        return player.balance + property_value + building_value
 
     def _charge_player(
         self,
@@ -1334,7 +1559,11 @@ class GameService:
             raise ConflictError("the property already has a hotel")
         if current_level != min(levels.values()):
             raise ConflictError("buildings must be distributed evenly")
-        cost = tile.build_cost or 0
+        cost = (
+            tile.hotel_cost
+            if current_level == 4 and tile.hotel_cost is not None
+            else tile.build_cost or 0
+        )
         if player.balance < cost:
             raise ConflictError("insufficient balance")
         if current_level < 4:
@@ -1377,7 +1606,12 @@ class GameService:
         if current_level != max(levels.values()):
             raise ConflictError("buildings must be sold evenly")
         pack = self._pack(game)
-        refund = (tile.build_cost or 0) * pack.manifest.building_sell_percent // 100
+        building_cost = (
+            tile.hotel_cost
+            if current_level == 5 and tile.hotel_cost is not None
+            else tile.build_cost or 0
+        )
+        refund = building_cost * pack.manifest.building_sell_percent // 100
         if current_level < 5:
             game.houses_remaining += 1
         else:
@@ -1580,6 +1814,11 @@ class GameService:
         auction = game.active_auction
         if auction is None:
             raise ConflictError("there is no active auction")
+        if (
+            auction.bid_deadline is not None
+            and auction.bid_deadline <= self._clock()
+        ):
+            raise ConflictError("the auction bidding window has expired")
         if actor_id not in auction.eligible_player_ids:
             raise ConflictError("the player cannot participate in this auction")
         if actor_id in auction.passed_player_ids:
@@ -1591,6 +1830,7 @@ class GameService:
             raise ConflictError("insufficient balance")
         auction.current_bid = amount
         auction.current_bidder_id = actor_id
+        auction.bid_deadline = self._clock() + AUCTION_BID_WINDOW
         self._append_event(
             game,
             "auction.bid_placed",
@@ -1598,6 +1838,7 @@ class GameService:
                 "property_id": auction.property_id,
                 "player_id": str(actor_id),
                 "amount": amount,
+                "bid_deadline": auction.bid_deadline.isoformat(),
             },
         )
         self._resolve_auction_if_finished(game)
@@ -1632,37 +1873,34 @@ class GameService:
             for player_id in auction.eligible_player_ids
             if player_id not in auction.passed_player_ids
         ]
-        if auction.current_bidder_id is not None and remaining == [
-            auction.current_bidder_id
-        ]:
+        if not remaining and auction.current_bidder_id is None:
+            self._complete_auction(game)
+
+    def _complete_auction(self, game: GameState) -> None:
+        auction = game.active_auction
+        if auction is None:
+            return
+        winner_id: str | None = None
+        amount = 0
+        if auction.current_bidder_id is not None:
             winner = self._player(game, auction.current_bidder_id)
             if winner.balance < auction.current_bid:
                 raise ConflictError("the highest bidder no longer has sufficient balance")
             winner.balance -= auction.current_bid
             game.owners[auction.property_id] = winner.user_id
-            self._append_event(
-                game,
-                "auction.completed",
-                {
-                    "property_id": auction.property_id,
-                    "winner_id": str(winner.user_id),
-                    "amount": auction.current_bid,
-                },
-            )
-            game.active_auction = None
-            self._start_next_bank_auction(game)
-        elif not remaining:
-            self._append_event(
-                game,
-                "auction.completed",
-                {
-                    "property_id": auction.property_id,
-                    "winner_id": None,
-                    "amount": 0,
-                },
-            )
-            game.active_auction = None
-            self._start_next_bank_auction(game)
+            winner_id = str(winner.user_id)
+            amount = auction.current_bid
+        self._append_event(
+            game,
+            "auction.completed",
+            {
+                "property_id": auction.property_id,
+                "winner_id": winner_id,
+                "amount": amount,
+            },
+        )
+        game.active_auction = None
+        self._start_next_bank_auction(game)
 
     def _propose_trade(
         self,
@@ -1786,7 +2024,7 @@ class GameService:
         purchasable_ids = {
             tile.id
             for tile in pack.board.tiles
-            if tile.kind in {TileKind.PROPERTY, TileKind.TRANSPORT, TileKind.UTILITY}
+            if tile.is_purchasable
         }
         for property_id in offered_property_ids:
             if property_id not in purchasable_ids:
@@ -1845,6 +2083,8 @@ class GameService:
         return tile
 
     def _pack(self, game: GameState) -> ContentPack:
+        if game.pack_snapshot is not None:
+            return game.pack_snapshot
         return self._packs.load(game.pack_id, version=game.pack_version)
 
     def _owned_tile(
@@ -1854,11 +2094,7 @@ class GameService:
         tile_id: str,
     ) -> TileDefinition:
         tile = self._tile(game, tile_id)
-        if tile.kind not in {
-            TileKind.PROPERTY,
-            TileKind.TRANSPORT,
-            TileKind.UTILITY,
-        }:
+        if not tile.is_purchasable:
             raise ConflictError("the tile is not a purchasable property")
         if game.owners.get(tile_id) != actor_id:
             raise ForbiddenError("the player does not own this property")

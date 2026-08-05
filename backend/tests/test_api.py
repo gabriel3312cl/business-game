@@ -1,4 +1,19 @@
+from copy import deepcopy
+from uuid import UUID
+
+import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from business_game.config import settings
+from business_game.infrastructure.db_models import (
+    AuthSessionRecord,
+    GameRecord,
+    UserRecord,
+)
+from business_game.realtime import _authenticated_user_id, sio
+from business_game.security import hash_session_token
 
 
 async def register_and_login(
@@ -70,6 +85,70 @@ async def test_rejects_duplicate_email_and_invalid_password(client: AsyncClient)
     assert invalid_login.status_code == 401
 
 
+async def test_persistent_session_refresh_and_logout(
+    client: AsyncClient,
+    session: AsyncSession,
+) -> None:
+    headers = await register_and_login(client, email="session@example.com")
+    current_user = (await client.get("/api/v1/auth/me", headers=headers)).json()
+    login = await client.post(
+        "/api/v1/auth/token",
+        data={
+            "username": "session@example.com",
+            "password": "correct-horse-battery",
+        },
+    )
+    cookie_header = login.headers["set-cookie"]
+    assert "HttpOnly" in cookie_header
+    assert "SameSite=strict" in cookie_header
+    assert "Path=/" in cookie_header
+
+    raw_session_token = client.cookies.get(settings.session_cookie_name)
+    assert raw_session_token
+    token_hash = hash_session_token(raw_session_token)
+    stored_session = await session.scalar(
+        select(AuthSessionRecord).where(
+            AuthSessionRecord.token_hash == token_hash,
+        )
+    )
+    assert stored_session is not None
+    assert stored_session.token_hash != raw_session_token
+    assert len(stored_session.token_hash) == 64
+    await session.rollback()
+
+    refreshed = await client.post("/api/v1/auth/refresh")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["token_type"] == "bearer"
+    assert refreshed.json()["access_token"]
+    assert refreshed.json()["user_id"] == current_user["id"]
+
+    logged_out = await client.post("/api/v1/auth/logout")
+    assert logged_out.status_code == 204
+    assert (await client.post("/api/v1/auth/refresh")).status_code == 401
+
+
+async def test_realtime_authentication_closes_lookup_transaction(
+    client: AsyncClient,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = await register_and_login(
+        client,
+        email="socket-auth@example.com",
+    )
+    token = headers["Authorization"].removeprefix("Bearer ")
+
+    async def socket_session(_sid: str) -> dict[str, str]:
+        return {"token": token}
+
+    monkeypatch.setattr(sio, "get_session", socket_session)
+    user_id = await _authenticated_user_id("socket-id", session)
+
+    assert not session.in_transaction()
+    async with session.begin():
+        assert await session.get(UserRecord, user_id) is not None
+
+
 async def test_game_creation_uses_authenticated_identity(client: AsyncClient) -> None:
     headers = await register_and_login(client)
     current_user = (await client.get("/api/v1/auth/me", headers=headers)).json()
@@ -87,6 +166,54 @@ async def test_game_creation_uses_authenticated_identity(client: AsyncClient) ->
     assert game["events"][0]["sequence"] == 1
     assert game["events"][0]["type"] == "game.created"
     assert game["events"][1]["type"] == "player.joined"
+
+
+async def test_lists_active_games_for_each_member(
+    client: AsyncClient,
+    session: AsyncSession,
+) -> None:
+    host_headers = await register_and_login(
+        client,
+        email="active-host@example.com",
+    )
+    player_headers = await register_and_login(
+        client,
+        email="active-player@example.com",
+    )
+    game = (
+        await client.post(
+            "/api/v1/games",
+            headers=host_headers,
+            json={"pack_id": "classic-demo"},
+        )
+    ).json()
+    joined = await client.post(
+        f"/api/v1/games/{game['id']}/players",
+        headers=player_headers,
+    )
+    assert joined.status_code == 200
+
+    host_games = await client.get("/api/v1/games/me/active", headers=host_headers)
+    player_games = await client.get(
+        "/api/v1/games/me/active",
+        headers=player_headers,
+    )
+    assert [candidate["id"] for candidate in host_games.json()] == [game["id"]]
+    assert [candidate["id"] for candidate in player_games.json()] == [game["id"]]
+    assert len(host_games.json()[0]["players"]) == 2
+
+    record = await session.get(GameRecord, UUID(game["id"]))
+    assert record is not None
+    state = deepcopy(record.state)
+    state["players"][1]["bankrupt"] = True
+    record.state = state
+    await session.commit()
+
+    player_games = await client.get(
+        "/api/v1/games/me/active",
+        headers=player_headers,
+    )
+    assert player_games.json() == []
 
 
 async def test_room_settings_and_spectator_permissions(client: AsyncClient) -> None:

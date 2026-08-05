@@ -1,8 +1,12 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 import socketio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from business_game.api.board_routes import router as board_router
 from business_game.api.routes import router
 from business_game.config import settings
 from business_game.domain.errors import (
@@ -12,9 +16,21 @@ from business_game.domain.errors import (
     NotFoundError,
     UnauthorizedError,
 )
-from business_game.realtime import sio
+from business_game.realtime import (
+    resume_auction_timers,
+    shutdown_auction_timers,
+    sio,
+)
 
-api = FastAPI(title=settings.app_name, version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    await resume_auction_timers()
+    yield
+    await shutdown_auction_timers()
+
+
+api = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 api.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
@@ -23,6 +39,7 @@ api.add_middleware(
     allow_headers=["*"],
 )
 api.include_router(router)
+api.include_router(board_router)
 
 
 @api.exception_handler(DomainError)

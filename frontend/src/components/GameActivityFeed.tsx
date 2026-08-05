@@ -21,11 +21,18 @@ interface Props {
   players: PlayerState[]
   spectators: SpectatorState[]
   pack: ContentPack
+  compact?: boolean
 }
 
-export function GameActivityFeed({ events, players, spectators, pack }: Props) {
+export function GameActivityFeed({
+  events,
+  players,
+  spectators,
+  pack,
+  compact = false,
+}: Props) {
   const { t, i18n } = useTranslation()
-  const visibleEvents = events.slice(-18).reverse()
+  const visibleEvents = events.slice(compact ? -6 : -18).reverse()
 
   const playerName = (playerId?: string) =>
     players.find((player) => player.user_id === playerId)?.display_name ??
@@ -39,22 +46,45 @@ export function GameActivityFeed({ events, players, spectators, pack }: Props) {
     const card = pack.board.decks
       .flatMap((deck) => deck.cards)
       .find((candidate) => candidate.id === cardId)
-    return card ? pack.messages[card.message_key] : (cardId ?? '')
+    if (!card) return cardId ?? ''
+    const title = card.title_key ? pack.messages[card.title_key] : ''
+    const message = pack.messages[card.message_key] ?? cardId ?? ''
+    return title ? `${title}: ${message}` : message
+  }
+  const deckName = (deckId?: string) => {
+    const deck = pack.board.decks.find((candidate) => candidate.id === deckId)
+    return deck?.name_key ? (pack.messages[deck.name_key] ?? deckId ?? '') : (deckId ?? '')
   }
 
   return (
     <Box>
-      <Divider sx={{ mb: 1.5 }} />
-      <Stack direction="row" spacing={1} alignItems="center">
-        <HistoryRoundedIcon fontSize="small" color="secondary" />
-        <Typography fontWeight={800}>{t('activity.title')}</Typography>
-      </Stack>
+      {!compact && (
+        <>
+          <Divider sx={{ mb: 1.5 }} />
+          <Stack direction="row" spacing={1} alignItems="center">
+            <HistoryRoundedIcon fontSize="small" color="secondary" />
+            <Typography fontWeight={800}>{t('activity.title')}</Typography>
+          </Stack>
+        </>
+      )}
       {visibleEvents.length === 0 ? (
         <Typography color="text.secondary" variant="body2" sx={{ mt: 1 }}>
           {t('activity.empty')}
         </Typography>
       ) : (
-        <List dense disablePadding sx={{ mt: 0.5, maxHeight: 280, overflow: 'auto' }}>
+        <List
+          dense
+          disablePadding
+          sx={{
+            mt: 0.5,
+            maxHeight: compact ? { xs: 72, sm: 120, lg: 180 } : 280,
+            overflow: compact ? 'hidden' : 'auto',
+            width: '100%',
+            maskImage: compact
+              ? 'linear-gradient(to bottom, black 58%, transparent 100%)'
+              : 'none',
+          }}
+        >
           {visibleEvents.map((event) => (
             <ListItem key={event.sequence} disableGutters alignItems="flex-start">
               <ListItemText
@@ -64,11 +94,24 @@ export function GameActivityFeed({ events, players, spectators, pack }: Props) {
                   playerName,
                   propertyName,
                   cardMessage,
+                  deckName,
                 )}
                 secondary={formatEventTime(event.occurred_at, i18n.language)}
                 slotProps={{
-                  primary: { variant: 'body2' },
-                  secondary: { variant: 'caption' },
+                  primary: {
+                    variant: 'body2',
+                    sx: compact
+                      ? {
+                          fontSize: { xs: '0.55rem', sm: '0.7rem', lg: '0.8rem' },
+                          lineHeight: 1.25,
+                          textAlign: 'center',
+                        }
+                      : undefined,
+                  },
+                  secondary: {
+                    variant: 'caption',
+                    sx: compact ? { display: 'none' } : undefined,
+                  },
                 }}
               />
             </ListItem>
@@ -87,6 +130,7 @@ function eventMessage(
   playerName: (playerId?: string) => string,
   propertyName: (tileId?: string) => string,
   cardMessage: (cardId?: string) => string,
+  deckName: (deckId?: string) => string,
 ): string {
   const player = playerName(textValue(event, 'player_id'))
   const member =
@@ -208,7 +252,9 @@ function eventMessage(
       })
     }
     case 'card.deck_empty':
-      return t('activity.deckEmpty')
+      return t('activity.deckEmpty', {
+        deck: deckName(textValue(event, 'deck_id')),
+      })
     case 'salary.collected':
       return t('activity.salaryCollected', { player, amount })
     case 'bank_pot.increased':

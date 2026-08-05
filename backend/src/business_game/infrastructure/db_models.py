@@ -42,6 +42,86 @@ class UserRecord(Base):
     )
 
 
+class AuthSessionRecord(Base):
+    __tablename__ = "auth_sessions"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_auth_sessions_token_hash"),
+        Index("ix_auth_sessions_user_active", "user_id", "revoked_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+    )
+    token_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        default=None,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
+class BoardProjectRecord(Base):
+    __tablename__ = "board_projects"
+    __table_args__ = (
+        UniqueConstraint("pack_id", name="uq_board_projects_pack_id"),
+        Index("ix_board_projects_owner_updated", "owner_id", "updated_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+    )
+    pack_id: Mapped[str] = mapped_column(String(80))
+    name: Mapped[str] = mapped_column(String(80))
+    description: Mapped[str] = mapped_column(String(500), default="")
+    document: Mapped[dict[str, Any]] = mapped_column(JSON)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class BoardVersionRecord(Base):
+    __tablename__ = "board_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "version",
+            name="uq_board_versions_project_version",
+        ),
+        Index("ix_board_versions_pack_published", "pack_id", "published_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("board_projects.id", ondelete="CASCADE"),
+    )
+    pack_id: Mapped[str] = mapped_column(String(80))
+    version: Mapped[str] = mapped_column(String(30))
+    source_revision: Mapped[int] = mapped_column(Integer)
+    document: Mapped[dict[str, Any]] = mapped_column(JSON)
+    manifest: Mapped[dict[str, Any]] = mapped_column(JSON)
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
 class GameRecord(Base):
     __tablename__ = "games"
 
@@ -50,6 +130,7 @@ class GameRecord(Base):
     pack_version: Mapped[str] = mapped_column(String(30))
     status: Mapped[str] = mapped_column(String(30))
     state: Mapped[dict[str, Any]] = mapped_column(JSON)
+    pack_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

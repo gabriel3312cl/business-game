@@ -1,10 +1,10 @@
 import AccountCircleRoundedIcon from '@mui/icons-material/AccountCircleRounded'
 import CloseFullscreenRoundedIcon from '@mui/icons-material/CloseFullscreenRounded'
+import DashboardCustomizeRoundedIcon from '@mui/icons-material/DashboardCustomizeRounded'
 import FullscreenRoundedIcon from '@mui/icons-material/FullscreenRounded'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
 import {
   Alert,
-  AppBar,
   Box,
   Button,
   CircularProgress,
@@ -17,12 +17,12 @@ import {
   TextField,
   ToggleButton,
   ToggleButtonGroup,
-  Toolbar,
   Typography,
 } from '@mui/material'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { activeGameSession, api, ApiError, authToken } from './api'
+import { BoardStudio } from './board-editor/BoardStudio'
 import { AuthDialog, type AuthMode } from './components/AuthDialog'
 import { GameBoard } from './components/GameBoard'
 import { GameSessionPanel } from './components/GameSessionPanel'
@@ -51,10 +51,24 @@ export default function App() {
   const [gamePack, setGamePack] = useState<ContentPack | null>(null)
   const [gameError, setGameError] = useState<string | null>(null)
   const [joinGameId, setJoinGameId] = useState('')
+  const [boardStudioOpen, setBoardStudioOpen] = useState(false)
+  const [customPackNames, setCustomPackNames] = useState<Record<string, string>>(
+    {},
+  )
   const activeGamePackId = createdGame?.pack_id
+  const activeGamePackVersion = createdGame?.pack_version
+  const customManifests = manifests.filter((item) => item.board_mode === 'custom')
   const displayedPack = createdGame && gamePack ? gamePack : pack
   const displayedMode =
     createdGame && gamePack ? gamePack.manifest.board_mode : selectedMode
+  const applyGameState = useCallback((nextGame: GameState) => {
+    setCreatedGame((currentGame) => {
+      if (!currentGame || currentGame.id !== nextGame.id) return nextGame
+      return gameSequence(nextGame) >= gameSequence(currentGame)
+        ? nextGame
+        : currentGame
+    })
+  }, [])
 
   const loadManifests = useCallback(async () => {
     setError(false)
@@ -62,9 +76,12 @@ export default function App() {
       const available = await api.listPacks()
       setManifests(available)
       const selected =
-        available.find((item) => item.board_mode === selectedMode) ?? available[0]
+        available.find((item) => item.board_mode === selectedMode) ??
+        (selectedMode === 'custom' ? undefined : available[0])
       if (selected) {
-        setPack(await api.getPack(selected.id, i18n.language))
+        setPack(await api.getPack(selected.id, i18n.language, selected.version))
+      } else {
+        setPack(null)
       }
     } catch {
       setError(true)
@@ -76,7 +93,34 @@ export default function App() {
   }, [loadManifests])
 
   useEffect(() => {
-    if (!authToken.get()) return
+    if (selectedMode !== 'custom') return
+    const custom = manifests.filter((item) => item.board_mode === 'custom')
+    let active = true
+    void Promise.all(
+      custom.map(async (manifest) => {
+        const content = await api.getPack(
+          manifest.id,
+          i18n.language,
+          manifest.version,
+        )
+        return [
+          `${manifest.id}@${manifest.version}`,
+          content.messages[content.manifest.name_key] ?? manifest.id,
+        ] as const
+      }),
+    )
+      .then((entries) => {
+        if (active) setCustomPackNames(Object.fromEntries(entries))
+      })
+      .catch(() => {
+        if (active) setCustomPackNames({})
+      })
+    return () => {
+      active = false
+    }
+  }, [i18n.language, manifests, selectedMode])
+
+  useEffect(() => {
     let active = true
     const restoreSession = async () => {
       try {
@@ -84,21 +128,21 @@ export default function App() {
         if (!active) return
         setUser(currentUser)
         const activeGameId = activeGameSession.get()
-        if (!activeGameId) return
-        try {
-          const restoredGame = await api.getGame(activeGameId)
-          if (active) setCreatedGame(restoredGame)
-        } catch (requestError: unknown) {
-          if (
-            requestError instanceof ApiError &&
-            [403, 404].includes(requestError.status)
-          ) {
-            activeGameSession.clear()
-          }
+        const activeGames = await api.listActiveGames()
+        if (!active) return
+        const restoredGame =
+          activeGames.find((game) => game.id === activeGameId) ?? activeGames[0]
+        if (restoredGame) {
+          activeGameSession.set(restoredGame.id)
+          setZoom(1)
+          applyGameState(restoredGame)
+        } else if (activeGameId) {
+          activeGameSession.clear()
         }
       } catch (requestError: unknown) {
         if (requestError instanceof ApiError && requestError.status === 401) {
           authToken.clear()
+          if (active) setUser(null)
         }
       }
     }
@@ -106,7 +150,7 @@ export default function App() {
     return () => {
       active = false
     }
-  }, [])
+  }, [applyGameState])
 
   useEffect(() => {
     if (!activeGamePackId) {
@@ -115,7 +159,7 @@ export default function App() {
     }
     let active = true
     api
-      .getPack(activeGamePackId, i18n.language)
+      .getPack(activeGamePackId, i18n.language, activeGamePackVersion)
       .then((loadedPack) => {
         if (active) setGamePack(loadedPack)
       })
@@ -125,15 +169,25 @@ export default function App() {
     return () => {
       active = false
     }
-  }, [activeGamePackId, i18n.language, t])
+  }, [activeGamePackId, activeGamePackVersion, i18n.language, t])
 
   const selectMode = async (mode: BoardMode) => {
     setSelectedMode(mode)
+    setPack(null)
     const selected = manifests.find((item) => item.board_mode === mode)
     if (selected) {
-      setPack(await api.getPack(selected.id, i18n.language))
+      setPack(await api.getPack(selected.id, i18n.language, selected.version))
       setZoom(1)
+    } else {
+      setPack(null)
     }
+  }
+
+  const selectManifest = async (manifest: PackManifest) => {
+    setSelectedMode(manifest.board_mode)
+    setPack(null)
+    setPack(await api.getPack(manifest.id, i18n.language, manifest.version))
+    setZoom(1)
   }
 
   const submitAuth = async (data: {
@@ -153,20 +207,18 @@ export default function App() {
         })
       }
       const token = await api.login(data.email, data.password)
-      authToken.set(token.access_token)
+      authToken.set(token.access_token, token.user_id)
       setUser(await api.me())
       const activeGameId = activeGameSession.get()
-      if (activeGameId) {
-        try {
-          setCreatedGame(await api.getGame(activeGameId))
-        } catch (requestError: unknown) {
-          if (
-            requestError instanceof ApiError &&
-            [403, 404].includes(requestError.status)
-          ) {
-            activeGameSession.clear()
-          }
-        }
+      const activeGames = await api.listActiveGames()
+      const restoredGame =
+        activeGames.find((game) => game.id === activeGameId) ?? activeGames[0]
+      if (restoredGame) {
+        activeGameSession.set(restoredGame.id)
+        setZoom(1)
+        applyGameState(restoredGame)
+      } else if (activeGameId) {
+        activeGameSession.clear()
       }
       setAuthOpen(false)
     } catch {
@@ -188,9 +240,10 @@ export default function App() {
       return
     }
     try {
-      const game = await api.createGame(pack.manifest.id)
+      const game = await api.createGame(pack.manifest.id, pack.manifest.version)
       activeGameSession.set(game.id)
-      setCreatedGame(game)
+      setZoom(1)
+      applyGameState(game)
     } catch (requestError: unknown) {
       if (requestError instanceof ApiError && requestError.status === 401) {
         authToken.clear()
@@ -201,12 +254,17 @@ export default function App() {
     }
   }
 
-  const logout = () => {
-    authToken.clear()
-    activeGameSession.clear()
-    setUser(null)
-    setCreatedGame(null)
-    setGamePack(null)
+  const logout = async () => {
+    try {
+      await api.logout()
+    } finally {
+      authToken.clear()
+      activeGameSession.clear()
+      setUser(null)
+      setCreatedGame(null)
+      setGamePack(null)
+      setBoardStudioOpen(false)
+    }
   }
 
   const joinGame = async () => {
@@ -219,7 +277,8 @@ export default function App() {
     try {
       const game = await api.joinGame(joinGameId.trim())
       activeGameSession.set(game.id)
-      setCreatedGame(game)
+      setZoom(1)
+      applyGameState(game)
     } catch {
       setGameError(t('joinGameError'))
     }
@@ -235,7 +294,8 @@ export default function App() {
     try {
       const game = await api.watchGame(joinGameId.trim())
       activeGameSession.set(game.id)
-      setCreatedGame(game)
+      setZoom(1)
+      applyGameState(game)
     } catch {
       setGameError(t('watchGameError'))
     }
@@ -247,136 +307,240 @@ export default function App() {
     setGamePack(null)
   }
 
+  const handleSessionExpired = useCallback(() => {
+    authToken.clear()
+    setUser(null)
+    setCreatedGame(null)
+    setGamePack(null)
+    setAuthMode('login')
+    setAuthError(null)
+    setAuthOpen(true)
+  }, [])
+
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      <AppBar
-        position="sticky"
-        elevation={0}
-        sx={{
-          bgcolor: 'rgba(11,9,18,.86)',
-          backdropFilter: 'blur(18px)',
-          borderBottom: '1px solid rgba(255,255,255,.08)',
-        }}
+    <Box
+      sx={{
+        minHeight: '100dvh',
+        height: { xs: createdGame ? '100dvh' : 'auto', md: '100dvh' },
+        overflow: { xs: createdGame ? 'hidden' : 'visible', md: 'hidden' },
+        bgcolor: 'background.default',
+      }}
+    >
+      <Container
+        maxWidth={false}
+        disableGutters={Boolean(createdGame)}
+        sx={
+          createdGame
+            ? { height: '100dvh', overflow: 'hidden' }
+            : {
+                py: 3,
+                px: { xs: 1.5, md: 3 },
+                height: { md: '100dvh' },
+                overflow: { md: 'hidden' },
+                display: { md: 'flex' },
+                flexDirection: 'column',
+              }
+        }
       >
-        <Toolbar sx={{ gap: 2 }}>
-          <Box sx={{ flexGrow: 1 }}>
-            <Typography variant="h6" fontWeight={900}>
-              BUSINESS<span style={{ color: '#b8ff3d' }}>GAME</span>
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {t('subtitle')}
-            </Typography>
-          </Box>
-          <FormControl size="small">
-            <Select
-              value={i18n.language}
-              onChange={(event) => void i18n.changeLanguage(event.target.value)}
-              aria-label="Language"
-            >
-              <MenuItem value="es">ES</MenuItem>
-              <MenuItem value="en">EN</MenuItem>
-            </Select>
-          </FormControl>
-          {user ? (
-            <>
-              <Stack direction="row" alignItems="center" spacing={0.7}>
-                <AccountCircleRoundedIcon color="secondary" />
-                <Typography variant="body2">{user.display_name}</Typography>
-              </Stack>
-              <Button
-                color="inherit"
-                startIcon={<LogoutRoundedIcon />}
-                onClick={logout}
+        {!createdGame && (
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            spacing={1}
+            sx={{ mb: 2 }}
+          >
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="h6" fontWeight={900}>
+                BUSINESS<span style={{ color: '#b8ff3d' }}>GAME</span>
+              </Typography>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: { xs: 'none', sm: 'block' } }}
               >
-                {t('logout')}
-              </Button>
-            </>
-          ) : (
+                {t('subtitle')}
+              </Typography>
+            </Box>
+            <Stack direction="row" alignItems="center" spacing={0.75}>
+              <FormControl size="small">
+                <Select
+                  value={i18n.language}
+                  onChange={(event) =>
+                    void i18n.changeLanguage(event.target.value)
+                  }
+                  aria-label="Language"
+                >
+                  <MenuItem value="es">ES</MenuItem>
+                  <MenuItem value="en">EN</MenuItem>
+                </Select>
+              </FormControl>
+              {user && (
+                <Button
+                  variant={boardStudioOpen ? 'contained' : 'outlined'}
+                  color="secondary"
+                  startIcon={<DashboardCustomizeRoundedIcon />}
+                  onClick={() => setBoardStudioOpen(true)}
+                  sx={{
+                    minWidth: { xs: 40, sm: 'auto' },
+                    px: { xs: 1, sm: 2 },
+                    '& .MuiButton-startIcon': { mr: { xs: 0, sm: 1 } },
+                  }}
+                  aria-label={t('boardStudio')}
+                >
+                  <Box
+                    component="span"
+                    sx={{ display: { xs: 'none', sm: 'inline' } }}
+                  >
+                    {t('createBoard')}
+                  </Box>
+                </Button>
+              )}
+              {user ? (
+                <>
+                  <Stack
+                    direction="row"
+                    alignItems="center"
+                    spacing={0.7}
+                    sx={{ display: { xs: 'none', sm: 'flex' } }}
+                  >
+                    <AccountCircleRoundedIcon color="secondary" />
+                    <Typography variant="body2">{user.display_name}</Typography>
+                  </Stack>
+                  <Button
+                    color="inherit"
+                    startIcon={<LogoutRoundedIcon />}
+                    onClick={() => void logout()}
+                    sx={{
+                      minWidth: { xs: 40, sm: 'auto' },
+                      px: { xs: 1, sm: 2 },
+                      '& .MuiButton-startIcon': { mr: { xs: 0, sm: 1 } },
+                    }}
+                    aria-label={t('logout')}
+                  >
+                    <Box
+                      component="span"
+                      sx={{ display: { xs: 'none', sm: 'inline' } }}
+                    >
+                      {t('logout')}
+                    </Box>
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  startIcon={<AccountCircleRoundedIcon />}
+                  onClick={() => {
+                    setAuthMode('login')
+                    setAuthError(null)
+                    setAuthOpen(true)
+                  }}
+                >
+                  {t('login')}
+                </Button>
+              )}
+            </Stack>
+          </Stack>
+        )}
+
+        {!createdGame && !boardStudioOpen && (
+          <Stack
+            direction={{ xs: 'column', md: 'row' }}
+            spacing={2}
+            alignItems={{ md: 'center' }}
+            sx={{ mb: 2 }}
+          >
+            <Typography fontWeight={750}>{t('board')}</Typography>
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={displayedMode}
+              onChange={(_, mode: BoardMode | null) => {
+                if (mode) void selectMode(mode)
+              }}
+            >
+              <ToggleButton value="classic">{t('classic')}</ToggleButton>
+              <ToggleButton value="extended">{t('extended')}</ToggleButton>
+              <ToggleButton value="custom" disabled={customManifests.length === 0}>
+                {t('custom')}
+              </ToggleButton>
+            </ToggleButtonGroup>
+            {displayedMode === 'custom' && customManifests.length > 0 && (
+              <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 230 } }}>
+                <Select
+                  aria-label={t('customBoard')}
+                  value={
+                    pack
+                      ? `${pack.manifest.id}@${pack.manifest.version}`
+                      : `${customManifests[0].id}@${customManifests[0].version}`
+                  }
+                  onChange={(event) => {
+                    const selected = customManifests.find(
+                      (item) => `${item.id}@${item.version}` === event.target.value,
+                    )
+                    if (selected) void selectManifest(selected)
+                  }}
+                >
+                  {customManifests.map((item) => (
+                    <MenuItem
+                      key={`${item.id}@${item.version}`}
+                      value={`${item.id}@${item.version}`}
+                    >
+                      {customPackNames[`${item.id}@${item.version}`] ?? item.id} · v
+                      {item.version}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+            <Stack
+              direction="row"
+              spacing={1.5}
+              alignItems="center"
+              sx={{ minWidth: 210 }}
+            >
+              <Typography variant="body2" color="text.secondary">
+                {t('zoom')}
+              </Typography>
+              <Slider
+                min={0.7}
+                max={1.35}
+                step={0.05}
+                value={zoom}
+                onChange={(_, value) => setZoom(value as number)}
+                size="small"
+              />
+            </Stack>
             <Button
               variant="outlined"
               color="secondary"
-              startIcon={<AccountCircleRoundedIcon />}
-              onClick={() => {
-                setAuthMode('login')
-                setAuthError(null)
-                setAuthOpen(true)
+              startIcon={
+                expanded ? (
+                  <CloseFullscreenRoundedIcon />
+                ) : (
+                  <FullscreenRoundedIcon />
+                )
+              }
+              onClick={() => setExpanded((value) => !value)}
+              sx={{
+                ml: { md: 'auto !important' },
+                display: expanded ? 'none' : 'inline-flex',
               }}
             >
-              {t('login')}
+              {expanded ? t('leaveFullscreen') : t('fullscreen')}
             </Button>
-          )}
-        </Toolbar>
-      </AppBar>
-
-      <Container
-        maxWidth={false}
-        sx={{ py: 3, px: { xs: 1.5, md: 3 } }}
-      >
-        <Stack
-          direction={{ xs: 'column', md: 'row' }}
-          spacing={2}
-          alignItems={{ md: 'center' }}
-          sx={{ mb: 2 }}
-        >
-          <Typography fontWeight={750}>{t('board')}</Typography>
-          <ToggleButtonGroup
-            exclusive
-            size="small"
-            value={displayedMode}
-            disabled={Boolean(createdGame)}
-            onChange={(_, mode: BoardMode | null) => {
-              if (mode) void selectMode(mode)
-            }}
-          >
-            <ToggleButton value="classic">{t('classic')}</ToggleButton>
-            <ToggleButton value="extended">{t('extended')}</ToggleButton>
-          </ToggleButtonGroup>
-          <Stack
-            direction="row"
-            spacing={1.5}
-            alignItems="center"
-            sx={{ minWidth: 210 }}
-          >
-            <Typography variant="body2" color="text.secondary">
-              {t('zoom')}
-            </Typography>
-            <Slider
-              min={0.7}
-              max={1.35}
-              step={0.05}
-              value={zoom}
-              onChange={(_, value) => setZoom(value as number)}
-              size="small"
-            />
           </Stack>
-          <Button
-            variant="outlined"
-            color="secondary"
-            startIcon={
-              expanded ? (
-                <CloseFullscreenRoundedIcon />
-              ) : (
-                <FullscreenRoundedIcon />
-              )
-            }
-            onClick={() => setExpanded((value) => !value)}
-            sx={{
-              ml: { md: 'auto !important' },
-              display: expanded ? 'none' : 'inline-flex',
-            }}
-          >
-            {expanded ? t('leaveFullscreen') : t('fullscreen')}
-          </Button>
-        </Stack>
+        )}
 
-        {user && !createdGame && (
+        {user && !createdGame && !boardStudioOpen && (
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
             <TextField
               size="small"
               label={t('gameId')}
               value={joinGameId}
               onChange={(event) => setJoinGameId(event.target.value)}
-              sx={{ minWidth: 320 }}
+              sx={{ width: { xs: '100%', sm: 320 } }}
             />
             <Button
               variant="outlined"
@@ -399,23 +563,54 @@ export default function App() {
             game={createdGame}
             pack={gamePack}
             user={user}
-            onChange={setCreatedGame}
+            zoom={zoom}
+            onChange={applyGameState}
             onLeave={leaveActiveGame}
+            onLogout={() => void logout()}
+            onSessionExpired={handleSessionExpired}
           />
         )}
         {gameError && (
-          <Alert severity="warning" onClose={() => setGameError(null)} sx={{ mb: 2 }}>
+          <Alert
+            severity="warning"
+            onClose={() => setGameError(null)}
+            sx={
+              createdGame
+                ? {
+                    position: 'fixed',
+                    top: 12,
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    zIndex: 1500,
+                    width: 'min(92vw, 620px)',
+                  }
+                : { mb: 2 }
+            }
+          >
             {gameError}
           </Alert>
         )}
 
-        {error ? (
+        {boardStudioOpen && user ? (
+          <BoardStudio
+            locale={i18n.language}
+            onClose={() => setBoardStudioOpen(false)}
+            onPublished={() => void loadManifests()}
+          />
+        ) : error ? (
           <Alert
             severity="error"
             action={<Button onClick={() => void loadManifests()}>{t('retry')}</Button>}
           >
             {t('loadError')}
           </Alert>
+        ) : createdGame ? (
+          !gamePack ? (
+            <Stack alignItems="center" py={10} spacing={2}>
+              <CircularProgress />
+              <Typography color="text.secondary">{t('loading')}</Typography>
+            </Stack>
+          ) : null
         ) : displayedPack ? (
           <Box
             sx={{
@@ -429,6 +624,9 @@ export default function App() {
               alignItems: expanded ? 'center' : 'flex-start',
               justifyContent: 'center',
               minHeight: expanded ? '100vh' : 0,
+              flex: { md: 1 },
+              height: { md: expanded ? '100vh' : 'auto' },
+              minWidth: 0,
             }}
           >
             {expanded && (
@@ -448,6 +646,7 @@ export default function App() {
               game={createdGame}
               currentUserId={user?.id}
               onCreateGame={() => void createGame()}
+              fitAvailableHeight={!expanded}
             />
           </Box>
         ) : (
@@ -474,4 +673,8 @@ export default function App() {
       />
     </Box>
   )
+}
+
+function gameSequence(game: GameState): number {
+  return game.events.at(-1)?.sequence ?? 0
 }

@@ -1,13 +1,17 @@
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from business_game.application.board_service import BoardProjectService, PackResolver
 from business_game.application.pack_loader import PackLoader
 from business_game.application.services import GameService, UserService
+from business_game.domain.board_models import BoardProjectCreate, PublishBoardRequest
 from business_game.domain.models import (
     BidCommand,
     DeclinePropertyCommand,
@@ -17,10 +21,12 @@ from business_game.domain.models import (
     UserCreate,
 )
 from business_game.infrastructure.db_models import (
+    BoardProjectRecord,
     GameEventRecord,
     GameRecord,
     UserRecord,
 )
+from tests.test_board_projects import board_document
 
 POSTGRES_TEST_URL = os.getenv("BUSINESS_GAME_TEST_DATABASE_URL")
 
@@ -36,6 +42,7 @@ async def test_postgres_persists_an_authoritative_auction(packs_dir: Path) -> No
     user_ids = []
     game_id = None
     suffix = uuid4().hex
+    current_time = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
     try:
         async with sessions() as session:
             users = UserService(session)
@@ -65,6 +72,7 @@ async def test_postgres_persists_an_authoritative_auction(packs_dir: Path) -> No
                 session,
                 PackLoader(packs_dir),
                 dice_roller=lambda: (1, 2),
+                clock=lambda: current_time,
             )
             game = await games.create("classic-demo", first)
             game_id = game.id
@@ -87,6 +95,12 @@ async def test_postgres_persists_an_authoritative_auction(packs_dir: Path) -> No
                 first.id,
                 PassAuctionCommand(action="pass_auction"),
             )
+            assert game.active_auction is not None
+            deadline = game.active_auction.bid_deadline
+            assert deadline is not None
+            current_time += timedelta(seconds=5)
+            game = await games.settle_expired_auction(game.id, deadline)
+            assert game is not None
             game = await games.execute(
                 game.id,
                 second.id,
@@ -124,4 +138,104 @@ async def test_postgres_persists_an_authoritative_auction(packs_dir: Path) -> No
         if user_ids:
             async with sessions.begin() as session:
                 await session.execute(delete(UserRecord).where(UserRecord.id.in_(user_ids)))
+        await engine.dispose()
+
+
+@pytest.mark.skipif(
+    POSTGRES_TEST_URL is None,
+    reason="BUSINESS_GAME_TEST_DATABASE_URL is not configured",
+)
+async def test_postgres_publishes_and_snapshots_a_custom_board(
+    packs_dir: Path,
+) -> None:
+    assert POSTGRES_TEST_URL is not None
+    engine = create_async_engine(POSTGRES_TEST_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    user_id = None
+    project_id = None
+    game_id = None
+    suffix = uuid4().hex
+    try:
+        async with sessions() as session:
+            user = await UserService(session).register(
+                UserCreate(
+                    email=f"board-owner-{suffix}@example.com",
+                    password="correct-horse-battery",
+                    display_name="Board Owner",
+                )
+            )
+            user_id = user.id
+            projects = BoardProjectService(session)
+            document = board_document()
+            document_tiles = cast(
+                list[dict[str, object]],
+                document["tiles"],
+            )
+            document_tiles[1]["hotel_cost"] = 275
+            draft = await projects.create(
+                user.id,
+                BoardProjectCreate(
+                    name="PostgreSQL board",
+                    document=document,
+                ),
+            )
+            project_id = draft.id
+            published = await projects.publish(
+                draft.id,
+                user.id,
+                PublishBoardRequest(revision=draft.revision),
+            )
+            filesystem = PackLoader(packs_dir)
+            games = GameService(
+                session,
+                filesystem,
+                pack_resolver=PackResolver(session, filesystem),
+            )
+            game = await games.create(
+                published.pack_id,
+                user,
+                published.version,
+            )
+            game_id = game.id
+
+        async with sessions() as session:
+            persisted = await GameService(session, PackLoader(packs_dir)).get(
+                game_id,
+                user_id,
+            )
+            assert persisted.pack_snapshot is not None
+            assert persisted.pack_snapshot.manifest.schema_version == 5
+            assert persisted.pack_snapshot.manifest.side_length == 5
+            assert persisted.pack_snapshot.manifest.tile_count == 16
+            snapshot_tiles = {
+                tile.id: tile for tile in persisted.pack_snapshot.board.tiles
+            }
+            assert snapshot_tiles["tile_01"].hotel_cost == 275
+            snapshot_deck = persisted.pack_snapshot.board.decks[0]
+            assert snapshot_deck.name_key == "deck.opportunity.name"
+            assert snapshot_deck.cards[0].title_key == "card.chain.title"
+            resolved = await PackResolver(session, PackLoader(packs_dir)).load(
+                persisted.pack_id,
+                version=persisted.pack_version,
+                locale="es",
+            )
+            assert resolved.messages["pack.name"] == "Mi tablero"
+            assert resolved.board.tiles[1].hotel_cost == 275
+    finally:
+        if game_id is not None:
+            async with sessions.begin() as session:
+                await session.execute(
+                    delete(GameEventRecord).where(GameEventRecord.game_id == game_id)
+                )
+                await session.execute(delete(GameRecord).where(GameRecord.id == game_id))
+        if project_id is not None:
+            async with sessions.begin() as session:
+                await session.execute(
+                    delete(BoardProjectRecord).where(
+                        BoardProjectRecord.id == project_id
+                    )
+                )
+        if user_id is not None:
+            async with sessions.begin() as session:
+                await session.execute(delete(UserRecord).where(UserRecord.id == user_id))
         await engine.dispose()

@@ -36,9 +36,17 @@ Cada directorio de `content/packs` contiene:
 - `locales/<idioma>.json`: nombres y textos visibles.
 
 El esquema 4 incorpora parámetros económicos, inventario de casas/hoteles,
-detención, dobles, mazos de cartas y reglas opcionales tipadas. El manifiesto y la
-versión exacta quedan asociados a la partida; si esa versión ya no está
-disponible, el servidor rechaza continuar en vez de aplicar reglas distintas.
+detención, dobles, mazos de cartas y reglas opcionales tipadas. El esquema 5
+agrega tableros creados por usuarios, efectos encadenados y efectos declarativos
+al aterrizar. El manifiesto y la versión exacta quedan asociados a la partida;
+si esa versión ya no está disponible, el servidor rechaza continuar en vez de
+aplicar reglas distintas. Las partidas con un tablero personalizado conservan
+además un snapshot del paquete exacto.
+
+Un tamaño N×N significa N posiciones por cada lado del cuadrado. Como las cuatro
+esquinas pertenecen a dos lados, el perímetro contiene `4N - 4` casillas. El
+editor acepta N entre 5 y 30, por lo que genera entre 16 y 116 casillas y no
+supone un tablero fijo de 40 posiciones.
 
 Las reglas solo consumen identificadores estables, como `property_01`. Los
 nombres traducidos nunca participan en cálculos ni validaciones.
@@ -53,20 +61,42 @@ El cargador rechaza:
 - propiedades sin precio o renta;
 - versiones o tipos de casilla inválidos.
 
+## Creador de tableros
+
+Los borradores son privados y se guardan en PostgreSQL. Cada escritura exige la
+revisión que vio el cliente; dos pestañas que intentan sobrescribir el mismo
+borrador reciben un conflicto en vez de perder cambios. Reducir N requiere
+confirmación porque elimina casillas del perímetro.
+
+La validación comprueba referencias entre grupos, mazos, cartas y destinos,
+además de los campos económicos permitidos para cada tipo de casilla. Los
+efectos admitidos son una DSL cerrada y tipada: dinero, pagos entre jugadores,
+movimiento absoluto o relativo, destino más cercano, reparaciones, detención y
+tarjeta para salir de ella. No se admite JavaScript, Python ni expresiones
+arbitrarias.
+
+Publicar crea una versión semántica inmutable. Una modificación posterior vuelve
+el proyecto a estado borrador y debe publicarse como una versión mayor que las
+anteriores. El catálogo muestra la versión publicada más alta y cada partida
+solicita explícitamente la versión que conservará.
+
 ## Persistencia y concurrencia
 
 Cada comando abre su propia `AsyncSession` y bloquea la fila de la partida con
 `SELECT ... FOR UPDATE`. El estado actualizado, el incremento de versión y los
 eventos se escriben en la misma transacción.
 
-La identidad se obtiene del JWT tanto en HTTP como en Socket.IO. Los comandos del
-cliente no aceptan `player_id`, por lo que un cliente no puede actuar declarando
-la identidad de otro jugador.
+La identidad se obtiene de un JWT corto tanto en HTTP como en Socket.IO. Una
+sesión opaca de 30 días permite renovar ese token: solo su hash se guarda en
+PostgreSQL y el valor original viaja en una cookie HttpOnly revocable. Los
+comandos del cliente no aceptan `player_id`, por lo que un cliente no puede
+actuar declarando la identidad de otro jugador.
 
-El navegador conserva solo el identificador de su partida activa. Al recargar,
-vuelve a obtener el estado autoritativo por HTTP y luego se suscribe otra vez a
-la sala Socket.IO. Las fichas y el historial se derivan del estado recibido; no
-mantienen una copia paralela de posiciones, saldos o eventos.
+El navegador conserva solo el identificador preferido de su partida activa. Al
+recargar, renueva el JWT mediante la cookie, consulta en el servidor sus partidas
+activas, vuelve a obtener el estado autoritativo por HTTP y luego se suscribe
+otra vez a la sala Socket.IO. Las fichas y el historial se derivan del estado
+recibido; no mantienen una copia paralela de posiciones, saldos o eventos.
 
 Los espectadores son miembros de solo lectura: pueden obtener el estado y
 suscribirse a la sala, pero no ejecutar comandos. El anfitrión controla el

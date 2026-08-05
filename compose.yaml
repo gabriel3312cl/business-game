@@ -7,10 +7,11 @@ services:
       dockerfile: backend/Dockerfile
     restart: unless-stopped
     environment:
-      BUSINESS_GAME_ENVIRONMENT: development
+      BUSINESS_GAME_ENVIRONMENT: ${BUSINESS_GAME_ENVIRONMENT:-development}
       BUSINESS_GAME_DATABASE_URL: postgresql+asyncpg://${BUSINESS_GAME_POSTGRES_USER:-business_game}:${BUSINESS_GAME_POSTGRES_PASSWORD:-local_business_game_only}@postgres:5432/${BUSINESS_GAME_POSTGRES_DB:-business_game}
       BUSINESS_GAME_JWT_SECRET: ${BUSINESS_GAME_JWT_SECRET:-development-only-change-this-secret}
       BUSINESS_GAME_ACCESS_TOKEN_MINUTES: ${BUSINESS_GAME_ACCESS_TOKEN_MINUTES:-30}
+      BUSINESS_GAME_SESSION_DAYS: ${BUSINESS_GAME_SESSION_DAYS:-30}
       BUSINESS_GAME_PACKS_DIR: /app/content/packs
     ports:
       - "127.0.0.1:${BUSINESS_GAME_API_PORT:-48010}:8000"
