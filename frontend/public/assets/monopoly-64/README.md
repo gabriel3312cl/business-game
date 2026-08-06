@@ -1,11 +1,10 @@
 # Monopoly expandido, 64 casillas
 
 ## Contenido
-- `svg/` 18 iconos: 13 heredados del set clasico mas 5 nuevos, subasta, gas, telecomunicaciones,
-  impuesto al patrimonio y contribuciones
-- `manifest.json` las 64 casillas con precio, hipoteca, rentas por nivel, costo de casa y color de grupo,
-  los 12 grupos, y los dos mazos de 20 cartas
-- `index.html` hoja de contacto, separa los iconos nuevos de los heredados
+- `svg/` contiene los 18 iconos usados por el tablero: 13 heredados del set
+  clasico y 5 nuevos para subasta, gas, telecomunicaciones, impuesto al
+  patrimonio y contribuciones.
+- La definición jugable está en `content/packs/extended-demo/`.
 
 ## Layout
 15 casillas por lado mas 4 esquinas. Las esquinas van en 1, 17, 33 y 49, asi que la Carcel y
@@ -25,7 +24,7 @@ Traen `svg: null` y el hex en `color`.
 
 ## Estilo
 viewBox 64x64, trazo 2.5, `stroke="currentColor"`. Mismo sistema que los sets de Santiago y clasico,
-los tres tableros se montan con el mismo componente cambiando solo el manifest.
+por lo que los tableros comparten el mismo componente visual.
 
 ## Licencia
 Variante no oficial. Nombres y diseno original son marca registrada de Hasbro. SVG originales.

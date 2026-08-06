@@ -3,8 +3,8 @@
 ## Contenido
 - `svg/` pictogramas de las 48 casillas, uno por elemento unico
 - `svg-fichas/` las 6 fichas de jugador
-- `manifest.json` mapa completo: posicion, tipo, grupo, precio, hipoteca, rentas, ruta del svg
-- `index.html` hoja de contacto, abrila en el navegador para ver todo junto
+- `frontend/src/assets/monopoly-santiago-manifest.json` mantiene el mapa usado
+  por el editor para relacionar posiciones y rutas SVG.
 
 ## Convencion de codigo
 El codigo de cada casilla es `POS_TIPO`, con POS de 01 a 48 en sentido horario desde la Salida.
