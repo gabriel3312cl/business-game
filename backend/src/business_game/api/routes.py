@@ -1,7 +1,9 @@
+import hashlib
+import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from business_game.api.dependencies import (
@@ -42,6 +44,7 @@ from business_game.domain.models import (
 )
 from business_game.realtime import (
     broadcast_game_state,
+    revoke_game_membership,
     sync_auction_timer,
     sync_bot_runner,
 )
@@ -49,6 +52,7 @@ from business_game.security import create_access_token
 
 router = APIRouter(prefix="/api/v1")
 auth_rate_limiter = SharedRateLimiter(settings.redis_url, namespace="auth")
+security_logger = logging.getLogger("business_game.security")
 
 
 @router.get("/health")
@@ -100,17 +104,39 @@ async def login(
 ) -> TokenResponse:
     client_ip = _client_ip(request)
     normalized_email = form.username.strip().lower()
-    await auth_rate_limiter.require_capacity(
-        f"login:ip:{client_ip}",
-        limit=settings.auth_login_attempts_per_minute,
-    )
-    await auth_rate_limiter.require_capacity(
-        f"login:account:{normalized_email}",
-        limit=settings.auth_login_attempts_per_minute,
-    )
-    user = await users.authenticate(form.username, form.password)
+    account_hash = _audit_hash(normalized_email)
+    try:
+        await auth_rate_limiter.require_capacity(
+            f"login:ip:{client_ip}",
+            limit=settings.auth_login_attempts_per_minute,
+        )
+        await auth_rate_limiter.require_capacity(
+            f"login:account:{normalized_email}",
+            limit=settings.auth_login_attempts_per_minute,
+        )
+        user = await users.authenticate(form.username, form.password)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+            security_logger.warning(
+                "security_event=auth_login_rate_limited source_ip=%s account_hash=%s",
+                client_ip,
+                account_hash,
+            )
+        raise
+    except UnauthorizedError:
+        security_logger.warning(
+            "security_event=auth_login_failed source_ip=%s account_hash=%s",
+            client_ip,
+            account_hash,
+        )
+        raise
     session_token = await sessions.create(user.id)
     _set_session_cookie(response, session_token)
+    security_logger.info(
+        "security_event=auth_login_succeeded source_ip=%s user_id=%s",
+        client_ip,
+        user.id,
+    )
     return TokenResponse(
         access_token=create_access_token(user.id),
         user_id=user.id,
@@ -124,8 +150,24 @@ async def refresh_session(
 ) -> TokenResponse:
     session_token = request.cookies.get(settings.session_cookie_name)
     if not session_token:
+        security_logger.warning(
+            "security_event=auth_refresh_failed source_ip=%s reason=missing_session",
+            _client_ip(request),
+        )
         raise UnauthorizedError("persistent session is required")
-    user = await sessions.resolve(session_token)
+    try:
+        user = await sessions.resolve(session_token)
+    except UnauthorizedError:
+        security_logger.warning(
+            "security_event=auth_refresh_failed source_ip=%s reason=invalid_session",
+            _client_ip(request),
+        )
+        raise
+    security_logger.info(
+        "security_event=auth_refresh_succeeded source_ip=%s user_id=%s",
+        _client_ip(request),
+        user.id,
+    )
     return TokenResponse(
         access_token=create_access_token(user.id),
         user_id=user.id,
@@ -141,6 +183,11 @@ async def logout(
     session_token = request.cookies.get(settings.session_cookie_name)
     if session_token:
         await sessions.revoke(session_token)
+    security_logger.info(
+        "security_event=auth_logout source_ip=%s session_present=%s",
+        _client_ip(request),
+        session_token is not None,
+    )
     response.delete_cookie(
         settings.session_cookie_name,
         path="/",
@@ -309,6 +356,10 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client is not None else "unknown"
 
 
+def _audit_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+
+
 @router.post("/games/{game_id}/spectators", response_model=GameStateView)
 async def watch_game(
     game_id: UUID,
@@ -341,6 +392,7 @@ async def leave_game(
     game = await games.leave(game_id, current_user.id)
     sync_auction_timer(game)
     sync_bot_runner(game)
+    await revoke_game_membership(game_id, current_user.id)
     await broadcast_game_state(game, complete_events=False)
     return game_state_view(game, current_user.id)
 

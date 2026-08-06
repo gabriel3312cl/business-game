@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -28,6 +29,8 @@ from business_game.realtime import (
     sio,
 )
 
+security_logger = logging.getLogger("business_game.security")
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -55,6 +58,14 @@ api.include_router(advisor_router)
 api.include_router(chat_router)
 
 
+@api.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    return response
+
+
 @api.exception_handler(DomainError)
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     status_code = 400
@@ -68,6 +79,14 @@ async def domain_error_handler(request: Request, exc: DomainError) -> JSONRespon
         status_code = 403
     elif isinstance(exc, ConflictError):
         status_code = 409
+    if status_code in {401, 403}:
+        security_logger.warning(
+            "security_event=authorization_denied source_ip=%s method=%s path=%s status=%s",
+            request.client.host if request.client is not None else "unknown",
+            request.method,
+            request.url.path,
+            status_code,
+        )
     return JSONResponse(
         status_code=status_code,
         content={"detail": str(exc)},

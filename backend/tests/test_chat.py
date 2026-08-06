@@ -444,6 +444,27 @@ def test_spamming_a_bot_schedules_one_reply_at_a_time(
     assert realtime.chat_replies_in_flight == {(game.id, bot.user_id)}
 
 
+async def test_chat_broadcast_targets_only_current_members(
+    pack: ContentPack,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = PlayerState(user_id=uuid4(), display_name="Activa", balance=1_500)
+    former = PlayerState(user_id=uuid4(), display_name="Retirada", balance=1_500)
+    game = make_game(pack, [active, former])
+    game.players.remove(former)
+    emitted_rooms: list[str] = []
+
+    async def record_emit(_event: str, _data: dict, *, room: str) -> None:
+        emitted_rooms.append(room)
+
+    monkeypatch.setattr(realtime.sio, "emit", record_emit)
+
+    await realtime._emit_chat_messages(game, [_message(active, "solo miembros actuales")])
+
+    assert emitted_rooms == [f"{game.id}:member:{active.user_id}"]
+    assert all(str(former.user_id) not in room for room in emitted_rooms)
+
+
 async def test_ai_bot_can_put_a_server_generated_offer_on_the_table(
     packs_dir: Path,
     session: AsyncSession,

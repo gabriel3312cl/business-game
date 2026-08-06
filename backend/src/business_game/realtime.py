@@ -96,7 +96,6 @@ async def room_join(sid: str, data: dict) -> dict:
             game = await GameService(session, pack_loader).get(game_id, user_id)
         sync_auction_timer(game)
         sync_bot_runner(game)
-        await sio.enter_room(sid, str(game_id))
         await sio.enter_room(sid, _member_game_room(game_id, user_id))
         await sio.emit(
             "game_state",
@@ -178,20 +177,28 @@ async def deliver_chat_message(
     The REST route persists with its own request-scoped session and calls this for
     the transport half, so both entry points share one delivery path.
     """
-    await _emit_chat_messages(game.id, [message])
+    await _emit_chat_messages(game, [message])
     _schedule_bot_chat_replies(game, author_id, message.body)
 
 
-async def _emit_chat_messages(game_id: UUID, messages: list[ChatMessage]) -> None:
-    for message in messages:
-        try:
-            await sio.emit(
-                "chat_message",
-                message.model_dump(mode="json"),
-                room=str(game_id),
-            )
-        except Exception:
-            logger.exception("chat broadcast failed for game %s", game_id)
+async def _emit_chat_messages(game: GameState, messages: list[ChatMessage]) -> None:
+    member_ids = {
+        player.user_id for player in game.players if not player.is_bot
+    } | {spectator.user_id for spectator in game.spectators}
+    for member_id in member_ids:
+        for message in messages:
+            try:
+                await sio.emit(
+                    "chat_message",
+                    message.model_dump(mode="json"),
+                    room=_member_game_room(game.id, member_id),
+                )
+            except Exception:
+                logger.exception(
+                    "chat broadcast failed for game %s member %s",
+                    game.id,
+                    member_id,
+                )
 
 
 async def _announce_bot_decisions(game: GameState, previous_sequence: int) -> None:
@@ -213,7 +220,7 @@ async def _announce_bot_decisions(game: GameState, previous_sequence: int) -> No
         logger.exception("bot chat announcement failed for game %s", game.id)
         return
     if messages:
-        await _emit_chat_messages(game.id, messages)
+        await _emit_chat_messages(game, messages)
 
 
 async def react_to_recent_events(game: GameState) -> None:
@@ -285,7 +292,7 @@ async def _publish_reaction(
     except Exception:
         logger.exception("bot reaction publish failed for game %s", game.id)
         return
-    await _emit_chat_messages(game.id, [message])
+    await _emit_chat_messages(game, [message])
 
 
 def _schedule_bot_reaction(game: GameState, reaction: BotReaction) -> None:
@@ -508,7 +515,7 @@ async def _reply_as_bot(game_id: UUID, bot_id: UUID, counterpart_id: UUID) -> No
             template=localizable,
         )
         await session.commit()
-    await _emit_chat_messages(game_id, [message])
+    await _emit_chat_messages(game, [message])
     if chosen_offer is not None:
         await _propose_chat_trade(game_id, bot, chosen_offer)
 
@@ -812,6 +819,11 @@ async def _resign_stalled_bot(game_id: UUID, bot_id: UUID) -> GameState:
 
 def _member_game_room(game_id: UUID, user_id: UUID) -> str:
     return f"{game_id}:member:{user_id}"
+
+
+async def revoke_game_membership(game_id: UUID, user_id: UUID) -> None:
+    """Remove every active socket for one user from a game's private room."""
+    await sio.close_room(_member_game_room(game_id, user_id))
 
 
 async def broadcast_game_state(

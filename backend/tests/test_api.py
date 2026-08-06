@@ -44,6 +44,8 @@ async def test_health(client: AsyncClient) -> None:
     response = await client.get("/api/v1/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cross-origin-resource-policy"] == "same-origin"
 
 
 async def test_authenticated_user_lifecycle(client: AsyncClient) -> None:
@@ -225,7 +227,10 @@ async def test_rejects_invalid_or_unauthenticated_panel_preferences(
     assert invalid_token.status_code == 422
 
 
-async def test_rejects_duplicate_email_and_invalid_password(client: AsyncClient) -> None:
+async def test_rejects_duplicate_email_and_invalid_password(
+    client: AsyncClient,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     await register_and_login(client)
     duplicate = await client.post(
         "/api/v1/auth/register",
@@ -243,6 +248,8 @@ async def test_rejects_duplicate_email_and_invalid_password(client: AsyncClient)
         data={"username": "gabriel@example.com", "password": "wrong-password"},
     )
     assert invalid_login.status_code == 401
+    assert "security_event=auth_login_failed" in caplog.text
+    assert "wrong-password" not in caplog.text
 
 
 async def test_persistent_session_refresh_and_logout(
@@ -428,7 +435,10 @@ async def test_lists_active_games_for_each_member(
     assert player_games.json() == []
 
 
-async def test_room_settings_and_spectator_permissions(client: AsyncClient) -> None:
+async def test_room_settings_and_spectator_permissions(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     host_headers = await register_and_login(
         client,
         email="room-host@example.com",
@@ -475,11 +485,20 @@ async def test_room_settings_and_spectator_permissions(client: AsyncClient) -> N
     )
     assert blocked_settings.status_code == 409
 
+    closed_rooms: list[str] = []
+
+    async def record_closed_room(room: str) -> None:
+        closed_rooms.append(room)
+
+    monkeypatch.setattr(sio, "close_room", record_closed_room)
+
     left = await client.delete(
         f"/api/v1/games/{game['id']}/members/me",
         headers=viewer_headers,
     )
     assert left.status_code == 200
+    viewer_id = watched.json()["spectators"][0]["user_id"]
+    assert closed_rooms == [f"{game['id']}:member:{viewer_id}"]
     settings = await client.patch(
         f"/api/v1/games/{game['id']}/settings",
         headers=host_headers,

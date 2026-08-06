@@ -51,11 +51,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def reject_development_secret_in_production(self) -> "Settings":
-        if (
-            self.environment == "production"
-            and self.jwt_secret == "development-only-change-this-secret"
-        ):
+        if self.environment != "production":
+            return self
+        if self.jwt_secret == "development-only-change-this-secret":
             raise ValueError("BUSINESS_GAME_JWT_SECRET is required in production")
+        if len(self.jwt_secret.encode("utf-8")) < 32:
+            raise ValueError(
+                "BUSINESS_GAME_JWT_SECRET must contain at least 32 bytes in production"
+            )
         return self
 
 
