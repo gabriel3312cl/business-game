@@ -37,6 +37,10 @@ services:
         condition: service_healthy
     networks:
       - business_game_internal
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./backend/src:/app/backend/src:ro
       - ./content:/app/content:ro
@@ -71,6 +75,10 @@ services:
         condition: service_healthy
     networks:
       - business_game_internal
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test:
         [
