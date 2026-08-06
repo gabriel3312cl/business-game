@@ -1,10 +1,13 @@
-.PHONY: dev-api dev-web infrastructure migrate stack stack-down test
+.PHONY: dev-api dev-web infrastructure migrate refresh stack stack-down test
 
 infrastructure:
 	docker compose up -d postgres redis
 
 stack:
-	docker compose up -d --build
+	docker compose up -d --build --wait
+
+refresh:
+	docker compose up -d --build --force-recreate --renew-anon-volumes --wait
 
 stack-down:
 	docker compose down

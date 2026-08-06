@@ -23,6 +23,8 @@ services:
       BUSINESS_GAME_ADVISOR_REQUESTS_PER_MINUTE: ${BUSINESS_GAME_ADVISOR_REQUESTS_PER_MINUTE}
       BUSINESS_GAME_ADVISOR_HISTORY_LIMIT: ${BUSINESS_GAME_ADVISOR_HISTORY_LIMIT}
       BUSINESS_GAME_ADVISOR_CONTEXT_MESSAGES: ${BUSINESS_GAME_ADVISOR_CONTEXT_MESSAGES}
+      BUSINESS_GAME_API_RELOAD: "true"
+      WATCHFILES_FORCE_POLLING: "true"
     ports:
       - "127.0.0.1:${BUSINESS_GAME_API_PORT:-48010}:8000"
     depends_on:
@@ -30,6 +32,9 @@ services:
         condition: service_healthy
     networks:
       - business_game_internal
+    volumes:
+      - ./backend/src:/app/backend/src:ro
+      - ./content:/app/content:ro
     healthcheck:
       test:
         [
@@ -47,9 +52,15 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      target: development
     restart: unless-stopped
+    environment:
+      BUSINESS_GAME_VITE_PROXY_TARGET: http://api:8000
     ports:
       - "127.0.0.1:${BUSINESS_GAME_FRONTEND_PORT:-43173}:8080"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     depends_on:
       api:
         condition: service_healthy
@@ -63,7 +74,7 @@ services:
           "--quiet",
           "--tries=1",
           "--spider",
-          "http://127.0.0.1:8080/health",
+          "http://127.0.0.1:8080/",
         ]
       interval: 5s
       timeout: 3s

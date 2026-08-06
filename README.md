@@ -97,7 +97,18 @@ make stack
 ```
 
 Esto levanta el frontend, la API, PostgreSQL y Redis. La API ejecuta las
-migraciones Alembic antes de iniciar. Para detener el stack sin borrar sus datos:
+migraciones Alembic antes de iniciar. En desarrollo, el frontend usa Vite con
+recarga automática y la API se reinicia al cambiar archivos de `backend/src` o
+`content`.
+
+Si cambias dependencias, Dockerfiles o la configuración de Compose, reconstruye
+y recrea los contenedores sin borrar PostgreSQL ni Redis:
+
+```bash
+make refresh
+```
+
+Para detener el stack sin borrar sus datos:
 
 ```bash
 make stack-down
