@@ -37,6 +37,7 @@ class UserRecord(Base):
     display_name: Mapped[str] = mapped_column(String(40))
     locale: Mapped[str] = mapped_column(String(10), default="es")
     password_hash: Mapped[str] = mapped_column(String(255))
+    ui_preferences: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

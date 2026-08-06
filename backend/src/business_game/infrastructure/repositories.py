@@ -5,7 +5,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.domain.errors import NotFoundError
-from business_game.domain.models import ContentPack, GameEvent, GameState, User
+from business_game.domain.models import (
+    ContentPack,
+    GameEvent,
+    GameState,
+    User,
+    UserPreferences,
+    UserPreferencesUpdate,
+)
 from business_game.infrastructure.db_models import (
     AuthSessionRecord,
     GameEventRecord,
@@ -62,6 +69,29 @@ class UserRepository:
             record.locale = locale
         await self.session.flush()
         return self._to_domain(record)
+
+    async def get_preferences(self, user_id: UUID) -> UserPreferences:
+        record = await self.session.get(UserRecord, user_id)
+        if record is None or not record.is_active:
+            raise NotFoundError("user was not found")
+        return UserPreferences.model_validate(record.ui_preferences or {})
+
+    async def update_preferences(
+        self,
+        user_id: UUID,
+        update: UserPreferencesUpdate,
+    ) -> UserPreferences:
+        record = await self.session.get(UserRecord, user_id, with_for_update=True)
+        if record is None or not record.is_active:
+            raise NotFoundError("user was not found")
+        payload = UserPreferences.model_validate(
+            record.ui_preferences or {}
+        ).model_dump(mode="json")
+        payload.update(update.model_dump(mode="json", exclude_none=True))
+        preferences = UserPreferences.model_validate(payload)
+        record.ui_preferences = preferences.model_dump(mode="json")
+        await self.session.flush()
+        return preferences
 
     async def deactivate(self, user_id: UUID) -> None:
         record = await self.session.get(UserRecord, user_id, with_for_update=True)

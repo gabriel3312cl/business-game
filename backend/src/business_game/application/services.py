@@ -73,6 +73,8 @@ from business_game.domain.models import (
     UseJailCardCommand,
     User,
     UserCreate,
+    UserPreferences,
+    UserPreferencesUpdate,
     UserUpdate,
 )
 from business_game.infrastructure.repositories import (
@@ -140,6 +142,17 @@ class UserService:
                 ),
                 locale=data.locale.strip().lower() if data.locale is not None else None,
             )
+
+    async def get_preferences(self, user_id: UUID) -> UserPreferences:
+        return await self._users.get_preferences(user_id)
+
+    async def update_preferences(
+        self,
+        user_id: UUID,
+        preferences: UserPreferencesUpdate,
+    ) -> UserPreferences:
+        async with self._session.begin():
+            return await self._users.update_preferences(user_id, preferences)
 
     async def deactivate(self, user_id: UUID) -> None:
         async with self._session.begin():
@@ -626,6 +639,19 @@ class GameService:
                 raise ConflictError("the game changed before the automated command ran")
             if game.status is not GameStatus.PLAYING:
                 raise ConflictError("the game is not active")
+
+            if isinstance(
+                command,
+                (
+                    MortgagePropertyCommand,
+                    UnmortgagePropertyCommand,
+                    BuildPropertyCommand,
+                    SellBuildingCommand,
+                ),
+            ):
+                current_player = game.current_player
+                if current_player is None or current_player.user_id != actor_id:
+                    raise ConflictError("it is not this player's turn")
 
             if game.active_auction is not None:
                 if isinstance(command, BidCommand):

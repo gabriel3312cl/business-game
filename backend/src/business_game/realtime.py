@@ -55,6 +55,8 @@ BOT_ACTION_DELAY_SECONDS = 0.8
 BOT_ACTIONS_PER_YIELD = 48
 BOT_MAX_REPEATED_FAILURES = 3
 AI_BOT_DECISION_DEADLINE_SECONDS = 9.0
+AI_AUCTION_DECISION_DEADLINE_SECONDS = 2.0
+AI_AUCTION_FALLBACK_BUFFER_SECONDS = 0.75
 AI_BOT_MAX_CONCURRENT_DECISIONS = 4
 ai_bot_decision_semaphore = asyncio.Semaphore(AI_BOT_MAX_CONCURRENT_DECISIONS)
 CHAT_MAX_CONCURRENT_REPLIES = 4
@@ -664,35 +666,39 @@ async def _run_bot_runner(game_id: UUID) -> None:
             )
             if actor is not None and actor.bot_controller is BotController.AI:
                 baseline_action = action
-                try:
-                    action = await asyncio.wait_for(
-                        _choose_ai_bot_action(
-                            ai_policy,
-                            game,
-                            pack,
-                            baseline_action,
-                        ),
-                        timeout=AI_BOT_DECISION_DEADLINE_SECONDS,
-                    )
-                except TimeoutError:
-                    logger.warning(
-                        "AI bot decision timed out for game %s; using standard policy",
-                        game_id,
-                    )
+                decision_timeout = _ai_bot_decision_timeout(game)
+                if decision_timeout <= 0:
                     action = baseline_action
-                except AiBotDecisionError as exc:
-                    logger.warning(
-                        "AI bot decision failed for game %s; using standard policy: %s",
-                        game_id,
-                        exc,
-                    )
-                    action = baseline_action
-                except Exception:
-                    logger.exception(
-                        "AI bot policy crashed for game %s; using standard policy",
-                        game_id,
-                    )
-                    action = baseline_action
+                else:
+                    try:
+                        action = await asyncio.wait_for(
+                            _choose_ai_bot_action(
+                                ai_policy,
+                                game,
+                                pack,
+                                baseline_action,
+                            ),
+                            timeout=decision_timeout,
+                        )
+                    except TimeoutError:
+                        logger.warning(
+                            "AI bot decision timed out for game %s; using standard policy",
+                            game_id,
+                        )
+                        action = baseline_action
+                    except AiBotDecisionError as exc:
+                        logger.warning(
+                            "AI bot decision failed for game %s; using standard policy: %s",
+                            game_id,
+                            exc,
+                        )
+                        action = baseline_action
+                    except Exception:
+                        logger.exception(
+                            "AI bot policy crashed for game %s; using standard policy",
+                            game_id,
+                        )
+                        action = baseline_action
             before_sequence = len(game.events)
             failure_key = (
                 before_sequence,
@@ -763,6 +769,20 @@ async def _choose_ai_bot_action(
 ) -> BotAction:
     async with ai_bot_decision_semaphore:
         return await policy.choose_action(game, pack, baseline)
+
+
+def _ai_bot_decision_timeout(
+    game: GameState,
+    *,
+    now: datetime | None = None,
+) -> float:
+    if game.active_auction is None:
+        return AI_BOT_DECISION_DEADLINE_SECONDS
+    timeout = AI_AUCTION_DECISION_DEADLINE_SECONDS
+    if game.active_auction.bid_deadline is None:
+        return timeout
+    remaining = (game.active_auction.bid_deadline - (now or datetime.now(UTC))).total_seconds()
+    return max(0.0, min(timeout, remaining - AI_AUCTION_FALLBACK_BUFFER_SECONDS))
 
 
 async def _execute_bot_action(

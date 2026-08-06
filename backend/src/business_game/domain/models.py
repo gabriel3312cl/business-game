@@ -526,6 +526,87 @@ class UserUpdate(BaseModel):
     locale: str | None = Field(default=None, min_length=2, max_length=10)
 
 
+PanelId = Literal["room", "heatmap", "players", "management", "chat"]
+PanelZone = Literal["left", "right"]
+PANEL_IDS = {"room", "heatmap", "players", "management", "chat"}
+
+
+class PanelLayoutPreferences(ContentModel):
+    order: list[PanelId] = Field(min_length=5, max_length=5)
+    zones: dict[PanelId, PanelZone]
+    heights: dict[PanelId, int] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_complete_layout(self) -> PanelLayoutPreferences:
+        if len(set(self.order)) != len(self.order) or set(self.order) != PANEL_IDS:
+            raise ValueError("panel order must contain every panel exactly once")
+        if set(self.zones) != PANEL_IDS:
+            raise ValueError("panel zones must contain every panel exactly once")
+        if not set(self.heights).issubset(PANEL_IDS):
+            raise ValueError("panel heights contain an unknown panel")
+        if any(height < 144 or height > 4000 for height in self.heights.values()):
+            raise ValueError("panel heights must be between 144 and 4000")
+        return self
+
+
+SoundId = Annotated[
+    str,
+    Field(min_length=1, max_length=80, pattern=r"^[a-z0-9][a-z0-9-]*$"),
+]
+
+
+class AudioPreferences(ContentModel):
+    muted: bool
+    volume: float = Field(ge=0, le=1)
+    disabled_sounds: list[SoundId] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_unique_disabled_sounds(self) -> AudioPreferences:
+        if len(set(self.disabled_sounds)) != len(self.disabled_sounds):
+            raise ValueError("disabled sounds must be unique")
+        return self
+
+
+TokenShape = Literal["circle", "rounded", "diamond"]
+TokenIcon = Literal[
+    "number",
+    "micro",
+    "bus",
+    "completo",
+    "terremoto",
+    "cerro",
+    "cat",
+]
+
+
+class TokenAppearancePreferences(ContentModel):
+    color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+    shape: TokenShape
+    icon: TokenIcon
+
+
+class UserPreferences(ContentModel):
+    panel_layout: PanelLayoutPreferences | None = None
+    audio_settings: AudioPreferences | None = None
+    token_appearance: TokenAppearancePreferences | None = None
+
+
+class UserPreferencesUpdate(ContentModel):
+    panel_layout: PanelLayoutPreferences | None = None
+    audio_settings: AudioPreferences | None = None
+    token_appearance: TokenAppearancePreferences | None = None
+
+    @model_validator(mode="after")
+    def validate_non_empty_update(self) -> UserPreferencesUpdate:
+        if (
+            self.panel_layout is None
+            and self.audio_settings is None
+            and self.token_appearance is None
+        ):
+            raise ValueError("at least one preference must be provided")
+        return self
+
+
 class TokenResponse(BaseModel):
     access_token: str
     user_id: UUID
@@ -644,6 +725,19 @@ class TradeOffer(BaseModel):
     status: TradeStatus = TradeStatus.PENDING
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     resolved_at: datetime | None = None
+
+
+class TradeAnalysisResponse(BaseModel):
+    trade_id: UUID
+    perspective: Literal["proposer", "recipient"]
+    verdict: Literal["accept", "counter", "reject"]
+    reason_code: str
+    estimated_gain: int = Field(ge=0)
+    estimated_cost: int = Field(ge=0)
+    estimated_surplus: int
+    cash_after: int
+    liquidity_floor: int = Field(ge=0)
+    snapshot_sequence: int = Field(ge=0)
 
 
 class GameEvent(BaseModel):

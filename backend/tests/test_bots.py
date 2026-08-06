@@ -1,4 +1,7 @@
+import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from httpx import AsyncClient
@@ -22,6 +25,7 @@ from business_game.domain.models import (
     DebtReason,
     DebtState,
     GameEvent,
+    GameState,
     GameStatus,
     MortgagePropertyCommand,
     PassAuctionCommand,
@@ -211,6 +215,38 @@ async def test_personalities_bid_to_different_valuation_limits(
     assert aggressive is not None
     assert isinstance(aggressive.command, BidCommand)
     assert aggressive.command.amount > game.active_auction.current_bid
+
+
+def test_ai_auction_timeout_preserves_time_for_the_fallback() -> None:
+    now = datetime(2026, 8, 6, tzinfo=UTC)
+    bot_id = UUID("6c35eb0a-d48e-441d-9f37-f915a4947460")
+    human_id = UUID("c530a4f5-c88a-4098-9f67-d5590636db56")
+    game = GameState(
+        host_user_id=human_id,
+        pack_id="classic-demo",
+        pack_version="1.0.0",
+        status=GameStatus.PLAYING,
+        players=[
+            PlayerState(
+                user_id=bot_id,
+                display_name="Bot",
+                is_bot=True,
+                bot_personality=BotPersonality.BALANCED,
+            ),
+            PlayerState(user_id=human_id, display_name="Human"),
+        ],
+        active_auction=AuctionState(
+            property_id="property_1",
+            eligible_player_ids=[bot_id, human_id],
+            bid_deadline=now + timedelta(seconds=5),
+        ),
+    )
+
+    assert realtime._ai_bot_decision_timeout(game, now=now) == 2.0
+    game.active_auction.bid_deadline = now + timedelta(seconds=1)
+    assert realtime._ai_bot_decision_timeout(game, now=now) == 0.25
+    game.active_auction.bid_deadline = now
+    assert realtime._ai_bot_decision_timeout(game, now=now) == 0.0
 
 
 async def test_bot_builds_evenly_on_complete_group(
@@ -546,6 +582,64 @@ async def test_runner_uses_standard_policy_when_ai_bot_fails(
         updated = await GameRepository(persisted_session).get(game.id)
     assert updated.current_player is not None
     assert updated.current_player.user_id == host.id
+
+
+async def test_runner_falls_back_in_time_for_ai_bot_auction(
+    packs_dir: Path,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = await create_user(session, "ai-auction-host@example.com", "Host")
+    games = GameService(session, PackLoader(packs_dir))
+    game = await games.create("classic-demo", host)
+    game = await games.add_bot(
+        game.id,
+        host.id,
+        AddBotRequest(
+            controller=BotController.AI,
+            personality=BotPersonality.BALANCED,
+        ),
+    )
+    bot = game.players[-1]
+    pack = PackLoader(packs_dir).load("classic-demo")
+    tile = next(tile for tile in pack.board.tiles if tile.is_purchasable and tile.price)
+    await games.start(game.id, host.id)
+    async with session.begin():
+        persisted = await GameRepository(session).get(game.id, for_update=True)
+        previous_sequence = len(persisted.events)
+        persisted.active_auction = AuctionState(
+            property_id=tile.id,
+            eligible_player_ids=[host.id, bot.user_id],
+            bid_deadline=datetime.now(UTC) + timedelta(seconds=5),
+        )
+        await GameRepository(session).save(persisted, previous_sequence)
+
+    runner_sessions = async_sessionmaker(session.bind, expire_on_commit=False)
+    monkeypatch.setattr(realtime, "session_factory", runner_sessions)
+    monkeypatch.setattr(realtime, "BOT_ACTION_DELAY_SECONDS", 0)
+    monkeypatch.setattr(realtime, "AI_AUCTION_DECISION_DEADLINE_SECONDS", 0.01)
+    monkeypatch.setattr(realtime, "sync_auction_timer", lambda _game: None)
+
+    async def slow_ai(*_args, **_kwargs):
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(realtime.AiBotPolicy, "choose_action", slow_ai)
+
+    async def ignore_broadcast(_game):
+        return None
+
+    monkeypatch.setattr(realtime, "_broadcast_game_state", ignore_broadcast)
+    await realtime._run_bot_runner(game.id)
+
+    async with runner_sessions() as persisted_session:
+        updated = await GameRepository(persisted_session).get(game.id)
+    auction_actions = [
+        event
+        for event in updated.events
+        if event.type in {"auction.bid_placed", "auction.player_passed"}
+        and event.data.get("player_id") == str(bot.user_id)
+    ]
+    assert auction_actions
 
 
 async def test_bot_refusal_reaches_the_activity_feed_with_its_reason(

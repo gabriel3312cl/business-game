@@ -112,6 +112,48 @@ async def test_rejects_command_from_other_player(
         await games.execute(game.id, second.id, RollCommand(action="roll"))
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        MortgagePropertyCommand(
+            action="mortgage_property",
+            property_id="property_01",
+        ),
+        UnmortgagePropertyCommand(
+            action="unmortgage_property",
+            property_id="property_01",
+        ),
+        BuildPropertyCommand(
+            action="build_property",
+            property_id="property_01",
+        ),
+        SellBuildingCommand(
+            action="sell_building",
+            property_id="property_01",
+        ),
+    ],
+)
+async def test_rejects_property_management_outside_players_turn(
+    packs_dir: Path,
+    session: AsyncSession,
+    command: (
+        MortgagePropertyCommand
+        | UnmortgagePropertyCommand
+        | BuildPropertyCommand
+        | SellBuildingCommand
+    ),
+) -> None:
+    first = await create_user(session, "turn-owner@example.com", "Turn owner")
+    second = await create_user(session, "waiting-owner@example.com", "Waiting owner")
+    games = GameService(session, PackLoader(packs_dir))
+    game = await games.create("classic-demo", first)
+    await games.join(game.id, second)
+    await games.start(game.id, first.id)
+
+    with pytest.raises(ConflictError, match="not this player's turn"):
+        await games.execute(game.id, second.id, command)
+
+
 async def test_only_host_can_start(
     packs_dir: Path,
     session: AsyncSession,

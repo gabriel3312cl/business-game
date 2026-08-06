@@ -24,6 +24,7 @@ from business_game.domain.models import (
     ProposeTradeCommand,
     TileDefinition,
     TileKind,
+    TradeAnalysisResponse,
     TradeOffer,
     TradeStatus,
 )
@@ -322,6 +323,55 @@ class NegotiationEngine:
             requested_cash=requested_cash,
             proposer_incoming_anchor=self._anchor_total(requested_property_ids),
             recipient_incoming_anchor=self._anchor_total(offered_property_ids),
+        )
+
+    def analyze_trade(
+        self,
+        actor: PlayerState,
+        trade: TradeOffer,
+    ) -> TradeAnalysisResponse:
+        """Evaluate a pending deal from either participant's point of view."""
+        if actor.user_id not in {trade.proposer_id, trade.recipient_id}:
+            raise ValueError("the player is not part of this trade")
+        valuation = self.evaluate(
+            trade.proposer_id,
+            trade.recipient_id,
+            offered_cash=trade.offered_cash,
+            requested_cash=trade.requested_cash,
+            offered_property_ids=trade.offered_property_ids,
+            requested_property_ids=trade.requested_property_ids,
+        )
+        if actor.user_id == trade.recipient_id:
+            perspective = "recipient"
+            perspective_trade = trade
+            gain = valuation.recipient_gain
+            cost = valuation.recipient_cost
+            cash_after = actor.balance + trade.offered_cash - trade.requested_cash
+        else:
+            perspective = "proposer"
+            perspective_trade = TradeOffer(
+                proposer_id=trade.recipient_id,
+                recipient_id=trade.proposer_id,
+                offered_cash=trade.requested_cash,
+                requested_cash=trade.offered_cash,
+                offered_property_ids=trade.requested_property_ids,
+                requested_property_ids=trade.offered_property_ids,
+            )
+            gain = valuation.proposer_gain
+            cost = valuation.proposer_cost
+            cash_after = actor.balance + trade.requested_cash - trade.offered_cash
+        assessment = self.assess_incoming(actor, perspective_trade)
+        return TradeAnalysisResponse(
+            trade_id=trade.id,
+            perspective=perspective,
+            verdict=assessment.verdict.value,
+            reason_code=assessment.reason,
+            estimated_gain=gain,
+            estimated_cost=cost,
+            estimated_surplus=gain - cost,
+            cash_after=cash_after,
+            liquidity_floor=self.liquidity_floor(actor),
+            snapshot_sequence=self._game.events[-1].sequence if self._game.events else 0,
         )
 
     # ------------------------------------------------------------- pressures

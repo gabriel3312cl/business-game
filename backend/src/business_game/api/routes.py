@@ -12,9 +12,15 @@ from business_game.api.dependencies import (
     get_user_service,
 )
 from business_game.application.board_service import PackResolver
+from business_game.application.negotiation import NegotiationEngine
 from business_game.application.services import GameService, SessionService, UserService
 from business_game.config import settings
-from business_game.domain.errors import UnauthorizedError
+from business_game.domain.errors import (
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    UnauthorizedError,
+)
 from business_game.domain.models import (
     AddBotRequest,
     ContentPack,
@@ -23,9 +29,13 @@ from business_game.domain.models import (
     GameState,
     PackManifest,
     TokenResponse,
+    TradeAnalysisResponse,
+    TradeStatus,
     UpdateGameSettingsRequest,
     User,
     UserCreate,
+    UserPreferences,
+    UserPreferencesUpdate,
     UserUpdate,
 )
 from business_game.realtime import sio, sync_auction_timer, sync_bot_runner
@@ -133,6 +143,23 @@ async def update_me(
     return await users.update(current_user.id, data)
 
 
+@router.get("/users/me/preferences", response_model=UserPreferences)
+async def get_my_preferences(
+    current_user: Annotated[User, Depends(get_current_user)],
+    users: Annotated[UserService, Depends(get_user_service)],
+) -> UserPreferences:
+    return await users.get_preferences(current_user.id)
+
+
+@router.patch("/users/me/preferences", response_model=UserPreferences)
+async def update_my_preferences(
+    data: UserPreferencesUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    users: Annotated[UserService, Depends(get_user_service)],
+) -> UserPreferences:
+    return await users.update_preferences(current_user.id, data)
+
+
 @router.delete("/users/me", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_me(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -166,6 +193,37 @@ async def get_game(
     games: Annotated[GameService, Depends(get_game_service)],
 ) -> GameState:
     return await games.get(game_id, current_user.id)
+
+
+@router.get(
+    "/games/{game_id}/trades/{trade_id}/analysis",
+    response_model=TradeAnalysisResponse,
+)
+async def analyze_trade(
+    game_id: UUID,
+    trade_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    games: Annotated[GameService, Depends(get_game_service)],
+    packs: Annotated[PackResolver, Depends(get_pack_resolver)],
+) -> TradeAnalysisResponse:
+    game = await games.get(game_id, current_user.id)
+    actor = next(
+        (player for player in game.players if player.user_id == current_user.id),
+        None,
+    )
+    if actor is None:
+        raise ForbiddenError("trade analysis is only available to players")
+    trade = next((item for item in game.trades if item.id == trade_id), None)
+    if trade is None or current_user.id not in {trade.proposer_id, trade.recipient_id}:
+        raise NotFoundError("trade not found")
+    if trade.status is not TradeStatus.PENDING:
+        raise ConflictError("only pending trades can be analyzed")
+    pack = await packs.load(
+        game.pack_id,
+        locale=current_user.locale,
+        version=game.pack_version,
+    )
+    return NegotiationEngine(game, pack).analyze_trade(actor, trade)
 
 
 @router.post("/games/{game_id}/players", response_model=GameState)

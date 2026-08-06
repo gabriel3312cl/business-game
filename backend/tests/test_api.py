@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.config import settings
+from business_game.domain.models import TradeOffer
 from business_game.infrastructure.db_models import (
     AuthSessionRecord,
     GameRecord,
@@ -63,6 +64,165 @@ async def test_authenticated_user_lifecycle(client: AsyncClient) -> None:
     deleted = await client.delete("/api/v1/users/me", headers=headers)
     assert deleted.status_code == 204
     assert (await client.get("/api/v1/auth/me", headers=headers)).status_code == 401
+
+
+async def test_user_panel_layout_preferences_persist_per_account(
+    client: AsyncClient,
+    session: AsyncSession,
+) -> None:
+    first_headers = await register_and_login(client, email="layout@example.com")
+    default_preferences = await client.get(
+        "/api/v1/users/me/preferences",
+        headers=first_headers,
+    )
+    assert default_preferences.status_code == 200
+    assert default_preferences.json() == {
+        "panel_layout": None,
+        "audio_settings": None,
+        "token_appearance": None,
+    }
+
+    panel_layout = {
+        "order": ["chat", "players", "management", "room", "heatmap"],
+        "zones": {
+            "room": "left",
+            "heatmap": "left",
+            "players": "right",
+            "management": "right",
+            "chat": "right",
+        },
+        "heights": {"chat": 420, "management": 500},
+    }
+    updated = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=first_headers,
+        json={"panel_layout": panel_layout},
+    )
+    assert updated.status_code == 200
+    assert updated.json() == {
+        "panel_layout": panel_layout,
+        "audio_settings": None,
+        "token_appearance": None,
+    }
+
+    audio_settings = {
+        "muted": True,
+        "volume": 0.35,
+        "disabled_sounds": ["chat-message", "auction-countdown"],
+    }
+    audio_updated = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=first_headers,
+        json={"audio_settings": audio_settings},
+    )
+    assert audio_updated.status_code == 200
+    assert audio_updated.json() == {
+        "panel_layout": panel_layout,
+        "audio_settings": audio_settings,
+        "token_appearance": None,
+    }
+
+    token_appearance = {
+        "color": "#70b7ff",
+        "shape": "diamond",
+        "icon": "cat",
+    }
+    token_updated = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=first_headers,
+        json={"token_appearance": token_appearance},
+    )
+    assert token_updated.status_code == 200
+    assert token_updated.json() == {
+        "panel_layout": panel_layout,
+        "audio_settings": audio_settings,
+        "token_appearance": token_appearance,
+    }
+
+    restored = await client.get(
+        "/api/v1/users/me/preferences",
+        headers=first_headers,
+    )
+    assert restored.status_code == 200
+    assert restored.json() == {
+        "panel_layout": panel_layout,
+        "audio_settings": audio_settings,
+        "token_appearance": token_appearance,
+    }
+
+    first_user = await session.scalar(
+        select(UserRecord).where(UserRecord.email == "layout@example.com")
+    )
+    assert first_user is not None
+    assert first_user.ui_preferences == {
+        "panel_layout": panel_layout,
+        "audio_settings": audio_settings,
+        "token_appearance": token_appearance,
+    }
+    await session.rollback()
+
+    second_headers = await register_and_login(client, email="other-layout@example.com")
+    second_preferences = await client.get(
+        "/api/v1/users/me/preferences",
+        headers=second_headers,
+    )
+    assert second_preferences.status_code == 200
+    assert second_preferences.json() == {
+        "panel_layout": None,
+        "audio_settings": None,
+        "token_appearance": None,
+    }
+
+
+async def test_rejects_invalid_or_unauthenticated_panel_preferences(
+    client: AsyncClient,
+) -> None:
+    assert (await client.get("/api/v1/users/me/preferences")).status_code == 401
+    headers = await register_and_login(client, email="invalid-layout@example.com")
+    invalid = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=headers,
+        json={
+            "panel_layout": {
+                "order": ["room", "room", "players", "management", "chat"],
+                "zones": {
+                    "room": "left",
+                    "heatmap": "left",
+                    "players": "right",
+                    "management": "right",
+                    "chat": "right",
+                },
+                "heights": {"chat": 50},
+            }
+        },
+    )
+    assert invalid.status_code == 422
+
+    invalid_audio = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=headers,
+        json={
+            "audio_settings": {
+                "muted": False,
+                "volume": 1.5,
+                "disabled_sounds": ["chat-message", "chat-message"],
+            }
+        },
+    )
+    assert invalid_audio.status_code == 422
+
+    invalid_token = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=headers,
+        json={
+            "token_appearance": {
+                "color": "javascript:red",
+                "shape": "triangle",
+                "icon": "unknown",
+            }
+        },
+    )
+    assert invalid_token.status_code == 422
 
 
 async def test_rejects_duplicate_email_and_invalid_password(client: AsyncClient) -> None:
@@ -166,6 +326,58 @@ async def test_game_creation_uses_authenticated_identity(client: AsyncClient) ->
     assert game["events"][0]["sequence"] == 1
     assert game["events"][0]["type"] == "game.created"
     assert game["events"][1]["type"] == "player.joined"
+
+
+async def test_trade_analysis_uses_authenticated_participant_perspective(
+    client: AsyncClient,
+    session: AsyncSession,
+) -> None:
+    proposer_headers = await register_and_login(
+        client,
+        email="analysis-proposer@example.com",
+    )
+    recipient_headers = await register_and_login(
+        client,
+        email="analysis-recipient@example.com",
+    )
+    created = await client.post(
+        "/api/v1/games",
+        headers=proposer_headers,
+        json={"pack_id": "classic-demo"},
+    )
+    game = created.json()
+    joined = await client.post(
+        f"/api/v1/games/{game['id']}/players",
+        headers=recipient_headers,
+    )
+    recipient = joined.json()["players"][1]
+    trade = TradeOffer(
+        proposer_id=UUID(game["players"][0]["user_id"]),
+        recipient_id=UUID(recipient["user_id"]),
+        offered_cash=200,
+    )
+    record = await session.get(GameRecord, UUID(game["id"]))
+    assert record is not None
+    state = deepcopy(record.state)
+    state["trades"] = [trade.model_dump(mode="json")]
+    record.state = state
+    await session.commit()
+
+    proposer_analysis = await client.get(
+        f"/api/v1/games/{game['id']}/trades/{trade.id}/analysis",
+        headers=proposer_headers,
+    )
+    recipient_analysis = await client.get(
+        f"/api/v1/games/{game['id']}/trades/{trade.id}/analysis",
+        headers=recipient_headers,
+    )
+
+    assert proposer_analysis.status_code == 200
+    assert proposer_analysis.json()["perspective"] == "proposer"
+    assert proposer_analysis.json()["estimated_surplus"] == -200
+    assert recipient_analysis.status_code == 200
+    assert recipient_analysis.json()["perspective"] == "recipient"
+    assert recipient_analysis.json()["estimated_surplus"] == 200
 
 
 async def test_lists_active_games_for_each_member(

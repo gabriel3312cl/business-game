@@ -99,6 +99,30 @@ def swap_setup(pack: ContentPack) -> tuple[GameState, PlayerState, PlayerState]:
     return game, seller, buyer
 
 
+def test_trade_analysis_uses_each_participants_perspective(pack: ContentPack) -> None:
+    proposer = make_bot(BotPersonality.BALANCED, name="Proposer")
+    recipient = make_bot(BotPersonality.BALANCED, name="Recipient")
+    game = make_game(pack, [proposer, recipient])
+    trade = TradeOffer(
+        proposer_id=proposer.user_id,
+        recipient_id=recipient.user_id,
+        offered_cash=200,
+    )
+    engine = NegotiationEngine(game, pack)
+
+    recipient_analysis = engine.analyze_trade(recipient, trade)
+    proposer_analysis = engine.analyze_trade(proposer, trade)
+
+    assert recipient_analysis.perspective == "recipient"
+    assert recipient_analysis.verdict == "accept"
+    assert recipient_analysis.estimated_surplus == 200
+    assert recipient_analysis.cash_after == recipient.balance + 200
+    assert proposer_analysis.perspective == "proposer"
+    assert proposer_analysis.verdict == "reject"
+    assert proposer_analysis.estimated_surplus == -200
+    assert proposer_analysis.cash_after == proposer.balance - 200
+
+
 async def test_bot_offers_the_swap_that_completes_both_monopolies(
     pack: ContentPack,
 ) -> None:
