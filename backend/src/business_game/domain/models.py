@@ -787,6 +787,7 @@ class GameState(BaseModel):
     trades: list[TradeOffer] = Field(default_factory=list, max_length=100)
     last_roll: tuple[int, int] | None = None
     events: list[GameEvent] = Field(default_factory=list)
+    event_sequence: int = Field(default=0, ge=0)
 
     @property
     def current_player(self) -> PlayerState | None:
@@ -796,6 +797,14 @@ class GameState(BaseModel):
 
     @model_validator(mode="after")
     def validate_economic_state(self) -> GameState:
+        if self.events:
+            sequences = [event.sequence for event in self.events]
+            if sequences != list(range(sequences[0], sequences[0] + len(sequences))):
+                raise ValueError("game event sequences must be contiguous")
+            if self.event_sequence == 0:
+                self.event_sequence = sequences[-1]
+            elif self.event_sequence != sequences[-1]:
+                raise ValueError("event_sequence must match the latest game event")
         if self.players and self.current_player_index >= len(self.players):
             raise ValueError("current_player_index is outside the player list")
         player_ids = {player.user_id for player in self.players}
@@ -971,6 +980,18 @@ GameCommand = Annotated[
     | CancelTradeCommand,
     Field(discriminator="action"),
 ]
+
+
+class GameCommandRequest(BaseModel):
+    command: GameCommand
+    expected_sequence: int = Field(ge=0)
+    command_id: UUID
+
+
+class GameStateView(GameState):
+    deck_orders: dict[str, list[str]] = Field(default_factory=dict, exclude=True)
+    deck_cursors: dict[str, int] = Field(default_factory=dict, exclude=True)
+    events_complete: bool = True
 
 
 class CreateGameRequest(BaseModel):

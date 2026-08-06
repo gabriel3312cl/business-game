@@ -94,6 +94,7 @@ CardShuffler = Callable[[list[str]], list[str]]
 Clock = Callable[[], datetime]
 AUCTION_BID_WINDOW = timedelta(seconds=5)
 MAX_EFFECTS_PER_COMMAND = 32
+DUMMY_PASSWORD_HASH = hash_password("business-game-invalid-account")
 
 
 class UserService:
@@ -122,11 +123,13 @@ class UserService:
 
     async def authenticate(self, email: str, password: str) -> User:
         record = await self._users.get_record_by_email(email.strip().lower())
-        if (
-            record is None
-            or not record.is_active
-            or not verify_password(password, record.password_hash)
-        ):
+        password_hash = (
+            record.password_hash
+            if record is not None and record.is_active
+            else DUMMY_PASSWORD_HASH
+        )
+        password_valid = verify_password(password, password_hash)
+        if record is None or not record.is_active or not password_valid:
             raise UnauthorizedError("invalid email or password")
         return await self._users.get(record.id)
 
@@ -276,7 +279,7 @@ class GameService:
     async def join(self, game_id: UUID, actor: User) -> GameState:
         async with self._session.begin():
             game = await self._games.get(game_id, for_update=True)
-            previous_sequence = len(game.events)
+            previous_sequence = game.event_sequence
             pack = self._pack(game)
             if any(player.user_id == actor.id for player in game.players):
                 return game
@@ -298,7 +301,7 @@ class GameService:
                 )
             )
             self._append_event(game, "player.joined", {"player_id": str(actor.id)})
-            await self._games.save(game, previous_sequence)
+            await self._games.save(game, previous_sequence, sync_members=True)
             return game
 
     async def add_bot(
@@ -317,7 +320,7 @@ class GameService:
             player_limit = game.settings.max_players or pack.manifest.max_players
             if len(game.players) >= player_limit:
                 raise ConflictError("the game is full")
-            previous_sequence = len(game.events)
+            previous_sequence = game.event_sequence
             display_name = (data.display_name or "").strip()
             if not display_name:
                 if data.controller is BotController.AI:
@@ -381,7 +384,7 @@ class GameService:
             )
             if bot is None:
                 raise NotFoundError("bot was not found in this game")
-            previous_sequence = len(game.events)
+            previous_sequence = game.event_sequence
             game.players.remove(bot)
             self._append_event(
                 game,
@@ -398,7 +401,7 @@ class GameService:
     async def watch(self, game_id: UUID, actor: User) -> GameState:
         async with self._session.begin():
             game = await self._games.get(game_id, for_update=True)
-            previous_sequence = len(game.events)
+            previous_sequence = game.event_sequence
             if game.status is GameStatus.CANCELLED:
                 raise ConflictError("the game was cancelled")
             if any(player.user_id == actor.id for player in game.players):
@@ -425,7 +428,7 @@ class GameService:
                     "display_name": actor.display_name,
                 },
             )
-            await self._games.save(game, previous_sequence)
+            await self._games.save(game, previous_sequence, sync_members=True)
             return game
 
     async def update_settings(
@@ -440,7 +443,7 @@ class GameService:
                 raise ForbiddenError("only the host can update game settings")
             if game.status is not GameStatus.LOBBY:
                 raise ConflictError("game settings can only change in the lobby")
-            previous_sequence = len(game.events)
+            previous_sequence = game.event_sequence
             pack = self._pack(game)
             changes: dict[str, object] = {}
             if data.max_players is not None:
@@ -488,7 +491,7 @@ class GameService:
     async def leave(self, game_id: UUID, actor_id: UUID) -> GameState:
         async with self._session.begin():
             game = await self._games.get(game_id, for_update=True)
-            previous_sequence = len(game.events)
+            previous_sequence = game.event_sequence
             spectator = next(
                 (
                     candidate
@@ -507,7 +510,7 @@ class GameService:
                         "display_name": spectator.display_name,
                     },
                 )
-                await self._games.save(game, previous_sequence)
+                await self._games.save(game, previous_sequence, sync_members=True)
                 return game
 
             player_index = next(
@@ -546,7 +549,7 @@ class GameService:
                             "host.transferred",
                             {"host_id": str(game.host_user_id)},
                         )
-                await self._games.save(game, previous_sequence)
+                await self._games.save(game, previous_sequence, sync_members=True)
                 return game
             if game.status in {GameStatus.FINISHED, GameStatus.CANCELLED}:
                 return game
@@ -593,7 +596,7 @@ class GameService:
                 },
             )
             self._declare_bankruptcy(game, actor_id, forced=True)
-            await self._games.save(game, previous_sequence)
+            await self._games.save(game, previous_sequence, sync_members=True)
             return game
 
     async def start(self, game_id: UUID, actor_id: UUID) -> GameState:
@@ -601,7 +604,7 @@ class GameService:
             game = await self._games.get(game_id, for_update=True)
             if game.host_user_id != actor_id:
                 raise ForbiddenError("only the host can start the game")
-            previous_sequence = len(game.events)
+            previous_sequence = game.event_sequence
             pack = self._pack(game)
             if game.status is not GameStatus.LOBBY:
                 raise ConflictError("the game already started")
@@ -627,6 +630,7 @@ class GameService:
         command: GameCommand,
         *,
         expected_sequence: int | None = None,
+        command_id: UUID | None = None,
         automation_reason: str | None = None,
         automation_note: str | None = None,
     ) -> GameState:
@@ -634,9 +638,15 @@ class GameService:
         async with self._session.begin():
             game = await self._games.get(game_id, for_update=True)
             self._require_participant(game, actor_id)
-            previous_sequence = len(game.events)
+            previous_sequence = game.event_sequence
+            if command_id is not None and await self._games.command_was_processed(
+                game_id,
+                actor_id,
+                command_id,
+            ):
+                return game
             if expected_sequence is not None and previous_sequence != expected_sequence:
-                raise ConflictError("the game changed before the automated command ran")
+                raise ConflictError("the game changed before the command ran")
             if game.status is not GameStatus.PLAYING:
                 raise ConflictError("the game is not active")
 
@@ -712,6 +722,8 @@ class GameService:
                 automation_note,
             )
             await self._games.save(game, previous_sequence)
+            if command_id is not None:
+                await self._games.record_command(game_id, actor_id, command_id)
             return game
 
     @staticmethod
@@ -750,7 +762,7 @@ class GameService:
                 or auction.bid_deadline > self._clock()
             ):
                 return None
-            previous_sequence = len(game.events)
+            previous_sequence = game.event_sequence
             self._complete_auction(game)
             await self._games.save(game, previous_sequence)
             return game
@@ -2552,9 +2564,13 @@ class GameService:
         event_type: str,
         data: dict[str, object] | None = None,
     ) -> None:
+        game.event_sequence = max(
+            game.event_sequence,
+            game.events[-1].sequence if game.events else 0,
+        ) + 1
         game.events.append(
             GameEvent(
-                sequence=len(game.events) + 1,
+                sequence=game.event_sequence,
                 type=event_type,
                 data=data or {},
             )

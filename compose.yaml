@@ -9,9 +9,12 @@ services:
     environment:
       BUSINESS_GAME_ENVIRONMENT: ${BUSINESS_GAME_ENVIRONMENT:-development}
       BUSINESS_GAME_DATABASE_URL: postgresql+asyncpg://${BUSINESS_GAME_POSTGRES_USER:-business_game}:${BUSINESS_GAME_POSTGRES_PASSWORD:-local_business_game_only}@postgres:5432/${BUSINESS_GAME_POSTGRES_DB:-business_game}
+      BUSINESS_GAME_REDIS_URL: redis://redis:6379/0
       BUSINESS_GAME_JWT_SECRET: ${BUSINESS_GAME_JWT_SECRET:-development-only-change-this-secret}
       BUSINESS_GAME_ACCESS_TOKEN_MINUTES: ${BUSINESS_GAME_ACCESS_TOKEN_MINUTES:-30}
       BUSINESS_GAME_SESSION_DAYS: ${BUSINESS_GAME_SESSION_DAYS:-30}
+      BUSINESS_GAME_AUTH_LOGIN_ATTEMPTS_PER_MINUTE: ${BUSINESS_GAME_AUTH_LOGIN_ATTEMPTS_PER_MINUTE:-30}
+      BUSINESS_GAME_AUTH_REGISTRATIONS_PER_MINUTE: ${BUSINESS_GAME_AUTH_REGISTRATIONS_PER_MINUTE:-20}
       BUSINESS_GAME_PACKS_DIR: /app/content/packs
       BUSINESS_GAME_DEEPSEEK_API_KEY: ${BUSINESS_GAME_DEEPSEEK_API_KEY}
       BUSINESS_GAME_DEEPSEEK_MODEL: ${BUSINESS_GAME_DEEPSEEK_MODEL}
@@ -29,6 +32,8 @@ services:
       - "127.0.0.1:${BUSINESS_GAME_API_PORT:-48010}:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - business_game_internal

@@ -19,6 +19,7 @@ from business_game.domain.board_models import (
 from business_game.domain.models import (
     BidCommand,
     DeclinePropertyCommand,
+    EndTurnCommand,
     MortgagePropertyCommand,
     PassAuctionCommand,
     RollCommand,
@@ -105,6 +106,11 @@ async def test_postgres_persists_an_authoritative_auction(packs_dir: Path) -> No
             current_time += timedelta(seconds=5)
             game = await games.settle_expired_auction(game.id, deadline)
             assert game is not None
+            game = await games.execute(
+                game.id,
+                first.id,
+                EndTurnCommand(action="end_turn"),
+            )
             game = await games.execute(
                 game.id,
                 second.id,

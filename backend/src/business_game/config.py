@@ -24,10 +24,13 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://business_game:local_business_game_only"
         "@127.0.0.1:45432/business_game"
     )
+    redis_url: str = "redis://127.0.0.1:46379/0"
     jwt_secret: str = "development-only-change-this-secret"
     access_token_minutes: int = 30
     session_days: int = 30
     session_cookie_name: str = "business_game_session"
+    auth_login_attempts_per_minute: int = Field(default=30, ge=1, le=300)
+    auth_registrations_per_minute: int = Field(default=20, ge=1, le=120)
     packs_dir: Path = PROJECT_ROOT / "content" / "packs"
     deepseek_api_key: SecretStr
     deepseek_model: str = Field(min_length=1)

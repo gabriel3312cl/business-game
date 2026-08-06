@@ -24,6 +24,7 @@ from business_game.application.chat_reactions import (
     BotReaction,
     detect_reaction,
 )
+from business_game.application.game_views import game_state_view
 from business_game.application.negotiation import NegotiationEngine, TradeCandidate
 from business_game.application.services import GameService
 from business_game.config import settings
@@ -32,7 +33,7 @@ from business_game.domain.errors import DomainError, UnauthorizedError
 from business_game.domain.models import (
     BotController,
     ContentPack,
-    GameCommand,
+    GameCommandRequest,
     GameState,
     GameStatus,
     PlayerState,
@@ -47,7 +48,7 @@ sio = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins=list(settings.cors_origins),
 )
-command_adapter = TypeAdapter(GameCommand)
+command_adapter = TypeAdapter(GameCommandRequest)
 logger = logging.getLogger(__name__)
 auction_timer_tasks: dict[UUID, tuple[datetime, asyncio.Task[None]]] = {}
 bot_runner_tasks: dict[UUID, asyncio.Task[None]] = {}
@@ -96,7 +97,12 @@ async def room_join(sid: str, data: dict) -> dict:
         sync_auction_timer(game)
         sync_bot_runner(game)
         await sio.enter_room(sid, str(game_id))
-        await sio.emit("game_state", game.model_dump(mode="json"), to=sid)
+        await sio.enter_room(sid, _member_game_room(game_id, user_id))
+        await sio.emit(
+            "game_state",
+            game_state_view(game, user_id).model_dump(mode="json"),
+            to=sid,
+        )
         return {"ok": True}
     except UnauthorizedError as exc:
         return {"ok": False, "code": "AUTH_EXPIRED", "error": str(exc)}
@@ -108,23 +114,21 @@ async def room_join(sid: str, data: dict) -> dict:
 async def game_command(sid: str, data: dict) -> dict:
     try:
         game_id = UUID(data["game_id"])
-        command = command_adapter.validate_python(data["command"])
+        request = command_adapter.validate_python(data)
         async with session_factory() as session:
             user_id = await _authenticated_user_id(sid, session)
             game = await GameService(session, pack_loader).execute(
                 game_id,
                 user_id,
-                command,
+                request.command,
+                expected_sequence=request.expected_sequence,
+                command_id=request.command_id,
             )
         sync_auction_timer(game)
         await react_to_recent_events(game)
         sync_bot_runner(game)
-        await sio.emit(
-            "game_state",
-            game.model_dump(mode="json"),
-            room=str(game_id),
-        )
-        return {"ok": True, "sequence": len(game.events)}
+        await broadcast_game_state(game, complete_events=False)
+        return {"ok": True, "sequence": game.event_sequence}
     except UnauthorizedError as exc:
         return {"ok": False, "code": "AUTH_EXPIRED", "error": str(exc)}
     except (KeyError, ValueError, ValidationError, DomainError) as exc:
@@ -576,7 +580,7 @@ async def _propose_chat_trade(
         logger.info("chat trade proposal dropped for game %s: %s", game_id, exc)
         return
     sync_auction_timer(updated)
-    await _broadcast_game_state(updated)
+    await broadcast_game_state(updated, complete_events=False)
 
 
 def _bot_chat_responder() -> BotChatResponder:
@@ -699,7 +703,7 @@ async def _run_bot_runner(game_id: UUID) -> None:
                             game_id,
                         )
                         action = baseline_action
-            before_sequence = len(game.events)
+            before_sequence = game.event_sequence
             failure_key = (
                 before_sequence,
                 action.actor_id,
@@ -746,7 +750,7 @@ async def _run_bot_runner(game_id: UUID) -> None:
             sync_auction_timer(updated)
             await _announce_bot_decisions(updated, before_sequence)
             await react_to_recent_events(updated)
-            await _broadcast_game_state(updated)
+            await broadcast_game_state(updated, complete_events=False)
             actions_since_yield += 1
             if actions_since_yield >= BOT_ACTIONS_PER_YIELD:
                 actions_since_yield = 0
@@ -806,15 +810,35 @@ async def _resign_stalled_bot(game_id: UUID, bot_id: UUID) -> GameState:
         return await GameService(session, pack_loader).leave(game_id, bot_id)
 
 
-async def _broadcast_game_state(game: GameState) -> None:
-    try:
-        await sio.emit(
-            "game_state",
-            game.model_dump(mode="json"),
-            room=str(game.id),
-        )
-    except Exception:
-        logger.exception("game state broadcast failed for game %s", game.id)
+def _member_game_room(game_id: UUID, user_id: UUID) -> str:
+    return f"{game_id}:member:{user_id}"
+
+
+async def broadcast_game_state(
+    game: GameState,
+    *,
+    complete_events: bool,
+) -> None:
+    member_ids = {
+        player.user_id for player in game.players if not player.is_bot
+    } | {spectator.user_id for spectator in game.spectators}
+    for member_id in member_ids:
+        try:
+            await sio.emit(
+                "game_state",
+                game_state_view(
+                    game,
+                    member_id,
+                    complete_events=complete_events,
+                ).model_dump(mode="json"),
+                room=_member_game_room(game.id, member_id),
+            )
+        except Exception:
+            logger.exception(
+                "game state broadcast failed for game %s member %s",
+                game.id,
+                member_id,
+            )
 
 
 def sync_auction_timer(game: GameState) -> None:
@@ -879,7 +903,7 @@ async def _run_auction_timer(game_id: UUID, deadline: datetime) -> None:
         if game is None:
             return
         await react_to_recent_events(game)
-        await _broadcast_game_state(game)
+        await broadcast_game_state(game, complete_events=False)
         sync_auction_timer(game)
         sync_bot_runner(game)
     except asyncio.CancelledError:

@@ -19,7 +19,7 @@ import {
   ToggleButtonGroup,
   Typography,
 } from '@mui/material'
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { activeGameSession, api, ApiError, authToken } from './api'
 import { GameAdvisorChat } from './advisor/GameAdvisorChat'
@@ -27,6 +27,7 @@ import { BoardStudio } from './board-editor/BoardStudio'
 import { AuthDialog, type AuthMode } from './components/AuthDialog'
 import { GameBoard } from './components/GameBoard'
 import { GameSessionPanel } from './components/GameSessionPanel'
+import { mergeGameState } from './gameState'
 import type {
   BoardMode,
   ContentPack,
@@ -46,6 +47,7 @@ export default function App() {
   const [manifests, setManifests] = useState<PackManifest[]>([])
   const [pack, setPack] = useState<ContentPack | null>(null)
   const [selectedMode, setSelectedMode] = useState<BoardMode>('classic')
+  const [selectedManifestKey, setSelectedManifestKey] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState(false)
@@ -64,6 +66,7 @@ export default function App() {
   const [customPackNames, setCustomPackNames] = useState<Record<string, string>>(
     {},
   )
+  const packLoadRequestRef = useRef(0)
   const activeGamePackId = createdGame?.pack_id
   const activeGamePackVersion = createdGame?.pack_version
   const customManifests = manifests.filter((item) => item.board_mode === 'custom')
@@ -72,10 +75,7 @@ export default function App() {
     createdGame && gamePack ? gamePack.manifest.board_mode : selectedMode
   const applyGameState = useCallback((nextGame: GameState) => {
     setCreatedGame((currentGame) => {
-      if (!currentGame || currentGame.id !== nextGame.id) return nextGame
-      return gameSequence(nextGame) >= gameSequence(currentGame)
-        ? nextGame
-        : currentGame
+      return mergeGameState(currentGame, nextGame)
     })
   }, [])
 
@@ -111,22 +111,34 @@ export default function App() {
   )
 
   const loadManifests = useCallback(async () => {
+    const requestId = ++packLoadRequestRef.current
     setError(false)
     try {
       const available = await api.listPacks()
+      if (packLoadRequestRef.current !== requestId) return
       setManifests(available)
       const selected =
+        available.find(
+          (item) =>
+            `${item.id}@${item.version}` === selectedManifestKey &&
+            item.board_mode === selectedMode,
+        ) ??
         available.find((item) => item.board_mode === selectedMode) ??
         (selectedMode === 'custom' ? undefined : available[0])
       if (selected) {
-        setPack(await api.getPack(selected.id, i18n.language, selected.version))
+        const loaded = await api.getPack(
+          selected.id,
+          i18n.language,
+          selected.version,
+        )
+        if (packLoadRequestRef.current === requestId) setPack(loaded)
       } else {
         setPack(null)
       }
     } catch {
-      setError(true)
+      if (packLoadRequestRef.current === requestId) setError(true)
     }
-  }, [i18n.language, selectedMode])
+  }, [i18n.language, selectedManifestKey, selectedMode])
 
   useEffect(() => {
     void loadManifests()
@@ -211,22 +223,19 @@ export default function App() {
     }
   }, [activeGamePackId, activeGamePackVersion, i18n.language, t])
 
-  const selectMode = async (mode: BoardMode) => {
+  const selectMode = (mode: BoardMode) => {
+    packLoadRequestRef.current += 1
     setSelectedMode(mode)
+    setSelectedManifestKey(null)
     setPack(null)
-    const selected = manifests.find((item) => item.board_mode === mode)
-    if (selected) {
-      setPack(await api.getPack(selected.id, i18n.language, selected.version))
-      setZoom(1)
-    } else {
-      setPack(null)
-    }
+    setZoom(1)
   }
 
-  const selectManifest = async (manifest: PackManifest) => {
+  const selectManifest = (manifest: PackManifest) => {
+    packLoadRequestRef.current += 1
     setSelectedMode(manifest.board_mode)
+    setSelectedManifestKey(`${manifest.id}@${manifest.version}`)
     setPack(null)
-    setPack(await api.getPack(manifest.id, i18n.language, manifest.version))
     setZoom(1)
   }
 
@@ -512,7 +521,7 @@ export default function App() {
               size="small"
               value={displayedMode}
               onChange={(_, mode: BoardMode | null) => {
-                if (mode) void selectMode(mode)
+                if (mode) selectMode(mode)
               }}
             >
               <ToggleButton value="classic">{t('classic')}</ToggleButton>
@@ -528,13 +537,14 @@ export default function App() {
                   value={
                     pack
                       ? `${pack.manifest.id}@${pack.manifest.version}`
-                      : `${customManifests[0].id}@${customManifests[0].version}`
+                      : (selectedManifestKey ??
+                        `${customManifests[0].id}@${customManifests[0].version}`)
                   }
                   onChange={(event) => {
                     const selected = customManifests.find(
                       (item) => `${item.id}@${item.version}` === event.target.value,
                     )
-                    if (selected) void selectManifest(selected)
+                    if (selected) selectManifest(selected)
                   }}
                 >
                   {customManifests.map((item) => (
@@ -754,8 +764,4 @@ export default function App() {
       />
     </Box>
   )
-}
-
-function gameSequence(game: GameState): number {
-  return game.events.at(-1)?.sequence ?? 0
 }

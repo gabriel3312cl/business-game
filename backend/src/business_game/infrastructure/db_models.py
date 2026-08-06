@@ -116,6 +116,9 @@ class BoardVersionRecord(Base):
     )
     pack_id: Mapped[str] = mapped_column(String(80))
     version: Mapped[str] = mapped_column(String(30))
+    version_major: Mapped[int] = mapped_column(Integer)
+    version_minor: Mapped[int] = mapped_column(Integer)
+    version_patch: Mapped[int] = mapped_column(Integer)
     source_revision: Mapped[int] = mapped_column(Integer)
     document: Mapped[dict[str, Any]] = mapped_column(JSON)
     manifest: Mapped[dict[str, Any]] = mapped_column(JSON)
@@ -146,6 +149,10 @@ class BoardAssetRecord(Base):
 
 class GameRecord(Base):
     __tablename__ = "games"
+    __table_args__ = (
+        Index("ix_games_status_auction_deadline", "status", "auction_deadline"),
+        Index("ix_games_status_active_bots", "status", "has_active_bots"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
     pack_id: Mapped[str] = mapped_column(String(80))
@@ -154,6 +161,11 @@ class GameRecord(Base):
     state: Mapped[dict[str, Any]] = mapped_column(JSON)
     pack_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     version: Mapped[int] = mapped_column(Integer, default=1)
+    auction_deadline: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        default=None,
+    )
+    has_active_bots: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -188,6 +200,52 @@ class GameEventRecord(Base):
     event_type: Mapped[str] = mapped_column(String(100))
     event_data: Mapped[dict[str, Any]] = mapped_column(JSON)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class GameMemberRecord(Base):
+    __tablename__ = "game_members"
+    __table_args__ = (
+        CheckConstraint("role IN ('player', 'spectator')", name="ck_game_members_role"),
+        Index("ix_game_members_user_game", "user_id", "game_id"),
+    )
+
+    game_id: Mapped[UUID] = mapped_column(
+        ForeignKey("games.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    role: Mapped[str] = mapped_column(String(12))
+
+
+class ProcessedGameCommandRecord(Base):
+    __tablename__ = "processed_game_commands"
+    __table_args__ = (
+        UniqueConstraint(
+            "game_id",
+            "actor_id",
+            "command_id",
+            name="uq_processed_game_command",
+        ),
+        Index("ix_processed_game_commands_game_id", "game_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    game_id: Mapped[UUID] = mapped_column(
+        ForeignKey("games.id", ondelete="CASCADE"),
+    )
+    actor_id: Mapped[UUID] = mapped_column()
+    command_id: Mapped[UUID] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
 
 
 class ChatMessageRecord(Base):

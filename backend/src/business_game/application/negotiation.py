@@ -371,7 +371,7 @@ class NegotiationEngine:
             estimated_surplus=gain - cost,
             cash_after=cash_after,
             liquidity_floor=self.liquidity_floor(actor),
-            snapshot_sequence=self._game.events[-1].sequence if self._game.events else 0,
+            snapshot_sequence=self._game.event_sequence,
         )
 
     # ------------------------------------------------------------- pressures
@@ -981,6 +981,6 @@ class NegotiationEngine:
 
     def _mood(self, player_id: UUID) -> int:
         """Reproducible jitter so identical personalities still differ."""
-        seed = f"{self._game.id}:{player_id}:{len(self._game.events)}".encode()
+        seed = f"{self._game.id}:{player_id}:{self._game.event_sequence}".encode()
         digest = hashlib.blake2s(seed, digest_size=2).digest()
         return int.from_bytes(digest, "big") % MOOD_SPREAD - MOOD_SPREAD // 2

@@ -132,5 +132,10 @@ async def ask_advisor(
         answer=response.answer,
         snapshot_sequence=response.snapshot_sequence,
     )
+    await repository.prune(
+        game_id,
+        current_user.id,
+        keep=settings.advisor_history_limit,
+    )
     await session.commit()
     return response

@@ -266,10 +266,22 @@ export const api = {
     ),
   startGame: (gameId: string) =>
     request<GameState>(`/games/${gameId}/start`, { method: 'POST' }, true),
-  executeCommand: (gameId: string, command: GameCommand) =>
+  executeCommand: (
+    gameId: string,
+    command: GameCommand,
+    expectedSequence: number,
+    commandId = crypto.randomUUID(),
+  ) =>
     request<GameState>(
       `/games/${gameId}/commands`,
-      { method: 'POST', body: JSON.stringify(command) },
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          command,
+          expected_sequence: expectedSequence,
+          command_id: commandId,
+        }),
+      },
       true,
     ),
 }

@@ -809,7 +809,7 @@ export function GameSessionPanel({
       setBusy(true)
       setError(null)
       try {
-        onChange(await api.executeCommand(game.id, command))
+        onChange(await api.executeCommand(game.id, command, game.event_sequence))
         return true
       } catch (requestError) {
         if (requestError instanceof ApiError && requestError.status === 401) {
@@ -829,10 +829,16 @@ export function GameSessionPanel({
     }
     setBusy(true)
     setError(null)
+    const commandId = crypto.randomUUID()
     return new Promise<boolean>((resolve) => {
       socket.timeout(8000).emit(
         'game_command',
-        { game_id: game.id, command },
+        {
+          game_id: game.id,
+          command,
+          expected_sequence: game.event_sequence,
+          command_id: commandId,
+        },
         (timeoutError: Error | null, ack?: CommandAck) => {
           if (timeoutError) {
             gameAudio.play('action-rejected', { gain: 0.72 })

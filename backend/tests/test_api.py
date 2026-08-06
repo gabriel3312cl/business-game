@@ -1,5 +1,5 @@
 from copy import deepcopy
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -461,7 +461,11 @@ async def test_room_settings_and_spectator_permissions(client: AsyncClient) -> N
     command = await client.post(
         f"/api/v1/games/{game['id']}/commands",
         headers=viewer_headers,
-        json={"action": "roll"},
+        json={
+            "command": {"action": "roll"},
+            "expected_sequence": game["event_sequence"],
+            "command_id": str(uuid4()),
+        },
     )
     assert command.status_code == 403
     blocked_settings = await client.patch(

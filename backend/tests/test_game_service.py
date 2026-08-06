@@ -97,6 +97,46 @@ async def test_first_playable_turn(
     assert event_count == len(game.events)
 
 
+async def test_human_commands_reject_stale_snapshots_and_deduplicate_retries(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    first = await create_user(session, "command-owner@example.com", "Owner")
+    second = await create_user(session, "command-guest@example.com", "Guest")
+    games = GameService(session, PackLoader(packs_dir), dice_roller=lambda: (1, 2))
+    game = await games.create("classic-demo", first)
+    await games.join(game.id, second)
+    game = await games.start(game.id, first.id)
+    expected_sequence = game.event_sequence
+    command_id = uuid4()
+
+    updated = await games.execute(
+        game.id,
+        first.id,
+        RollCommand(action="roll"),
+        expected_sequence=expected_sequence,
+        command_id=command_id,
+    )
+    retried = await games.execute(
+        game.id,
+        first.id,
+        RollCommand(action="roll"),
+        expected_sequence=expected_sequence,
+        command_id=command_id,
+    )
+
+    assert retried.event_sequence == updated.event_sequence
+    assert retried.last_roll == updated.last_roll
+    with pytest.raises(ConflictError, match="game changed"):
+        await games.execute(
+            game.id,
+            first.id,
+            RollCommand(action="roll"),
+            expected_sequence=expected_sequence,
+            command_id=uuid4(),
+        )
+
+
 async def test_rejects_command_from_other_player(
     packs_dir: Path,
     session: AsyncSession,

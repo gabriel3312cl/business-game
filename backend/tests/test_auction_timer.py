@@ -100,7 +100,10 @@ async def test_scheduler_automatically_settles_and_broadcasts_expired_auction(
         assert persisted.players[1].balance == 1425
         assert persisted.events[-1].type == "auction.completed"
         assert settlement_attempts == 2
-        assert broadcasts == [("game_state", str(game.id))]
+        assert set(broadcasts) == {
+            ("game_state", f"{game.id}:member:{first.id}"),
+            ("game_state", f"{game.id}:member:{second.id}"),
+        }
     finally:
         await realtime.shutdown_auction_timers()
 

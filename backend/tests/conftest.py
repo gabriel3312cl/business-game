@@ -8,6 +8,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from business_game.api.routes import auth_rate_limiter
 from business_game.config import settings
 from business_game.infrastructure.database import get_session
 from business_game.infrastructure.db_models import Base
@@ -35,11 +36,13 @@ async def override_session() -> AsyncIterator[AsyncSession]:
 
 @pytest_asyncio.fixture(autouse=True)
 async def reset_database() -> AsyncIterator[None]:
+    auth_rate_limiter._fallback.clear()
     async with test_engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     api.dependency_overrides[get_session] = override_session
     yield
     api.dependency_overrides.clear()
+    auth_rate_limiter._fallback.clear()
     async with test_engine.begin() as connection:
         await connection.run_sync(Base.metadata.drop_all)
 

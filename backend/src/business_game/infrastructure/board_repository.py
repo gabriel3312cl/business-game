@@ -139,10 +139,14 @@ class BoardProjectRepository:
         document: dict[str, object],
         manifest: dict[str, object],
     ) -> BoardVersionRecord:
+        version_major, version_minor, version_patch = map(int, version.split("."))
         record = BoardVersionRecord(
             project_id=project_id,
             pack_id=pack_id,
             version=version,
+            version_major=version_major,
+            version_minor=version_minor,
+            version_patch=version_patch,
             source_revision=source_revision,
             document=document,
             manifest=manifest,
@@ -153,21 +157,24 @@ class BoardProjectRepository:
         return record
 
     async def list_versions(self, project_id: UUID) -> list[BoardVersionRecord]:
-        statement = select(BoardVersionRecord).where(
-            BoardVersionRecord.project_id == project_id
+        statement = (
+            select(BoardVersionRecord)
+            .where(BoardVersionRecord.project_id == project_id)
+            .order_by(*self._version_order())
         )
-        records = list((await self.session.scalars(statement)).all())
-        return sorted(records, key=self._version_key, reverse=True)
+        return list((await self.session.scalars(statement)).all())
 
     async def latest_version(
         self,
         project_id: UUID,
     ) -> BoardVersionRecord | None:
-        statement = select(BoardVersionRecord).where(
-            BoardVersionRecord.project_id == project_id
+        statement = (
+            select(BoardVersionRecord)
+            .where(BoardVersionRecord.project_id == project_id)
+            .order_by(*self._version_order())
+            .limit(1)
         )
-        records = list((await self.session.scalars(statement)).all())
-        return max(records, key=self._version_key, default=None)
+        return await self.session.scalar(statement)
 
     async def latest_versions_for_projects(
         self,
@@ -175,16 +182,26 @@ class BoardProjectRepository:
     ) -> dict[UUID, BoardVersionRecord]:
         if not project_ids:
             return {}
-        statement = select(BoardVersionRecord).where(
-            BoardVersionRecord.project_id.in_(project_ids)
+        ranked = (
+            select(
+                BoardVersionRecord.id.label("version_id"),
+                func.row_number()
+                .over(
+                    partition_by=BoardVersionRecord.project_id,
+                    order_by=self._version_order(),
+                )
+                .label("rank"),
+            )
+            .where(BoardVersionRecord.project_id.in_(project_ids))
+            .subquery()
+        )
+        statement = (
+            select(BoardVersionRecord)
+            .join(ranked, ranked.c.version_id == BoardVersionRecord.id)
+            .where(ranked.c.rank == 1)
         )
         records = list((await self.session.scalars(statement)).all())
-        latest: dict[UUID, BoardVersionRecord] = {}
-        for record in records:
-            current = latest.get(record.project_id)
-            if current is None or self._version_key(record) > self._version_key(current):
-                latest[record.project_id] = record
-        return latest
+        return {record.project_id: record for record in records}
 
     async def get_published(
         self,
@@ -199,23 +216,36 @@ class BoardProjectRepository:
             statement = statement.where(BoardVersionRecord.version == version)
             record = await self.session.scalar(statement.limit(1))
         else:
-            records = list((await self.session.scalars(statement)).all())
-            record = max(records, key=self._version_key, default=None)
+            record = await self.session.scalar(
+                statement.order_by(*self._version_order()).limit(1)
+            )
         if record is None:
             suffix = f" version '{version}'" if version is not None else ""
             raise NotFoundError(f"pack '{pack_id}'{suffix} was not found")
         return record
 
     async def list_latest_published(self) -> list[BoardVersionRecord]:
-        records = list((await self.session.scalars(select(BoardVersionRecord))).all())
-        latest_by_pack: dict[str, BoardVersionRecord] = {}
-        for record in records:
-            current = latest_by_pack.get(record.pack_id)
-            if current is None or self._version_key(record) > self._version_key(current):
-                latest_by_pack[record.pack_id] = record
-        return sorted(latest_by_pack.values(), key=lambda item: item.pack_id)
+        ranked = select(
+            BoardVersionRecord.id.label("version_id"),
+            func.row_number()
+            .over(
+                partition_by=BoardVersionRecord.pack_id,
+                order_by=self._version_order(),
+            )
+            .label("rank"),
+        ).subquery()
+        statement = (
+            select(BoardVersionRecord)
+            .join(ranked, ranked.c.version_id == BoardVersionRecord.id)
+            .where(ranked.c.rank == 1)
+            .order_by(BoardVersionRecord.pack_id)
+        )
+        return list((await self.session.scalars(statement)).all())
 
     @staticmethod
-    def _version_key(record: BoardVersionRecord) -> tuple[int, int, int]:
-        major, minor, patch = record.version.split(".")
-        return int(major), int(minor), int(patch)
+    def _version_order() -> tuple[object, object, object]:
+        return (
+            BoardVersionRecord.version_major.desc(),
+            BoardVersionRecord.version_minor.desc(),
+            BoardVersionRecord.version_patch.desc(),
+        )

@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.domain.advisor_models import AdvisorChatMessage, AdvisorStoredMessage
@@ -72,6 +72,27 @@ class AdvisorChatRepository:
             ]
         )
         await self._session.flush()
+
+    async def prune(self, game_id: UUID, user_id: UUID, *, keep: int) -> None:
+        cutoff = await self._session.scalar(
+            select(AdvisorMessageRecord.id)
+            .where(
+                AdvisorMessageRecord.game_id == game_id,
+                AdvisorMessageRecord.user_id == user_id,
+            )
+            .order_by(AdvisorMessageRecord.id.desc())
+            .offset(keep)
+            .limit(1)
+        )
+        if cutoff is None:
+            return
+        await self._session.execute(
+            delete(AdvisorMessageRecord).where(
+                AdvisorMessageRecord.game_id == game_id,
+                AdvisorMessageRecord.user_id == user_id,
+                AdvisorMessageRecord.id <= cutoff,
+            )
+        )
 
     @staticmethod
     def _to_domain(record: AdvisorMessageRecord) -> AdvisorStoredMessage:

@@ -10,7 +10,7 @@ from business_game.api.advisor_routes import router as advisor_router
 from business_game.api.board_routes import asset_router
 from business_game.api.board_routes import router as board_router
 from business_game.api.chat_routes import router as chat_router
-from business_game.api.routes import router
+from business_game.api.routes import auth_rate_limiter, router
 from business_game.config import settings
 from business_game.domain.errors import (
     ConflictError,
@@ -37,6 +37,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     await shutdown_chat_replies()
     await shutdown_bot_runners()
     await shutdown_auction_timers()
+    await auth_rate_limiter.close()
 
 
 api = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)

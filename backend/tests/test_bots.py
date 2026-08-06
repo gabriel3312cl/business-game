@@ -484,10 +484,11 @@ async def test_runner_fallback_ends_turn_after_repeated_invalid_decision(
 
     monkeypatch.setattr(BotPolicy, "choose_action", invalid_action)
 
-    async def ignore_broadcast(_game):
+    async def ignore_broadcast(_game, *, complete_events: bool):
+        del complete_events
         return None
 
-    monkeypatch.setattr(realtime, "_broadcast_game_state", ignore_broadcast)
+    monkeypatch.setattr(realtime, "broadcast_game_state", ignore_broadcast)
     await realtime._run_bot_runner(game.id)
 
     async with runner_sessions() as persisted_session:
@@ -527,10 +528,11 @@ async def test_runner_uses_fallback_when_policy_crashes(
 
     monkeypatch.setattr(BotPolicy, "choose_action", crash_policy)
 
-    async def ignore_broadcast(_game):
+    async def ignore_broadcast(_game, *, complete_events: bool):
+        del complete_events
         return None
 
-    monkeypatch.setattr(realtime, "_broadcast_game_state", ignore_broadcast)
+    monkeypatch.setattr(realtime, "broadcast_game_state", ignore_broadcast)
     await realtime._run_bot_runner(game.id)
 
     async with runner_sessions() as persisted_session:
@@ -572,10 +574,11 @@ async def test_runner_uses_standard_policy_when_ai_bot_fails(
 
     monkeypatch.setattr(realtime.AiBotPolicy, "choose_action", fail_ai)
 
-    async def ignore_broadcast(_game):
+    async def ignore_broadcast(_game, *, complete_events: bool):
+        del complete_events
         return None
 
-    monkeypatch.setattr(realtime, "_broadcast_game_state", ignore_broadcast)
+    monkeypatch.setattr(realtime, "broadcast_game_state", ignore_broadcast)
     await realtime._run_bot_runner(game.id)
 
     async with runner_sessions() as persisted_session:
@@ -625,10 +628,11 @@ async def test_runner_falls_back_in_time_for_ai_bot_auction(
 
     monkeypatch.setattr(realtime.AiBotPolicy, "choose_action", slow_ai)
 
-    async def ignore_broadcast(_game):
+    async def ignore_broadcast(_game, *, complete_events: bool):
+        del complete_events
         return None
 
-    monkeypatch.setattr(realtime, "_broadcast_game_state", ignore_broadcast)
+    monkeypatch.setattr(realtime, "broadcast_game_state", ignore_broadcast)
     await realtime._run_bot_runner(game.id)
 
     async with runner_sessions() as persisted_session:

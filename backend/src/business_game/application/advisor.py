@@ -299,7 +299,7 @@ def _response_content(payload: object) -> str:
 
 
 def _snapshot_sequence(game: GameState) -> int:
-    return game.events[-1].sequence if game.events else 0
+    return game.event_sequence
 
 
 def _external_user_id(game_id: UUID, actor_id: UUID) -> str:

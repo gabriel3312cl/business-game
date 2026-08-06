@@ -382,7 +382,7 @@ def build_ai_bot_context(
             option["balance_estimate"] = choice.estimate
         options.append(option)
     return {
-        "sequence": game.events[-1].sequence if game.events else 0,
+        "sequence": game.event_sequence,
         "personality": personality,
         "personality_hint": PERSONALITY_HINTS.get(personality, ""),
         "phase": game.phase.value,

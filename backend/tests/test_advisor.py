@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.api.advisor_routes import get_advisor_service
 from business_game.application.advisor import (
@@ -13,8 +14,16 @@ from business_game.application.advisor import (
     build_advisor_context,
 )
 from business_game.application.pack_loader import PackLoader
+from business_game.application.services import GameService, UserService
 from business_game.domain.advisor_models import AdvisorRequest, AdvisorResponse
-from business_game.domain.models import ContentPack, GameEvent, GameState, PlayerState
+from business_game.domain.models import (
+    ContentPack,
+    GameEvent,
+    GameState,
+    PlayerState,
+    UserCreate,
+)
+from business_game.infrastructure.advisor_repository import AdvisorChatRepository
 from business_game.main import api
 
 
@@ -68,6 +77,42 @@ def test_advisor_context_filters_identifiers_and_private_cards(packs_dir: Path) 
     assert "Otra persona" not in serialized
     assert "private-card" not in serialized
     assert "other-private-card" not in serialized
+
+
+async def test_advisor_history_is_pruned_to_the_configured_limit(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    user = await UserService(session).register(
+        UserCreate(
+            email="advisor-retention@example.com",
+            password="correct-horse-battery",
+            display_name="Advisor retention",
+        )
+    )
+    game = await GameService(session, PackLoader(packs_dir)).create(
+        "classic-demo",
+        user,
+    )
+    repository = AdvisorChatRepository(session)
+    async with session.begin():
+        for index in range(3):
+            await repository.append_exchange(
+                game_id=game.id,
+                user_id=user.id,
+                question=f"question-{index}",
+                answer=f"answer-{index}",
+                snapshot_sequence=game.event_sequence,
+            )
+        await repository.prune(game.id, user.id, keep=4)
+
+    messages = await repository.list_messages(game.id, user.id, limit=10)
+    assert [message.content for message in messages] == [
+        "question-1",
+        "answer-1",
+        "question-2",
+        "answer-2",
+    ]
 
 
 async def test_advisor_calls_deepseek_with_filtered_state(packs_dir: Path) -> None:

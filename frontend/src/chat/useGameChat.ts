@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { chatApi } from './api'
 import type { ChatMessage } from './types'
 
@@ -21,6 +21,8 @@ export function useGameChat(gameId: string): GameChat {
   const [loading, setLoading] = useState(true)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [error, setError] = useState(false)
+  const activeGameIdRef = useRef(gameId)
+  const olderRequestRef = useRef(0)
 
   const receive = useCallback((message: ChatMessage) => {
     // Ids are monotonic per room, so they double as dedup key and sort key: the
@@ -33,11 +35,14 @@ export function useGameChat(gameId: string): GameChat {
   }, [])
 
   useEffect(() => {
+    activeGameIdRef.current = gameId
+    olderRequestRef.current += 1
     let active = true
     setMessages([])
     setHasMore(false)
     setError(false)
     setLoading(true)
+    setLoadingOlder(false)
     void chatApi
       .history(gameId)
       .then((page) => {
@@ -59,18 +64,39 @@ export function useGameChat(gameId: string): GameChat {
   const oldestId = messages[0]?.id
   const loadOlder = useCallback(() => {
     if (oldestId === undefined || loadingOlder) return
+    const requestedGameId = gameId
+    const requestId = ++olderRequestRef.current
     setLoadingOlder(true)
     void chatApi
       .history(gameId, { beforeId: oldestId })
       .then((page) => {
+        if (
+          activeGameIdRef.current !== requestedGameId ||
+          olderRequestRef.current !== requestId
+        ) {
+          return
+        }
         setMessages((current) => {
-          const seen = new Set(current.map((item) => item.id))
-          return [...page.messages.filter((item) => !seen.has(item.id)), ...current]
+          return mergeOlderMessages(current, page.messages)
         })
         setHasMore(page.has_more)
       })
-      .catch(() => setError(true))
-      .finally(() => setLoadingOlder(false))
+      .catch(() => {
+        if (
+          activeGameIdRef.current === requestedGameId &&
+          olderRequestRef.current === requestId
+        ) {
+          setError(true)
+        }
+      })
+      .finally(() => {
+        if (
+          activeGameIdRef.current === requestedGameId &&
+          olderRequestRef.current === requestId
+        ) {
+          setLoadingOlder(false)
+        }
+      })
   }, [gameId, loadingOlder, oldestId])
 
   const dismissError = useCallback(() => setError(false), [])
@@ -85,4 +111,12 @@ export function useGameChat(gameId: string): GameChat {
     loadOlder,
     dismissError,
   }
+}
+
+export function mergeOlderMessages(
+  current: ChatMessage[],
+  older: ChatMessage[],
+): ChatMessage[] {
+  const seen = new Set(current.map((item) => item.id))
+  return [...older.filter((item) => !seen.has(item.id)), ...current]
 }

@@ -391,11 +391,11 @@ export interface GameState {
   hotels_remaining: number
   consecutive_doubles: number
   extra_roll_pending: boolean
-  deck_orders: Record<string, string[]>
-  deck_cursors: Record<string, number>
   bank_auction_queue: string[]
   last_card_id: string | null
   trades: TradeOffer[]
   last_roll: [number, number] | null
   events: GameEvent[]
+  event_sequence: number
+  events_complete: boolean
 }
