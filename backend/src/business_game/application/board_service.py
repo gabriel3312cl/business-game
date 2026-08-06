@@ -4,8 +4,8 @@ import json
 import re
 from hashlib import sha256
 from uuid import UUID, uuid4
-from xml.etree import ElementTree
 
+from defusedxml import ElementTree
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
