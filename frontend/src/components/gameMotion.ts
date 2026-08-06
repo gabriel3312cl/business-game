@@ -12,6 +12,12 @@ export interface MotionSettlement {
   syncMotionKey?: string | number
 }
 
+export interface MotionAudioCue {
+  sequence: number
+  step: number
+  playerId: string
+}
+
 interface PlayerMovement {
   sequence: number
   eventType: GameEvent['type']
@@ -32,6 +38,8 @@ export function useVisualPlayerPositions(
   tileCount: number,
   syncMotionKey?: string | number,
   onMotionSettled?: (settlement: MotionSettlement) => void,
+  onTokenStep?: (cue: MotionAudioCue) => void,
+  onTokenTeleport?: (cue: MotionAudioCue) => void,
 ): VisualPositions {
   const prefersReducedMotion = useMediaQuery(
     '(prefers-reduced-motion: reduce)',
@@ -53,6 +61,8 @@ export function useVisualPlayerPositions(
   const syncMotionKeyRef = useRef(syncMotionKey)
   const processedSequenceRef = useRef(latestSequence(game))
   const onMotionSettledRef = useRef(onMotionSettled)
+  const onTokenStepRef = useRef(onTokenStep)
+  const onTokenTeleportRef = useRef(onTokenTeleport)
 
   const replaceVisualPositions = useCallback((positions: VisualPositions) => {
     visualPositionsRef.current = positions
@@ -85,6 +95,14 @@ export function useVisualPlayerPositions(
   useEffect(() => {
     onMotionSettledRef.current = onMotionSettled
   }, [onMotionSettled])
+
+  useEffect(() => {
+    onTokenStepRef.current = onTokenStep
+  }, [onTokenStep])
+
+  useEffect(() => {
+    onTokenTeleportRef.current = onTokenTeleport
+  }, [onTokenTeleport])
 
   const notifyMotionSettled = useCallback(
     (
@@ -141,6 +159,11 @@ export function useVisualPlayerPositions(
 
         if (movement.movement === 'teleport') {
           setPlayerPosition(movement.playerId, toPosition)
+          onTokenTeleportRef.current?.({
+            sequence: movement.sequence,
+            step: 0,
+            playerId: movement.playerId,
+          })
           continue
         }
 
@@ -161,6 +184,11 @@ export function useVisualPlayerPositions(
             movement.playerId,
             normalizePosition(fromPosition + direction * step, count),
           )
+          onTokenStepRef.current?.({
+            sequence: movement.sequence,
+            step,
+            playerId: movement.playerId,
+          })
           if (!(await wait(stepDuration, generation))) break
         }
 

@@ -148,6 +148,43 @@ export interface User {
   created_at: string
 }
 
+export type PanelId = 'room' | 'heatmap' | 'players' | 'management' | 'chat'
+export type PanelZone = 'left' | 'right'
+
+export interface PanelLayoutPreferences {
+  order: PanelId[]
+  zones: Record<PanelId, PanelZone>
+  heights: Partial<Record<PanelId, number>>
+}
+
+export interface AudioPreferenceSettings {
+  muted: boolean
+  volume: number
+  disabled_sounds: string[]
+}
+
+export type TokenShape = 'circle' | 'rounded' | 'diamond'
+export type TokenIcon =
+  | 'number'
+  | 'micro'
+  | 'bus'
+  | 'completo'
+  | 'terremoto'
+  | 'cerro'
+  | 'cat'
+
+export interface TokenAppearanceSettings {
+  color: string
+  shape: TokenShape
+  icon: TokenIcon
+}
+
+export interface UserPreferences {
+  panel_layout: PanelLayoutPreferences | null
+  audio_settings: AudioPreferenceSettings | null
+  token_appearance: TokenAppearanceSettings | null
+}
+
 export interface TokenResponse {
   access_token: string
   user_id: string
@@ -231,6 +268,19 @@ export interface TradeOffer {
   status: 'pending' | 'accepted' | 'rejected' | 'cancelled'
   created_at: string
   resolved_at: string | null
+}
+
+export interface TradeAnalysis {
+  trade_id: string
+  perspective: 'proposer' | 'recipient'
+  verdict: 'accept' | 'counter' | 'reject'
+  reason_code: string
+  estimated_gain: number
+  estimated_cost: number
+  estimated_surplus: number
+  cash_after: number
+  liquidity_floor: number
+  snapshot_sequence: number
 }
 
 export type GameEventType =

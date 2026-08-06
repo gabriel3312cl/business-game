@@ -4,9 +4,10 @@ import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import ForumRoundedIcon from '@mui/icons-material/ForumRounded'
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
-import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded'
+import LayersRoundedIcon from '@mui/icons-material/LayersRounded'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded'
+import PaletteRoundedIcon from '@mui/icons-material/PaletteRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import {
   Alert,
@@ -14,15 +15,12 @@ import {
   BottomNavigationAction,
   Box,
   Button,
-  Card,
-  CardContent,
   Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogContentText,
   DialogTitle,
-  Divider,
   Drawer,
   FormControl,
   IconButton,
@@ -35,10 +33,25 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type DragEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { io, type Socket } from 'socket.io-client'
 import { api, ApiError, authToken } from '../api'
+import { AudioControls } from '../audio/AudioControls'
+import {
+  GAME_SOUNDS,
+  gameAudio,
+  type AudioSettings,
+  type GameSound,
+} from '../audio/gameAudio'
+import { useGameEventAudio } from '../audio/useGameEventAudio'
 import { chatApi } from '../chat/api'
 import { GameChatPanel } from '../chat/GameChatPanel'
 import type { ChatMessage } from '../chat/types'
@@ -50,13 +63,18 @@ import type {
   GameCommand,
   GameEvent,
   GameState,
+  AudioPreferenceSettings,
+  PanelId,
+  PanelLayoutPreferences as PanelLayout,
+  PanelZone,
+  TokenAppearanceSettings,
   User,
 } from '../types'
 import { BotManagementPanel } from './BotManagementPanel'
 import { GameActionCenter } from './GameActionCenter'
-import { GameActivityFeed } from './GameActivityFeed'
 import { GameAuctionDialog } from './GameAuctionDialog'
 import { GameBoard } from './GameBoard'
+import { GameFinishedDialog } from './GameFinishedDialog'
 import { BoardHeatmapControls } from './BoardHeatmapControls'
 import {
   buildHistoryHeatmap,
@@ -65,12 +83,17 @@ import {
 } from './boardHeatmap'
 import {
   latestMotionSequence,
+  type MotionAudioCue,
   type MotionSettlement,
 } from './gameMotion'
 import { GamePlayersPanel } from './GamePlayersPanel'
+import { playerColors } from './gameColors'
 import { GameTradePanel } from './GameTradePanel'
 import { LobbySettingsPanel } from './LobbySettingsPanel'
+import { PersonalizablePanel } from './PersonalizablePanel'
 import { PropertyManagementPanel } from './PropertyManagementPanel'
+import { TokenCustomizationDialog } from './TokenCustomizationDialog'
+import { normalizeTokenAppearance } from './tokenAppearance'
 
 interface Props {
   game: GameState
@@ -78,6 +101,7 @@ interface Props {
   user: User
   zoom: number
   onChange: (game: GameState) => void
+  onBackToMenu: () => void
   onLeave: () => void
   onLogout: () => void
   onSessionExpired: () => void
@@ -102,7 +126,120 @@ type ConnectionState =
   | 'reconnecting'
   | 'disconnected'
 
-type MobilePanel = 'room' | 'players' | 'manage' | 'activity' | 'chat' | null
+type MobilePanel = 'room' | 'players' | 'manage' | 'heatmap' | 'chat' | null
+
+const PANEL_IDS: PanelId[] = [
+  'room',
+  'heatmap',
+  'players',
+  'management',
+  'chat',
+]
+const DEFAULT_PANEL_LAYOUT: PanelLayout = {
+  order: PANEL_IDS,
+  zones: {
+    room: 'left',
+    heatmap: 'left',
+    players: 'right',
+    management: 'right',
+    chat: 'right',
+  },
+  heights: {},
+}
+const PANEL_LAYOUT_STORAGE_PREFIX = 'business-game:panel-layout:v1:'
+const TOKEN_APPEARANCE_STORAGE_PREFIX = 'business-game:token-appearance:v1:'
+
+function readPanelLayout(userId: string): PanelLayout {
+  try {
+    const raw = localStorage.getItem(`${PANEL_LAYOUT_STORAGE_PREFIX}${userId}`)
+    if (!raw) return DEFAULT_PANEL_LAYOUT
+    return normalizePanelLayout(JSON.parse(raw) as Partial<PanelLayout>)
+  } catch {
+    return DEFAULT_PANEL_LAYOUT
+  }
+}
+
+function normalizePanelLayout(stored: Partial<PanelLayout>): PanelLayout {
+  const storedOrder = Array.isArray(stored.order)
+    ? stored.order.filter(isPanelId)
+    : []
+  const order = [...new Set<PanelId>([...storedOrder, ...PANEL_IDS])]
+  const zones = { ...DEFAULT_PANEL_LAYOUT.zones }
+  for (const panelId of PANEL_IDS) {
+    const zone = stored.zones?.[panelId]
+    if (zone === 'left' || zone === 'right') zones[panelId] = zone
+  }
+  const heights: Partial<Record<PanelId, number>> = {}
+  for (const panelId of PANEL_IDS) {
+    const height = stored.heights?.[panelId]
+    if (typeof height === 'number' && Number.isFinite(height) && height >= 144) {
+      heights[panelId] = Math.round(height)
+    }
+  }
+  return { order, zones, heights }
+}
+
+function writePanelLayout(userId: string, layout: PanelLayout): void {
+  try {
+    localStorage.setItem(
+      `${PANEL_LAYOUT_STORAGE_PREFIX}${userId}`,
+      JSON.stringify(layout),
+    )
+  } catch {
+    // PostgreSQL remains authoritative when browser storage is unavailable.
+  }
+}
+
+function readTokenAppearance(userId: string): TokenAppearanceSettings | null {
+  try {
+    const raw = localStorage.getItem(`${TOKEN_APPEARANCE_STORAGE_PREFIX}${userId}`)
+    return raw
+      ? normalizeTokenAppearance(
+          JSON.parse(raw) as Partial<TokenAppearanceSettings>,
+        )
+      : null
+  } catch {
+    return null
+  }
+}
+
+function writeTokenAppearance(
+  userId: string,
+  appearance: TokenAppearanceSettings,
+): void {
+  try {
+    localStorage.setItem(
+      `${TOKEN_APPEARANCE_STORAGE_PREFIX}${userId}`,
+      JSON.stringify(appearance),
+    )
+  } catch {
+    // PostgreSQL remains authoritative when browser storage is unavailable.
+  }
+}
+
+function isPanelId(value: unknown): value is PanelId {
+  return typeof value === 'string' && PANEL_IDS.includes(value as PanelId)
+}
+
+function toAudioPreferences(settings: AudioSettings): AudioPreferenceSettings {
+  return {
+    muted: settings.muted,
+    volume: settings.volume,
+    disabled_sounds: [...settings.disabledSounds],
+  }
+}
+
+function fromAudioPreferences(
+  preferences: AudioPreferenceSettings,
+): AudioSettings {
+  return {
+    muted: preferences.muted,
+    volume: preferences.volume,
+    disabledSounds: preferences.disabled_sounds.filter(
+      (sound): sound is GameSound => GAME_SOUNDS.includes(sound as GameSound),
+    ),
+  }
+}
 
 export function GameSessionPanel({
   game,
@@ -110,6 +247,7 @@ export function GameSessionPanel({
   user,
   zoom,
   onChange,
+  onBackToMenu,
   onLeave,
   onLogout,
   onSessionExpired,
@@ -125,10 +263,43 @@ export function GameSessionPanel({
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('connecting')
   const [confirmResignation, setConfirmResignation] = useState(false)
+  const [gameResultOpen, setGameResultOpen] = useState(
+    game.status === 'finished',
+  )
   const [sideTab, setSideTab] = useState(0)
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null)
+  const [panelLayout, setPanelLayout] = useState<PanelLayout>(() =>
+    readPanelLayout(user.id),
+  )
+  const [tokenAppearance, setTokenAppearance] =
+    useState<TokenAppearanceSettings | null>(() => readTokenAppearance(user.id))
+  const tokenAppearanceRef = useRef(tokenAppearance)
+  const tokenAppearanceChangeRef = useRef(0)
+  const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
+  const panelLayoutRef = useRef(panelLayout)
+  const panelLayoutChangeRef = useRef(0)
+  const preferenceSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const audioSettingsChangeRef = useRef(0)
+  const restoringAudioSettingsRef = useRef(false)
+  const audioSaveTimerRef = useRef<number | null>(null)
+  const audioSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const [draggedPanel, setDraggedPanel] = useState<PanelId | null>(null)
   const chat = useGameChat(game.id)
   const receiveChatMessage = chat.receive
+  const receiveChatMessageWithAudio = useCallback(
+    (message: ChatMessage) => {
+      receiveChatMessage(message)
+      if (message.author_id === user.id) return
+      const mention = `@${user.display_name}`.toLocaleLowerCase()
+      gameAudio.play(
+        message.body.toLocaleLowerCase().includes(mention)
+          ? 'chat-mention'
+          : 'chat-message',
+        { gain: 0.72 },
+      )
+    },
+    [receiveChatMessage, user.display_name, user.id],
+  )
   const [heatmapMode, setHeatmapMode] = useState<BoardHeatmapMode>('off')
   const [heatmapPlayerId, setHeatmapPlayerId] = useState<string | null>(null)
   const [heatmapRange, setHeatmapRange] = useState<{
@@ -157,6 +328,7 @@ export function GameSessionPanel({
         (event) => event.sequence <= motionSettlement.sequence,
       )
     : game.events
+  useGameEventAudio(game, visibleEvents, pack, user.id)
   const maximumHeatmapSequence =
     visibleEvents[visibleEvents.length - 1]?.sequence ?? 1
   const selectedHeatmapPlayerId = game.players.some(
@@ -224,10 +396,18 @@ export function GameSessionPanel({
         : settlement,
     )
   }, [])
-
-  useEffect(() => {
-    if ((!isTablet || isWide) && sideTab > 1) setSideTab(0)
-  }, [isTablet, isWide, sideTab])
+  const handleTokenStep = useCallback((cue: MotionAudioCue) => {
+    gameAudio.play('token-step-metal-soft', {
+      gain: 0.58,
+      variant: cue.sequence + cue.step,
+    })
+  }, [])
+  const handleTokenTeleport = useCallback(() => {
+    gameAudio.play('token-teleport', { gain: 0.78 })
+  }, [])
+  const handleAuctionCountdown = useCallback(() => {
+    gameAudio.play('auction-countdown', { gain: 0.78 })
+  }, [])
 
   useEffect(() => {
     setHeatmapMode('off')
@@ -236,10 +416,218 @@ export function GameSessionPanel({
   }, [game.id])
 
   useEffect(() => {
+    if (game.status === 'finished') setGameResultOpen(true)
+  }, [game.id, game.status])
+
+  useEffect(() => {
     if (heatmapMode === 'probability' && !probabilityHeatmapAvailable) {
       setHeatmapMode('off')
     }
   }, [heatmapMode, probabilityHeatmapAvailable])
+
+  const savePanelLayoutRemotely = useCallback((layout: PanelLayout) => {
+    preferenceSaveQueueRef.current = preferenceSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await api.updatePanelLayout(layout)
+        } catch {
+          // The local cache remains available until a later change retries.
+        }
+      })
+  }, [])
+
+  const saveAudioSettingsRemotely = useCallback((settings: AudioSettings) => {
+    const preferences = toAudioPreferences(settings)
+    audioSaveQueueRef.current = audioSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await api.updateAudioSettings(preferences)
+        } catch {
+          // The per-user browser cache remains available until a later change retries.
+        }
+      })
+  }, [])
+
+  const saveTokenAppearanceRemotely = useCallback(
+    (appearance: TokenAppearanceSettings) => {
+      preferenceSaveQueueRef.current = preferenceSaveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            await api.updateTokenAppearance(appearance)
+          } catch {
+            // The per-user browser cache remains available until a later change retries.
+          }
+        })
+    },
+    [],
+  )
+
+  useEffect(() => {
+    gameAudio.useUser(user.id)
+    const unsubscribe = gameAudio.subscribe(() => {
+      if (restoringAudioSettingsRef.current) return
+      audioSettingsChangeRef.current += 1
+      if (audioSaveTimerRef.current !== null) {
+        window.clearTimeout(audioSaveTimerRef.current)
+      }
+      audioSaveTimerRef.current = window.setTimeout(() => {
+        audioSaveTimerRef.current = null
+        saveAudioSettingsRemotely(gameAudio.getSettings())
+      }, 350)
+    })
+    return () => {
+      unsubscribe()
+      if (audioSaveTimerRef.current !== null) {
+        window.clearTimeout(audioSaveTimerRef.current)
+        audioSaveTimerRef.current = null
+      }
+    }
+  }, [saveAudioSettingsRemotely, user.id])
+
+  useEffect(() => {
+    let active = true
+    const changesAtStart = panelLayoutChangeRef.current
+    const audioChangesAtStart = audioSettingsChangeRef.current
+    const tokenChangesAtStart = tokenAppearanceChangeRef.current
+    void api
+      .getUserPreferences()
+      .then((preferences) => {
+        if (!active) return
+        if (
+          preferences.panel_layout &&
+          panelLayoutChangeRef.current === changesAtStart
+        ) {
+          const restored = normalizePanelLayout(preferences.panel_layout)
+          panelLayoutRef.current = restored
+          setPanelLayout(restored)
+          writePanelLayout(user.id, restored)
+        } else {
+          savePanelLayoutRemotely(panelLayoutRef.current)
+        }
+        if (
+          preferences.audio_settings &&
+          audioSettingsChangeRef.current === audioChangesAtStart
+        ) {
+          restoringAudioSettingsRef.current = true
+          try {
+            gameAudio.replaceSettings(
+              fromAudioPreferences(preferences.audio_settings),
+            )
+          } finally {
+            restoringAudioSettingsRef.current = false
+          }
+        } else {
+          saveAudioSettingsRemotely(gameAudio.getSettings())
+        }
+        if (
+          preferences.token_appearance &&
+          tokenAppearanceChangeRef.current === tokenChangesAtStart
+        ) {
+          const restored = normalizeTokenAppearance(preferences.token_appearance)
+          if (restored) {
+            tokenAppearanceRef.current = restored
+            setTokenAppearance(restored)
+            writeTokenAppearance(user.id, restored)
+          }
+        } else if (tokenAppearanceRef.current) {
+          saveTokenAppearanceRemotely(tokenAppearanceRef.current)
+        }
+      })
+      .catch(() => {
+        // The per-user browser cache keeps customization available offline.
+      })
+    return () => {
+      active = false
+    }
+  }, [
+    saveAudioSettingsRemotely,
+    savePanelLayoutRemotely,
+    saveTokenAppearanceRemotely,
+    user.id,
+  ])
+
+  const updateTokenAppearance = useCallback(
+    (appearance: TokenAppearanceSettings) => {
+      const normalized = normalizeTokenAppearance(appearance)
+      if (!normalized) return
+      tokenAppearanceRef.current = normalized
+      tokenAppearanceChangeRef.current += 1
+      setTokenAppearance(normalized)
+      writeTokenAppearance(user.id, normalized)
+      saveTokenAppearanceRemotely(normalized)
+      setTokenDialogOpen(false)
+    },
+    [saveTokenAppearanceRemotely, user.id],
+  )
+
+  const updatePanelLayout = useCallback(
+    (update: (current: PanelLayout) => PanelLayout) => {
+      const next = update(panelLayoutRef.current)
+      panelLayoutRef.current = next
+      panelLayoutChangeRef.current += 1
+      setPanelLayout(next)
+      writePanelLayout(user.id, next)
+      savePanelLayoutRemotely(next)
+    },
+    [savePanelLayoutRemotely, user.id],
+  )
+
+  const movePanel = useCallback(
+    (panelId: PanelId, targetId: PanelId | null, zone: PanelZone) => {
+      updatePanelLayout((current) => {
+        const order = current.order.filter((candidate) => candidate !== panelId)
+        const targetIndex = targetId === null ? -1 : order.indexOf(targetId)
+        if (targetIndex === -1) order.push(panelId)
+        else order.splice(targetIndex, 0, panelId)
+        return {
+          ...current,
+          order,
+          zones: isWide
+            ? { ...current.zones, [panelId]: zone }
+            : current.zones,
+        }
+      })
+    },
+    [isWide, updatePanelLayout],
+  )
+
+  const startPanelDrag = useCallback(
+    (panelId: PanelId, event: DragEvent<HTMLElement>) => {
+      setDraggedPanel(panelId)
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('text/plain', panelId)
+    },
+    [],
+  )
+
+  const dropPanel = useCallback(
+    (
+      event: DragEvent<HTMLDivElement>,
+      targetId: PanelId | null,
+      zone: PanelZone,
+    ) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const transferred = event.dataTransfer.getData('text/plain')
+      const panelId = draggedPanel ?? (isPanelId(transferred) ? transferred : null)
+      if (panelId && panelId !== targetId) movePanel(panelId, targetId, zone)
+      setDraggedPanel(null)
+    },
+    [draggedPanel, movePanel],
+  )
+
+  const resizePanel = useCallback(
+    (panelId: PanelId, height: number) => {
+      updatePanelLayout((current) => ({
+        ...current,
+        heights: { ...current.heights, [panelId]: height },
+      }))
+    },
+    [updatePanelLayout],
+  )
 
   useEffect(() => {
     const token = authToken.get()
@@ -258,6 +646,8 @@ export function GameSessionPanel({
       reconnectionDelayMax: 5000,
     })
     socketRef.current = socket
+    let connectedOnce = false
+    let connectionWasLost = false
 
     async function renewSocketSession() {
       if (refreshingSocketRef.current) return
@@ -297,6 +687,11 @@ export function GameSessionPanel({
             return
           }
           if (ack.ok) {
+            if (connectionWasLost) {
+              gameAudio.play('connection-restored', { gain: 0.82 })
+            }
+            connectedOnce = true
+            connectionWasLost = false
             setConnectionState('connected')
             setError(null)
             setMotionSyncKey((value) => value + 1)
@@ -333,14 +728,22 @@ export function GameSessionPanel({
       setConnectionState('connected')
       onChange(nextGame)
     })
-    socket.on('chat_message', receiveChatMessage)
+    socket.on('chat_message', receiveChatMessageWithAudio)
     socket.on('disconnect', (reason) => {
       if (reason !== 'io client disconnect') {
+        if (connectedOnce && !connectionWasLost) {
+          gameAudio.play('connection-lost', { gain: 0.82 })
+        }
+        connectionWasLost = true
         setConnectionState('reconnecting')
         if (reason === 'io server disconnect') socket.connect()
       }
     })
     socket.on('connect_error', (connectionError) => {
+      if (connectedOnce && !connectionWasLost) {
+        gameAudio.play('connection-lost', { gain: 0.82 })
+      }
+      if (connectedOnce) connectionWasLost = true
       setConnectionState('reconnecting')
       setError(t('realtimeError'))
       if (
@@ -364,7 +767,7 @@ export function GameSessionPanel({
       socketRef.current = null
       refreshingSocketRef.current = false
     }
-  }, [game.id, onChange, onSessionExpired, receiveChatMessage, t])
+  }, [game.id, onChange, onSessionExpired, receiveChatMessageWithAudio, t])
 
   const playerName = (playerId: string | null) =>
     game.players.find((player) => player.user_id === playerId)?.display_name ??
@@ -388,6 +791,7 @@ export function GameSessionPanel({
         onSessionExpired()
         return false
       }
+      gameAudio.play('action-rejected', { gain: 0.72 })
       setError(
         requestError instanceof Error
           ? requestError.message
@@ -411,6 +815,7 @@ export function GameSessionPanel({
         if (requestError instanceof ApiError && requestError.status === 401) {
           onSessionExpired()
         } else {
+          gameAudio.play('action-rejected', { gain: 0.72 })
           setError(
             requestError instanceof Error
               ? requestError.message
@@ -430,6 +835,7 @@ export function GameSessionPanel({
         { game_id: game.id, command },
         (timeoutError: Error | null, ack?: CommandAck) => {
           if (timeoutError) {
+            gameAudio.play('action-rejected', { gain: 0.72 })
             setError(t('realtimeError'))
             setConnectionState('reconnecting')
             setBusy(false)
@@ -437,12 +843,14 @@ export function GameSessionPanel({
             return
           }
           if (!ack) {
+            gameAudio.play('action-rejected', { gain: 0.72 })
             setError(t('commandRejected'))
             setBusy(false)
             resolve(false)
             return
           }
           if (!ack.ok) {
+            gameAudio.play('action-rejected', { gain: 0.72 })
             setError(ack.error ?? t('commandRejected'))
             if (isAuthenticationError(ack.code, ack.error)) {
               socket.disconnect()
@@ -470,6 +878,8 @@ export function GameSessionPanel({
       } catch (requestError) {
         if (requestError instanceof ApiError && requestError.status === 401) {
           onSessionExpired()
+        } else {
+          gameAudio.play('action-rejected', { gain: 0.58 })
         }
         return false
       }
@@ -480,11 +890,13 @@ export function GameSessionPanel({
         { game_id: game.id, body },
         (timeoutError: Error | null, ack?: ChatAck) => {
           if (timeoutError) {
+            gameAudio.play('action-rejected', { gain: 0.58 })
             setConnectionState('reconnecting')
             resolve(false)
             return
           }
           if (!ack?.ok) {
+            gameAudio.play('action-rejected', { gain: 0.58 })
             if (ack && isAuthenticationError(ack.code, ack.error)) {
               socket.disconnect()
               socket.connect()
@@ -511,6 +923,7 @@ export function GameSessionPanel({
       await api.leaveGame(game.id)
       onLeave()
     } catch (requestError) {
+      gameAudio.play('action-rejected', { gain: 0.72 })
       setError(
         requestError instanceof Error
           ? requestError.message
@@ -529,19 +942,28 @@ export function GameSessionPanel({
     (spectator) => spectator.user_id === user.id,
   )
   const isHost = game.host_user_id === user.id
-  const hasProperties = Object.values(game.owners).includes(user.id)
+  const currentUserPlayerIndex = game.players.findIndex(
+    (player) => player.user_id === user.id,
+  )
+  const tokenDialogValue = useMemo<TokenAppearanceSettings>(
+    () =>
+      tokenAppearance ?? {
+        color:
+          playerColors[
+            Math.max(0, currentUserPlayerIndex) % playerColors.length
+          ],
+        shape: 'circle',
+        icon: 'number',
+      },
+    [currentUserPlayerIndex, tokenAppearance],
+  )
   const currentCardId = currentTurnCardId(game.events)
   const lastCard = pack.board.decks
     .flatMap((deck) => deck.cards)
     .find((card) => card.id === currentCardId)
 
   const roomContent = (
-    <Card
-      variant="outlined"
-      sx={{ borderColor: 'rgba(255,255,255,.08)', minWidth: 0 }}
-    >
-      <CardContent>
-        <Stack spacing={1.5}>
+    <Stack spacing={1.5}>
           <Stack
             direction="row"
             alignItems="center"
@@ -551,19 +973,22 @@ export function GameSessionPanel({
             <Typography fontWeight={900} sx={{ letterSpacing: '-0.03em' }}>
               BUSINESS<span style={{ color: '#b8ff3d' }}>GAME</span>
             </Typography>
-            <FormControl size="small">
-              <Select
-                value={i18n.language}
-                onChange={(event) =>
-                  void i18n.changeLanguage(event.target.value)
-                }
-                aria-label="Language"
-                sx={{ minWidth: 68 }}
-              >
-                <MenuItem value="es">ES</MenuItem>
-                <MenuItem value="en">EN</MenuItem>
-              </Select>
-            </FormControl>
+            <Stack direction="row" alignItems="center" spacing={0.5}>
+              <AudioControls />
+              <FormControl size="small">
+                <Select
+                  value={i18n.language}
+                  onChange={(event) =>
+                    void i18n.changeLanguage(event.target.value)
+                  }
+                  aria-label="Language"
+                  sx={{ minWidth: 68 }}
+                >
+                  <MenuItem value="es">ES</MenuItem>
+                  <MenuItem value="en">EN</MenuItem>
+                </Select>
+              </FormControl>
+            </Stack>
           </Stack>
 
           <Stack
@@ -588,14 +1013,26 @@ export function GameSessionPanel({
                 {user.display_name}
               </Typography>
             </Stack>
-            <Button
-              size="small"
-              color="inherit"
-              startIcon={<LogoutRoundedIcon />}
-              onClick={onLogout}
-            >
-              {t('logout')}
-            </Button>
+            <Stack direction="row" spacing={0.5}>
+              {isParticipant && (
+                <Button
+                  size="small"
+                  color="secondary"
+                  startIcon={<PaletteRoundedIcon />}
+                  onClick={() => setTokenDialogOpen(true)}
+                >
+                  {t('token.open')}
+                </Button>
+              )}
+              <Button
+                size="small"
+                color="inherit"
+                startIcon={<LogoutRoundedIcon />}
+                onClick={onLogout}
+              >
+                {t('logout')}
+              </Button>
+            </Stack>
           </Stack>
 
           <Box>
@@ -638,6 +1075,14 @@ export function GameSessionPanel({
           </Stack>
 
           <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+            <Button
+              size="small"
+              startIcon={<MenuRoundedIcon />}
+              disabled={busy}
+              onClick={onBackToMenu}
+            >
+              {t('backToMenu')}
+            </Button>
             <Button
               size="small"
               startIcon={<RefreshRoundedIcon />}
@@ -718,80 +1163,44 @@ export function GameSessionPanel({
               />
             </Stack>
           )}
-        </Stack>
-      </CardContent>
-    </Card>
+    </Stack>
   )
 
-  const activityContent = (
-    <Card
-      variant="outlined"
-      sx={{ borderColor: 'rgba(255,255,255,.08)', minWidth: 0 }}
-    >
-      <CardContent>
-        <BoardHeatmapControls
-          mode={heatmapMode}
-          playerId={selectedHeatmapPlayerId}
-          players={game.players}
-          range={resolvedHeatmapRange}
-          maximumSequence={maximumHeatmapSequence}
-          probabilityAvailable={probabilityHeatmapAvailable}
-          onModeChange={setHeatmapMode}
-          onPlayerChange={setHeatmapPlayerId}
-          onRangeChange={([from, to]) =>
-            setHeatmapRange({
-              gameId: game.id,
-              from,
-              to: to >= maximumHeatmapSequence ? null : to,
-            })
-          }
-          onShowAllHistory={() =>
-            setHeatmapRange({ gameId: game.id, from: 1, to: null })
-          }
-        />
-        <Divider sx={{ my: 2 }} />
-        <GameActivityFeed
-          events={visibleEvents}
-          players={game.players}
-          spectators={game.spectators}
-          pack={pack}
-        />
-      </CardContent>
-    </Card>
-  )
-
-  const chatContent = (
-    <Card
-      variant="outlined"
-      sx={{ borderColor: 'rgba(255,255,255,.08)', minWidth: 0 }}
-    >
-      <CardContent>
-        <GameChatPanel
-          game={game}
-          user={user}
-          chat={chat}
-          onSend={sendChatMessage}
-        />
-      </CardContent>
-    </Card>
+  const heatmapContent = (
+    <BoardHeatmapControls
+      mode={heatmapMode}
+      playerId={selectedHeatmapPlayerId}
+      players={game.players}
+      range={resolvedHeatmapRange}
+      maximumSequence={maximumHeatmapSequence}
+      probabilityAvailable={probabilityHeatmapAvailable}
+      showTitle={false}
+      onModeChange={setHeatmapMode}
+      onPlayerChange={setHeatmapPlayerId}
+      onRangeChange={([from, to]) =>
+        setHeatmapRange({
+          gameId: game.id,
+          from,
+          to: to >= maximumHeatmapSequence ? null : to,
+        })
+      }
+      onShowAllHistory={() =>
+        setHeatmapRange({ gameId: game.id, from: 1, to: null })
+      }
+    />
   )
 
   const playersContent = (
-    <Card
-      variant="outlined"
-      sx={{ borderColor: 'rgba(255,255,255,.08)', minWidth: 0 }}
-    >
-      <CardContent sx={{ p: 1.25, '&:last-child': { pb: 1.25 } }}>
-        <GamePlayersPanel
-          game={game}
-          user={user}
-          useAssetTokens={pack.board.tiles.some((tile) => tile.asset_path)}
-        />
-      </CardContent>
-    </Card>
+    <GamePlayersPanel
+      game={game}
+      user={user}
+      useAssetTokens={pack.board.tiles.some((tile) => tile.asset_path)}
+      currentUserTokenAppearance={tokenAppearance}
+      showTitle={false}
+    />
   )
 
-  const propertiesContent = hasProperties ? (
+  const propertiesContent = (
     <PropertyManagementPanel
       embedded
       game={game}
@@ -800,10 +1209,6 @@ export function GameSessionPanel({
       busy={busy}
       onCommand={sendCommand}
     />
-  ) : (
-    <Typography color="text.secondary" variant="body2">
-      {t('noProperties')}
-    </Typography>
   )
 
   const tradesContent = (
@@ -817,26 +1222,10 @@ export function GameSessionPanel({
     />
   )
 
-  const tabContent =
-    sideTab === 0
-      ? propertiesContent
-      : sideTab === 1
-        ? tradesContent
-        : sideTab === 2
-          ? roomContent
-          : sideTab === 3
-            ? activityContent
-            : chatContent
+  const tabContent = sideTab === 0 ? propertiesContent : tradesContent
 
   const managementContent = (
-    <Card
-      variant="outlined"
-      sx={{
-        borderColor: 'rgba(255,255,255,.08)',
-        minWidth: 0,
-        overflow: 'hidden',
-      }}
-    >
+    <>
       <Tabs
         value={sideTab}
         onChange={(_, value: number) => setSideTab(value)}
@@ -856,39 +1245,16 @@ export function GameSessionPanel({
           aria-controls="game-panel-1"
           label={t('trades')}
         />
-        {isTablet && !isWide && (
-          <Tab
-            value={2}
-            id="game-panel-tab-2"
-            aria-controls="game-panel-2"
-            label={t('room')}
-          />
-        )}
-        {isTablet && !isWide && (
-          <Tab
-            value={3}
-            id="game-panel-tab-3"
-            aria-controls="game-panel-3"
-            label={t('activity.title')}
-          />
-        )}
-        {isTablet && !isWide && (
-          <Tab
-            value={4}
-            id="game-panel-tab-4"
-            aria-controls="game-panel-4"
-            label={t('chat.short')}
-          />
-        )}
       </Tabs>
-      <CardContent
+      <Box
         role="tabpanel"
         id={`game-panel-${sideTab}`}
         aria-labelledby={`game-panel-tab-${sideTab}`}
+        sx={{ pt: 2, minWidth: 0 }}
       >
         {tabContent}
-      </CardContent>
-    </Card>
+      </Box>
+    </>
   )
 
   const criticalAlerts = (
@@ -947,12 +1313,85 @@ export function GameSessionPanel({
     </>
   )
 
+  const renderSidebarPanel = (
+    panelId: PanelId,
+    zone: PanelZone,
+    personalizable = true,
+  ) => {
+    const title =
+      panelId === 'room'
+        ? t('room')
+        : panelId === 'heatmap'
+          ? t('heatmap.title')
+          : panelId === 'players'
+            ? t('playersPanel')
+            : panelId === 'management'
+              ? t('propertiesAndTrades')
+              : t('chat.title')
+    const content =
+      panelId === 'room'
+        ? roomContent
+        : panelId === 'heatmap'
+          ? heatmapContent
+          : panelId === 'players'
+            ? playersContent
+            : panelId === 'management'
+              ? managementContent
+              : (
+                  <GameChatPanel
+                    game={game}
+                    user={user}
+                    chat={chat}
+                    showHeader={false}
+                    fillAvailableHeight={personalizable}
+                    onSend={sendChatMessage}
+                  />
+                )
+
+    return (
+      <PersonalizablePanel
+        key={panelId}
+        id={`game-panel-${panelId}`}
+        title={title}
+        personalizable={personalizable}
+        height={personalizable ? panelLayout.heights[panelId] : undefined}
+        defaultHeight={
+          personalizable
+            ? panelId === 'room'
+              ? 'calc(68dvh - 12px)'
+              : panelId === 'heatmap'
+                ? 'calc(32dvh - 28px)'
+                : panelId === 'players'
+                  ? '30dvh'
+                  : panelId === 'management'
+                    ? '40dvh'
+                    : 'calc(30dvh - 40px)'
+            : undefined
+        }
+        dragging={draggedPanel === panelId}
+        dragLabel={t('layout.dragPanel', { panel: title })}
+        resizeLabel={t('layout.resizePanel', { panel: title })}
+        onDragStart={(event) => startPanelDrag(panelId, event)}
+        onDragEnd={() => setDraggedPanel(null)}
+        onDragOver={(event) => {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={(event) => dropPanel(event, panelId, zone)}
+        onHeightChange={(height) => resizePanel(panelId, height)}
+      >
+        {content}
+      </PersonalizablePanel>
+    )
+  }
+
   return (
     <Box
       data-testid="game-workspace"
       sx={{
         width: '100vw',
         height: '100dvh',
+        maxHeight: '100dvh',
         overflow: 'hidden',
       }}
     >
@@ -961,6 +1400,8 @@ export function GameSessionPanel({
           display: 'grid',
           width: '100%',
           height: '100%',
+          minHeight: 0,
+          gridTemplateRows: 'minmax(0, 1fr)',
           gridTemplateColumns: {
             xs: 'minmax(0, 1fr)',
             md: 'minmax(0, 1fr) clamp(240px, 25vw, 280px)',
@@ -980,17 +1421,25 @@ export function GameSessionPanel({
           <Stack
             gridArea="left"
             spacing={1.25}
+            onDragOver={(event) => {
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+            }}
+            onDrop={(event) => dropPanel(event, null, 'left')}
             sx={{
-              height: '100dvh',
-              overflow: 'auto',
+              height: '100%',
+              minHeight: 0,
+              overflowY: 'auto',
+              overscrollBehaviorY: 'contain',
+              scrollbarGutter: 'stable',
               p: 1,
               borderRight: '1px solid rgba(255,255,255,.08)',
               '& > *': { flexShrink: 0 },
             }}
           >
-            {roomContent}
-            {activityContent}
-            {chatContent}
+            {panelLayout.order
+              .filter((panelId) => panelLayout.zones[panelId] === 'left')
+              .map((panelId) => renderSidebarPanel(panelId, 'left'))}
           </Stack>
         )}
 
@@ -1039,8 +1488,11 @@ export function GameSessionPanel({
               zoom={zoom}
               game={game}
               currentUserId={user.id}
+              currentUserTokenAppearance={tokenAppearance}
               syncMotionKey={motionSyncKey}
               onMotionSettled={handleMotionSettled}
+              onTokenStep={handleTokenStep}
+              onTokenTeleport={handleTokenTeleport}
               motionPending={motionPending}
               busy={busy}
               onCommand={sendCommand}
@@ -1072,15 +1524,30 @@ export function GameSessionPanel({
           <Stack
             gridArea="right"
             spacing={1.25}
+            onDragOver={(event) => {
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+            }}
+            onDrop={(event) => dropPanel(event, null, 'right')}
             sx={{
-              height: '100dvh',
-              overflow: 'auto',
+              height: '100%',
+              minHeight: 0,
+              overflowY: 'auto',
+              overscrollBehaviorY: 'contain',
+              touchAction: 'pan-y',
+              WebkitOverflowScrolling: 'touch',
+              scrollbarGutter: 'stable',
               p: 1,
               borderLeft: '1px solid rgba(255,255,255,.08)',
+              '& > *': { flexShrink: 0 },
             }}
           >
-            {playersContent}
-            {managementContent}
+            {panelLayout.order
+              .filter(
+                (panelId) =>
+                  !isWide || panelLayout.zones[panelId] === 'right',
+              )
+              .map((panelId) => renderSidebarPanel(panelId, 'right'))}
           </Stack>
         )}
       </Box>
@@ -1120,10 +1587,10 @@ export function GameSessionPanel({
               onClick={() => setMobilePanel('manage')}
             />
             <BottomNavigationAction
-              value="activity"
-              label={t('activity.short')}
-              icon={<HistoryRoundedIcon />}
-              onClick={() => setMobilePanel('activity')}
+              value="heatmap"
+              label={t('heatmap.title')}
+              icon={<LayersRoundedIcon />}
+              onClick={() => setMobilePanel('heatmap')}
             />
             <BottomNavigationAction
               value="chat"
@@ -1160,11 +1627,16 @@ export function GameSessionPanel({
               </IconButton>
             </Stack>
             <Box sx={{ overflow: 'auto' }}>
-              {mobilePanel === 'room' && roomContent}
-              {mobilePanel === 'players' && playersContent}
-              {mobilePanel === 'manage' && managementContent}
-              {mobilePanel === 'activity' && activityContent}
-              {mobilePanel === 'chat' && chatContent}
+              {mobilePanel === 'room' &&
+                renderSidebarPanel('room', 'left', false)}
+              {mobilePanel === 'players' &&
+                renderSidebarPanel('players', 'right', false)}
+              {mobilePanel === 'manage' &&
+                renderSidebarPanel('management', 'right', false)}
+              {mobilePanel === 'heatmap' &&
+                renderSidebarPanel('heatmap', 'left', false)}
+              {mobilePanel === 'chat' &&
+                renderSidebarPanel('chat', 'right', false)}
             </Box>
           </Drawer>
         </>
@@ -1178,8 +1650,26 @@ export function GameSessionPanel({
           busy={busy}
           error={error}
           onCommand={sendCommand}
+          onCountdownWarning={handleAuctionCountdown}
         />
       )}
+
+      <GameFinishedDialog
+        open={gameResultOpen}
+        game={game}
+        currentUserId={user.id}
+        busy={busy}
+        onClose={() => setGameResultOpen(false)}
+        onExit={() => void leaveGame()}
+      />
+
+      <TokenCustomizationDialog
+        open={tokenDialogOpen}
+        value={tokenDialogValue}
+        playerNumber={Math.max(1, currentUserPlayerIndex + 1)}
+        onClose={() => setTokenDialogOpen(false)}
+        onSave={updateTokenAppearance}
+      />
 
       <Dialog
         open={confirmResignation}

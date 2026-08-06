@@ -27,6 +27,8 @@ interface Props {
   chat: GameChat
   busy?: boolean
   compact?: boolean
+  showHeader?: boolean
+  fillAvailableHeight?: boolean
   onSend: (body: string) => Promise<boolean>
 }
 
@@ -36,6 +38,8 @@ export function GameChatPanel({
   chat,
   busy = false,
   compact = false,
+  showHeader = true,
+  fillAvailableHeight = false,
   onSend,
 }: Props) {
   const { t, i18n } = useTranslation()
@@ -84,8 +88,16 @@ export function GameChatPanel({
     setDraft((current) => (current.includes(`@${name}`) ? current : `@${name} ${current}`.trim()))
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-      {!compact && (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        minWidth: 0,
+        minHeight: 0,
+        height: fillAvailableHeight ? '100%' : 'auto',
+      }}
+    >
+      {!compact && showHeader && (
         <>
           <Divider sx={{ mb: 1.5 }} />
           <Stack direction="row" spacing={1} alignItems="center">
@@ -104,9 +116,18 @@ export function GameChatPanel({
       <Box
         sx={{
           mt: 1,
-          maxHeight: compact ? { xs: 180, sm: 220 } : { xs: 240, md: 260, xl: 300 },
+          flex: fillAvailableHeight ? 1 : '0 1 auto',
+          minHeight: 0,
+          maxHeight: fillAvailableHeight
+            ? 'none'
+            : compact
+              ? { xs: 180, sm: 220 }
+              : { xs: 240, md: 260, xl: 300 },
           overflowY: 'auto',
           overscrollBehavior: 'contain',
+          touchAction: 'pan-y',
+          WebkitOverflowScrolling: 'touch',
+          scrollbarGutter: 'stable',
         }}
       >
         {chat.loading ? (
@@ -147,7 +168,11 @@ export function GameChatPanel({
       </Box>
 
       {isMember && (
-        <Box component="form" onSubmit={submit} sx={{ mt: 1 }}>
+        <Box
+          component="form"
+          onSubmit={submit}
+          sx={{ mt: 1, flexShrink: 0 }}
+        >
           {sendFailed && (
             <Alert severity="warning" sx={{ mb: 1 }} onClose={() => setSendFailed(false)}>
               {t('chat.sendFailed')}

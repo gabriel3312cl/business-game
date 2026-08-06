@@ -73,9 +73,16 @@ export function GameActionCenter({
     <Stack
       spacing={{ xs: 0.45, sm: 0.8, lg: 1.2 }}
       alignItems="center"
-      justifyContent="center"
+      justifyContent="safe center"
       aria-busy={motionPending}
-      sx={{ width: '100%', minWidth: 0, height: '100%', py: { xs: 0.5, sm: 1 } }}
+      sx={{
+        width: '100%',
+        minWidth: 0,
+        minHeight: '100%',
+        height: 'max-content',
+        py: { xs: 0.5, sm: 1 },
+        '& > *': { flexShrink: 0 },
+      }}
     >
       <Typography
         component="span"

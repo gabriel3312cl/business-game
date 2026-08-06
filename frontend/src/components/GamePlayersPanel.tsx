@@ -13,27 +13,47 @@ import {
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 import { santiagoTokenAssets } from '../assets/monopolySantiago'
-import type { GameState, User } from '../types'
+import type { GameState, TokenAppearanceSettings, User } from '../types'
 import { AssetGlyph } from './AssetVisual'
 import { playerColors } from './gameColors'
+import { tokenAssetPath, tokenShapeStyle } from './tokenAppearance'
 
 interface Props {
   game: GameState
   user: User
   useAssetTokens?: boolean
+  currentUserTokenAppearance?: TokenAppearanceSettings | null
+  showTitle?: boolean
 }
 
-export function GamePlayersPanel({ game, user, useAssetTokens = false }: Props) {
+export function GamePlayersPanel({
+  game,
+  user,
+  useAssetTokens = false,
+  currentUserTokenAppearance = null,
+  showTitle = true,
+}: Props) {
   const { t } = useTranslation()
 
   return (
     <Box>
-      <Typography fontWeight={850} sx={{ px: 1, pt: 0.5 }}>
-        {t('playersPanel')}
-      </Typography>
+      {showTitle && (
+        <Typography fontWeight={850} sx={{ px: 1, pt: 0.5 }}>
+          {t('playersPanel')}
+        </Typography>
+      )}
       <List dense disablePadding sx={{ mt: 0.5 }}>
         {game.players.map((player, index) => {
           const active = index === game.current_player_index
+          const customAppearance =
+            player.user_id === user.id ? currentUserTokenAppearance : null
+          const color =
+            customAppearance?.color ?? playerColors[index % playerColors.length]
+          const assetPath = customAppearance
+            ? tokenAssetPath(customAppearance.icon)
+            : useAssetTokens
+              ? santiagoTokenAssets[index % santiagoTokenAssets.length].path
+              : undefined
           return (
             <ListItem
               key={player.user_id}
@@ -42,7 +62,7 @@ export function GamePlayersPanel({ game, user, useAssetTokens = false }: Props) 
                 mb: 0.5,
                 px: 1,
                 borderLeft: active
-                  ? `4px solid ${playerColors[index % playerColors.length]}`
+                  ? `4px solid ${color}`
                   : '4px solid transparent',
                 bgcolor:
                   player.user_id === user.id
@@ -55,20 +75,17 @@ export function GamePlayersPanel({ game, user, useAssetTokens = false }: Props) 
                   sx={{
                     width: 32,
                     height: 32,
-                    bgcolor: playerColors[index % playerColors.length],
+                    bgcolor: color,
                     color: '#0b0912',
                     fontWeight: 900,
                     fontSize: 14,
+                    ...(customAppearance
+                      ? tokenShapeStyle(customAppearance.shape)
+                      : {}),
                   }}
                 >
-                  {useAssetTokens ? (
-                    <AssetGlyph
-                      path={
-                        santiagoTokenAssets[index % santiagoTokenAssets.length]
-                          .path
-                      }
-                      size="72%"
-                    />
+                  {assetPath ? (
+                    <AssetGlyph path={assetPath} size="72%" />
                   ) : (
                     index + 1
                   )}

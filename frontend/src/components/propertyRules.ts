@@ -6,6 +6,7 @@ import type {
 
 export type PropertyRuleReason =
   | 'gameNotActive'
+  | 'notYourTurn'
   | 'notOwner'
   | 'propertyOnly'
   | 'completeGroupRequired'
@@ -163,6 +164,9 @@ function commonActionBlock(
   allowedForDebtor: boolean,
 ): PropertyActionAvailability | null {
   if (game.status !== 'playing') return denied('gameNotActive')
+  if (game.players[game.current_player_index]?.user_id !== actorId) {
+    return denied('notYourTurn')
+  }
   if (game.active_auction) return denied('auctionInProgress')
   if (game.pending_auction_selector_id) {
     return denied('auctionSelectionInProgress')

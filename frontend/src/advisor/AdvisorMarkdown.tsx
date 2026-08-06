@@ -11,7 +11,7 @@ export function AdvisorMarkdown({ children }: Props) {
     <Box
       sx={{
         overflowWrap: 'anywhere',
-        '& > :first-child': { mt: 0 },
+        '& > :first-of-type': { mt: 0 },
         '& > :last-child': { mb: 0 },
       }}
     >

@@ -21,6 +21,7 @@ interface Props {
   range: [number, number]
   maximumSequence: number
   probabilityAvailable: boolean
+  showTitle?: boolean
   onModeChange: (mode: BoardHeatmapMode) => void
   onPlayerChange: (playerId: string | null) => void
   onRangeChange: (range: [number, number]) => void
@@ -34,6 +35,7 @@ export function BoardHeatmapControls({
   range,
   maximumSequence,
   probabilityAvailable,
+  showTitle = true,
   onModeChange,
   onPlayerChange,
   onRangeChange,
@@ -45,10 +47,12 @@ export function BoardHeatmapControls({
 
   return (
     <Stack spacing={1.25}>
-      <Stack direction="row" spacing={0.75} alignItems="center">
-        <LayersRoundedIcon color="secondary" fontSize="small" />
-        <Typography fontWeight={850}>{t('heatmap.title')}</Typography>
-      </Stack>
+      {showTitle && (
+        <Stack direction="row" spacing={0.75} alignItems="center">
+          <LayersRoundedIcon color="secondary" fontSize="small" />
+          <Typography fontWeight={850}>{t('heatmap.title')}</Typography>
+        </Stack>
+      )}
 
       <ToggleButtonGroup
         exclusive

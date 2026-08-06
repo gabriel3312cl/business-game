@@ -1,6 +1,7 @@
 import { Box, Tooltip, Typography } from '@mui/material'
 import type { ReactNode } from 'react'
 import type { TileDefinition } from '../types'
+import type { TokenShape } from '../types'
 import { AssetGlyph, TileVisual } from './AssetVisual'
 import { defaultTileColor, tileIconBackgroundStyle } from './tilePresentation'
 
@@ -10,7 +11,10 @@ interface BoardTileProps {
   gridColumn: number
   gridRow: number
   edge: BoardEdge
+  rotation: number
   compact: boolean
+  buildingLevel?: number
+  buildingLabel?: string
   tokens?: BoardToken[]
   owner?: BoardOwner
   heatmap?: BoardTileHeatmap
@@ -25,6 +29,7 @@ export interface BoardToken {
   playerNumber: number
   displayName: string
   color: string
+  shape?: TokenShape
   assetPath?: string
   active: boolean
   currentUser: boolean
@@ -50,7 +55,10 @@ export function BoardTile({
   gridColumn,
   gridRow,
   edge,
+  rotation,
   compact,
+  buildingLevel = 0,
+  buildingLabel,
   tokens = [],
   owner,
   heatmap,
@@ -58,10 +66,12 @@ export function BoardTile({
   onClick,
 }: BoardTileProps) {
   const accent = tile.color ?? defaultTileColor(tile.kind)
-  const verticalEdge = edge === 'left' || edge === 'right'
+  const quarterTurn = Math.abs(rotation) === 90
+  const corner = edge === 'corner'
   const propertyColorBand = tile.kind === 'property' && !tile.asset_path
   const priceLabel = tile.price != null ? `, $${tile.price}` : ''
   const ownerLabel = owner ? `, ${owner.ariaLabel}` : ''
+  const buildingsLabel = buildingLabel ? `, ${buildingLabel}` : ''
   const heatmapLabel = heatmap ? `, ${heatmap.ariaLabel}` : ''
 
   return (
@@ -74,7 +84,7 @@ export function BoardTile({
     <Box
       component="button"
       type="button"
-      aria-label={`${name}${priceLabel}${ownerLabel}${heatmapLabel}`}
+      aria-label={`${name}${priceLabel}${ownerLabel}${buildingsLabel}${heatmapLabel}`}
       onClick={onClick}
       sx={{
         gridColumn,
@@ -170,7 +180,12 @@ export function BoardTile({
       <Box
         sx={{
           position: 'absolute',
-          inset: 0,
+          top: '50%',
+          left: '50%',
+          width: quarterTurn ? '74.074%' : corner ? '70.71%' : '100%',
+          height: quarterTurn ? '135%' : corner ? '70.71%' : '100%',
+          transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+          transformOrigin: 'center',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -182,14 +197,9 @@ export function BoardTile({
             sm: compact ? 0.4 : 0.55,
             md: compact ? 0.5 : 0.7,
           },
-          pb:
-            edge === 'top' || edge === 'corner'
-              ? { xs: 0.65, sm: compact ? 0.9 : 1.1 }
-              : undefined,
-          pt:
-            edge === 'bottom'
-              ? { xs: 0.65, sm: compact ? 0.9 : 1.1 }
-              : undefined,
+          pt: corner
+            ? undefined
+            : { xs: 0.65, sm: compact ? 0.9 : 1.1 },
         }}
       >
         <Box
@@ -200,15 +210,15 @@ export function BoardTile({
               ? '100%'
               : {
                   xs: compact ? 12 : 14,
-                  sm: verticalEdge ? (compact ? 16 : 19) : compact ? 18 : 23,
-                  md: verticalEdge ? (compact ? 19 : 23) : compact ? 23 : 30,
+                  sm: compact ? 18 : 23,
+                  md: compact ? 23 : 30,
                 },
             height: propertyColorBand
               ? { xs: 5, sm: compact ? 7 : 9, md: compact ? 9 : 12 }
               : {
                   xs: compact ? 12 : 14,
-                  sm: verticalEdge ? (compact ? 16 : 19) : compact ? 18 : 23,
-                  md: verticalEdge ? (compact ? 19 : 23) : compact ? 23 : 30,
+                  sm: compact ? 18 : 23,
+                  md: compact ? 23 : 30,
                 },
             ...(propertyColorBand
               ? {
@@ -219,6 +229,8 @@ export function BoardTile({
               : tileIconBackgroundStyle(tile.icon_background, accent)),
             display: 'grid',
             placeItems: 'center',
+            position: 'relative',
+            zIndex: propertyColorBand && buildingLevel > 0 ? 3 : 1,
             '& svg': {
               fontSize: {
                 xs: compact ? 7 : 8,
@@ -228,6 +240,9 @@ export function BoardTile({
             },
           }}
         >
+          {propertyColorBand && buildingLevel > 0 && (
+            <BuildingPieces level={buildingLevel} label={buildingLabel} />
+          )}
           {!propertyColorBand && (
             <TileVisual
               kind={tile.kind}
@@ -241,17 +256,16 @@ export function BoardTile({
           sx={{
             width: '100%',
             minHeight: 0,
-            flex: verticalEdge ? '0 0 auto' : undefined,
             fontWeight: 850,
             fontSize: {
               xs: compact ? 5 : 6,
-              sm: verticalEdge ? (compact ? 7 : 8) : compact ? 7.5 : 9,
-              md: verticalEdge ? (compact ? 8.5 : 10) : compact ? 9.5 : 12,
+              sm: compact ? 7.5 : 9,
+              md: compact ? 9.5 : 12,
             },
             lineHeight: 1.04,
             letterSpacing: '-0.015em',
             overflow: 'hidden',
-            WebkitLineClamp: verticalEdge ? 1 : edge === 'corner' ? 3 : 2,
+            WebkitLineClamp: corner ? 3 : 2,
             WebkitBoxOrient: 'vertical',
             display: '-webkit-box',
             textShadow: '0 1px 3px rgba(0,0,0,.8)',
@@ -271,8 +285,8 @@ export function BoardTile({
               py: { xs: 0, sm: 0.1 },
               fontSize: {
                 xs: compact ? 5 : 6,
-                sm: verticalEdge ? (compact ? 6.5 : 7.5) : compact ? 7 : 8.5,
-                md: verticalEdge ? (compact ? 8 : 9.5) : compact ? 8.5 : 11,
+                sm: compact ? 7 : 8.5,
+                md: compact ? 8.5 : 11,
               },
               lineHeight: 1.15,
               fontWeight: 800,
@@ -317,7 +331,16 @@ export function BoardTile({
                 height: { xs: 9, sm: compact ? 11 : 14, md: compact ? 13 : 17 },
                 display: 'grid',
                 placeItems: 'center',
-                borderRadius: '50%',
+                borderRadius:
+                  token.shape === 'rounded'
+                    ? '24%'
+                    : token.shape === 'diamond'
+                      ? 0
+                      : '50%',
+                clipPath:
+                  token.shape === 'diamond'
+                    ? 'polygon(50% 0, 100% 50%, 50% 100%, 0 50%)'
+                    : undefined,
                 bgcolor: token.color,
                 color: '#090711',
                 border: token.currentUser
@@ -350,6 +373,62 @@ export function BoardTile({
       )}
     </Box>
     </Tooltip>
+  )
+}
+
+function BuildingPieces({ level, label }: { level: number; label?: string }) {
+  if (level >= 5) {
+    return (
+      <Box
+        component="span"
+        role={label ? 'img' : undefined}
+        aria-label={label}
+        sx={{
+          width: { xs: 10, sm: 15, md: 19 },
+          height: { xs: 4, sm: 6, md: 8 },
+          borderRadius: '2px 2px 1px 1px',
+          bgcolor: '#ff5368',
+          border: '1px solid rgba(70,0,12,.7)',
+          boxShadow: '0 1px 4px rgba(0,0,0,.7), 0 0 6px rgba(255,83,104,.75)',
+        }}
+      />
+    )
+  }
+
+  return (
+    <Box
+      component="span"
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: { xs: '1px', sm: '2px' },
+        px: { xs: '1px', sm: '2px' },
+        py: '1px',
+        borderRadius: '3px',
+        bgcolor: 'rgba(7,10,15,.82)',
+        border: '1px solid rgba(255,255,255,.28)',
+        boxShadow: '0 1px 4px rgba(0,0,0,.7)',
+      }}
+    >
+      {Array.from({ length: Math.min(level, 4) }, (_, index) => (
+        <Box
+          key={index}
+          component="span"
+          aria-hidden
+          sx={{
+            width: { xs: 4, sm: 6, md: 8 },
+            height: { xs: 4, sm: 6, md: 8 },
+            display: 'block',
+            bgcolor: '#5cff7d',
+            clipPath: 'polygon(50% 0, 100% 38%, 100% 100%, 0 100%, 0 38%)',
+            filter: 'drop-shadow(0 1px 1px rgba(0,0,0,.9))',
+          }}
+        />
+      ))}
+    </Box>
   )
 }
 

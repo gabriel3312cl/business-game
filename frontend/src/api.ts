@@ -1,13 +1,18 @@
 import type {
+  AudioPreferenceSettings,
   BotController,
   BotPersonality,
   ContentPack,
   GameCommand,
   GameState,
   OptionalRules,
+  PanelLayoutPreferences,
   PackManifest,
+  TokenAppearanceSettings,
   TokenResponse,
+  TradeAnalysis,
   User,
+  UserPreferences,
 } from './types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api/v1'
@@ -165,6 +170,35 @@ export const api = {
     return request<void>('/auth/logout', { method: 'POST' })
   },
   me: () => request<User>('/auth/me', {}, true),
+  getUserPreferences: () =>
+    request<UserPreferences>('/users/me/preferences', {}, true),
+  updatePanelLayout: (panelLayout: PanelLayoutPreferences) =>
+    request<UserPreferences>(
+      '/users/me/preferences',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ panel_layout: panelLayout }),
+      },
+      true,
+    ),
+  updateAudioSettings: (audioSettings: AudioPreferenceSettings) =>
+    request<UserPreferences>(
+      '/users/me/preferences',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ audio_settings: audioSettings }),
+      },
+      true,
+    ),
+  updateTokenAppearance: (tokenAppearance: TokenAppearanceSettings) =>
+    request<UserPreferences>(
+      '/users/me/preferences',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ token_appearance: tokenAppearance }),
+      },
+      true,
+    ),
   createGame: (packId: string, version?: string) =>
     request<GameState>(
       '/games',
@@ -176,6 +210,12 @@ export const api = {
     ),
   getGame: (gameId: string) =>
     request<GameState>(`/games/${gameId}`, {}, true),
+  analyzeTrade: (gameId: string, tradeId: string) =>
+    request<TradeAnalysis>(
+      `/games/${gameId}/trades/${tradeId}/analysis`,
+      {},
+      true,
+    ),
   listActiveGames: () => request<GameState[]>('/games/me/active', {}, true),
   joinGame: (gameId: string) =>
     request<GameState>(`/games/${gameId}/players`, { method: 'POST' }, true),

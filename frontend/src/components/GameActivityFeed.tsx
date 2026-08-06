@@ -32,7 +32,7 @@ export function GameActivityFeed({
   compact = false,
 }: Props) {
   const { t, i18n } = useTranslation()
-  const visibleEvents = events.slice(compact ? -6 : -18).reverse()
+  const visibleEvents = events.slice(-18).reverse()
 
   const playerName = (playerId?: string) =>
     players.find((player) => player.user_id === playerId)?.display_name ??
@@ -78,11 +78,11 @@ export function GameActivityFeed({
           sx={{
             mt: 0.5,
             maxHeight: compact ? { xs: 72, sm: 120, lg: 180 } : 280,
-            overflow: compact ? 'hidden' : 'auto',
+            overflowY: 'auto',
+            overscrollBehaviorY: 'contain',
+            touchAction: 'pan-y',
+            scrollbarGutter: 'stable',
             width: '100%',
-            maskImage: compact
-              ? 'linear-gradient(to bottom, black 58%, transparent 100%)'
-              : 'none',
           }}
         >
           {visibleEvents.map((event) => (

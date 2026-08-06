@@ -19,7 +19,7 @@ import {
   ToggleButtonGroup,
   Typography,
 } from '@mui/material'
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { activeGameSession, api, ApiError, authToken } from './api'
 import { GameAdvisorChat } from './advisor/GameAdvisorChat'
@@ -35,6 +35,12 @@ import type {
   User,
 } from './types'
 
+const ActiveGamesPanel = lazy(() =>
+  import('./components/ActiveGamesPanel').then((module) => ({
+    default: module.ActiveGamesPanel,
+  })),
+)
+
 export default function App() {
   const { t, i18n } = useTranslation()
   const [manifests, setManifests] = useState<PackManifest[]>([])
@@ -49,6 +55,8 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
   const [createdGame, setCreatedGame] = useState<GameState | null>(null)
+  const [activeGames, setActiveGames] = useState<GameState[]>([])
+  const [activeGamesLoading, setActiveGamesLoading] = useState(false)
   const [gamePack, setGamePack] = useState<ContentPack | null>(null)
   const [gameError, setGameError] = useState<string | null>(null)
   const [joinGameId, setJoinGameId] = useState('')
@@ -70,6 +78,37 @@ export default function App() {
         : currentGame
     })
   }, [])
+
+  const refreshActiveGames = useCallback(async () => {
+    if (!user) {
+      setActiveGames([])
+      return
+    }
+    setActiveGamesLoading(true)
+    try {
+      setActiveGames(await api.listActiveGames())
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        authToken.clear()
+        setUser(null)
+        setActiveGames([])
+        setAuthOpen(true)
+      } else {
+        setGameError(t('activeGames.loadError'))
+      }
+    } finally {
+      setActiveGamesLoading(false)
+    }
+  }, [t, user])
+
+  const resumeGame = useCallback(
+    (game: GameState) => {
+      activeGameSession.set(game.id)
+      setZoom(1)
+      applyGameState(game)
+    },
+    [applyGameState],
+  )
 
   const loadManifests = useCallback(async () => {
     setError(false)
@@ -131,12 +170,12 @@ export default function App() {
         const activeGameId = activeGameSession.get()
         const activeGames = await api.listActiveGames()
         if (!active) return
-        const restoredGame =
-          activeGames.find((game) => game.id === activeGameId) ?? activeGames[0]
+        setActiveGames(activeGames)
+        const restoredGame = activeGameId
+          ? activeGames.find((game) => game.id === activeGameId)
+          : undefined
         if (restoredGame) {
-          activeGameSession.set(restoredGame.id)
-          setZoom(1)
-          applyGameState(restoredGame)
+          resumeGame(restoredGame)
         } else if (activeGameId) {
           activeGameSession.clear()
         }
@@ -151,7 +190,7 @@ export default function App() {
     return () => {
       active = false
     }
-  }, [applyGameState])
+  }, [resumeGame])
 
   useEffect(() => {
     if (!activeGamePackId) {
@@ -209,15 +248,16 @@ export default function App() {
       }
       const token = await api.login(data.email, data.password)
       authToken.set(token.access_token, token.user_id)
-      setUser(await api.me())
+      const currentUser = await api.me()
+      setUser(currentUser)
       const activeGameId = activeGameSession.get()
       const activeGames = await api.listActiveGames()
-      const restoredGame =
-        activeGames.find((game) => game.id === activeGameId) ?? activeGames[0]
+      setActiveGames(activeGames)
+      const restoredGame = activeGameId
+        ? activeGames.find((game) => game.id === activeGameId)
+        : undefined
       if (restoredGame) {
-        activeGameSession.set(restoredGame.id)
-        setZoom(1)
-        applyGameState(restoredGame)
+        resumeGame(restoredGame)
       } else if (activeGameId) {
         activeGameSession.clear()
       }
@@ -262,6 +302,7 @@ export default function App() {
       authToken.clear()
       activeGameSession.clear()
       setUser(null)
+      setActiveGames([])
       setCreatedGame(null)
       setGamePack(null)
       setBoardStudioOpen(false)
@@ -303,14 +344,27 @@ export default function App() {
   }
 
   const leaveActiveGame = () => {
+    const leavingGameId = createdGame?.id
     activeGameSession.clear()
     setCreatedGame(null)
     setGamePack(null)
+    if (leavingGameId) {
+      setActiveGames((games) => games.filter((game) => game.id !== leavingGameId))
+    }
+    void refreshActiveGames()
+  }
+
+  const returnToMenu = () => {
+    activeGameSession.clear()
+    setCreatedGame(null)
+    setGamePack(null)
+    void refreshActiveGames()
   }
 
   const handleSessionExpired = useCallback(() => {
     authToken.clear()
     setUser(null)
+    setActiveGames([])
     setCreatedGame(null)
     setGamePack(null)
     setAuthMode('login')
@@ -535,29 +589,46 @@ export default function App() {
         )}
 
         {user && !createdGame && !boardStudioOpen && (
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
-            <TextField
-              size="small"
-              label={t('gameId')}
-              value={joinGameId}
-              onChange={(event) => setJoinGameId(event.target.value)}
-              sx={{ width: { xs: '100%', sm: 320 } }}
-            />
-            <Button
-              variant="outlined"
-              disabled={!joinGameId.trim()}
-              onClick={() => void joinGame()}
+          <>
+            <Suspense
+              fallback={
+                <Stack alignItems="center" sx={{ mb: 2 }}>
+                  <CircularProgress size={24} />
+                </Stack>
+              }
             >
-              {t('joinGame')}
-            </Button>
-            <Button
-              color="secondary"
-              disabled={!joinGameId.trim()}
-              onClick={() => void watchGame()}
-            >
-              {t('watchGame')}
-            </Button>
-          </Stack>
+              <ActiveGamesPanel
+                games={activeGames}
+                user={user}
+                loading={activeGamesLoading}
+                onResume={resumeGame}
+                onRefresh={() => void refreshActiveGames()}
+              />
+            </Suspense>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
+              <TextField
+                size="small"
+                label={t('gameId')}
+                value={joinGameId}
+                onChange={(event) => setJoinGameId(event.target.value)}
+                sx={{ width: { xs: '100%', sm: 320 } }}
+              />
+              <Button
+                variant="outlined"
+                disabled={!joinGameId.trim()}
+                onClick={() => void joinGame()}
+              >
+                {t('joinGame')}
+              </Button>
+              <Button
+                color="secondary"
+                disabled={!joinGameId.trim()}
+                onClick={() => void watchGame()}
+              >
+                {t('watchGame')}
+              </Button>
+            </Stack>
+          </>
         )}
         {createdGame && gamePack && user && (
           <>
@@ -567,6 +638,7 @@ export default function App() {
               user={user}
               zoom={zoom}
               onChange={applyGameState}
+              onBackToMenu={returnToMenu}
               onLeave={leaveActiveGame}
               onLogout={() => void logout()}
               onSessionExpired={handleSessionExpired}

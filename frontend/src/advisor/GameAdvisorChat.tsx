@@ -26,6 +26,7 @@ import {
   useState,
 } from 'react'
 import { useTranslation } from 'react-i18next'
+import { gameAudio } from '../audio/gameAudio'
 import type { ContentPack, GameState, User } from '../types'
 import { advisorApi } from './api'
 import { buildAdvisorSuggestions } from './suggestions'
@@ -110,6 +111,7 @@ export function GameAdvisorChat({ game, pack, user }: Props) {
           snapshotSequence: response.snapshot_sequence,
         },
       ])
+      gameAudio.play('advisor-response', { gain: 0.76 })
       queueMicrotask(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }))
     } catch {
       setError(true)

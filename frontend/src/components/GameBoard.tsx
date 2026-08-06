@@ -3,18 +3,25 @@ import { Box, Button, Chip, Stack, Typography } from '@mui/material'
 import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { santiagoTokenAssets } from '../assets/monopolySantiago'
-import type { ContentPack, GameCommand, GameState } from '../types'
+import type {
+  ContentPack,
+  GameCommand,
+  GameState,
+  TokenAppearanceSettings,
+} from '../types'
 import {
   BoardTile,
-  type BoardEdge,
   type BoardOwner,
   type BoardTileHeatmap,
   type BoardToken,
 } from './BoardTile'
 import { BoardTileDialog } from './BoardTileDialog'
+import { perimeterPosition } from './boardGeometry'
 import type { BoardHeatmap } from './boardHeatmap'
 import { playerColors } from './gameColors'
+import { tokenAssetPath } from './tokenAppearance'
 import {
+  type MotionAudioCue,
   type MotionSettlement,
   useVisualPlayerPositions,
 } from './gameMotion'
@@ -24,10 +31,13 @@ interface GameBoardProps {
   zoom: number
   game?: GameState | null
   currentUserId?: string
+  currentUserTokenAppearance?: TokenAppearanceSettings | null
   onCreateGame?: () => void
   centerContent?: ReactNode
   syncMotionKey?: string | number
   onMotionSettled?: (settlement: MotionSettlement) => void
+  onTokenStep?: (cue: MotionAudioCue) => void
+  onTokenTeleport?: (cue: MotionAudioCue) => void
   motionPending?: boolean
   fitAvailableHeight?: boolean
   busy?: boolean
@@ -40,10 +50,13 @@ export function GameBoard({
   zoom,
   game = null,
   currentUserId,
+  currentUserTokenAppearance = null,
   onCreateGame,
   centerContent,
   syncMotionKey,
   onMotionSettled,
+  onTokenStep,
+  onTokenTeleport,
   motionPending = false,
   fitAvailableHeight = false,
   busy = false,
@@ -61,14 +74,18 @@ export function GameBoard({
     pack.manifest.tile_count,
     syncMotionKey,
     onMotionSettled,
+    onTokenStep,
+    onTokenTeleport,
   )
   const tokensByPosition = new Map<number, BoardToken[]>()
   const ownersById = new Map<string, BoardOwner>()
   game?.players.forEach((player, index) => {
+    const currentUser = player.user_id === currentUserId
+    const customAppearance = currentUser ? currentUserTokenAppearance : null
     const presentation = {
       playerNumber: index + 1,
       displayName: player.display_name,
-      color: playerColors[index % playerColors.length],
+      color: customAppearance?.color ?? playerColors[index % playerColors.length],
     }
     ownersById.set(player.user_id, {
       ...presentation,
@@ -80,11 +97,14 @@ export function GameBoard({
     tokens.push({
       playerId: player.user_id,
       ...presentation,
-      assetPath: useAssetTokens
-        ? santiagoTokenAssets[index % santiagoTokenAssets.length]?.path
-        : undefined,
+      shape: customAppearance?.shape,
+      assetPath: customAppearance
+        ? tokenAssetPath(customAppearance.icon)
+        : useAssetTokens
+          ? santiagoTokenAssets[index % santiagoTokenAssets.length]?.path
+          : undefined,
       active: index === game.current_player_index,
-      currentUser: player.user_id === currentUserId,
+      currentUser,
     })
     tokensByPosition.set(position, tokens)
   })
@@ -123,6 +143,13 @@ export function GameBoard({
         const position = perimeterPosition(index, side)
         const name = pack.messages[tile.name_key] ?? tile.id
         const owner = ownersById.get(game?.owners[tile.id] ?? '')
+        const buildingLevel = game?.building_levels[tile.id] ?? 0
+        const buildingLabel =
+          tile.kind !== 'property' || buildingLevel <= 0
+            ? undefined
+            : buildingLevel >= 5
+              ? t('hotel')
+              : t('houseCount', { count: buildingLevel })
         const heatmapCell = heatmap?.cells.get(index)
         const tileHeatmap = heatmap && heatmapCell
           ? boardTileHeatmap(heatmap, heatmapCell, t, i18n.language)
@@ -135,7 +162,10 @@ export function GameBoard({
             gridColumn={position.column}
             gridRow={position.row}
             edge={position.edge}
+            rotation={position.rotation}
             compact={compact}
+            buildingLevel={buildingLevel}
+            buildingLabel={buildingLabel}
             tokens={tokensByPosition.get(index)}
             owner={owner}
             heatmap={tileHeatmap}
@@ -156,6 +186,11 @@ export function GameBoard({
                       ? t('unownedProperty')
                       : t(`tileKind.${tile.kind}`)}
                 </Typography>
+                {buildingLabel && (
+                  <Typography variant="caption" color="success.light" fontWeight={800}>
+                    {buildingLabel}
+                  </Typography>
+                )}
                 <Typography variant="caption" color="secondary.light">
                   {t('clickForTileDetails')}
                 </Typography>
@@ -182,7 +217,13 @@ export function GameBoard({
             'radial-gradient(circle at center, rgba(91,73,143,.18), transparent 58%)',
           p: { xs: 0.75, sm: 1.5, md: 2.5 },
           minWidth: 0,
-          overflow: 'hidden',
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          overscrollBehavior: 'contain',
+          touchAction: 'pan-y',
+          WebkitOverflowScrolling: 'touch',
+          scrollbarGutter: 'stable',
         }}
         spacing={{ xs: 0.5, sm: 1, md: 1.5 }}
       >
@@ -257,7 +298,11 @@ export function GameBoard({
                           width: 8,
                           height: 8,
                           borderRadius: '50%',
-                          bgcolor: playerColors[index % playerColors.length],
+                          bgcolor:
+                            player.user_id === currentUserId
+                              ? currentUserTokenAppearance?.color ??
+                                playerColors[index % playerColors.length]
+                              : playerColors[index % playerColors.length],
                           ml: 1,
                         },
                       }}
@@ -334,40 +379,6 @@ function boardTileHeatmap(
     valueLabel: `${percentage}%`,
     ariaLabel: t('heatmap.probabilityValue', { value: percentage }),
   }
-}
-
-function perimeterPosition(
-  index: number,
-  side: number,
-): { column: number; row: number; edge: BoardEdge } {
-  let column: number
-  let row: number
-  if (index < side) {
-    column = index + 1
-    row = 1
-  } else if (index < side * 2 - 1) {
-    column = side
-    row = index - side + 2
-  } else if (index < side * 3 - 2) {
-    column = side - 1 - (index - (side * 2 - 1))
-    row = side
-  } else {
-    column = 1
-    row = side - 1 - (index - (side * 3 - 2))
-  }
-
-  const corner =
-    (column === 1 || column === side) && (row === 1 || row === side)
-  const edge: BoardEdge = corner
-    ? 'corner'
-    : row === 1
-      ? 'top'
-      : column === side
-        ? 'right'
-        : row === side
-          ? 'bottom'
-          : 'left'
-  return { column, row, edge }
 }
 
 function boardTrackTemplate(side: number): string {

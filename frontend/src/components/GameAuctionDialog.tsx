@@ -13,7 +13,7 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type {
   ContentPack,
@@ -31,6 +31,7 @@ interface Props {
   busy: boolean
   error: string | null
   onCommand: (command: GameCommand) => Promise<boolean>
+  onCountdownWarning?: () => void
 }
 
 interface AuctionBid {
@@ -49,12 +50,14 @@ export function GameAuctionDialog({
   busy,
   error,
   onCommand,
+  onCountdownWarning,
 }: Props) {
   const { t } = useTranslation()
   const theme = useTheme()
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const deadline = game.active_auction?.bid_deadline ?? null
   const [now, setNow] = useState(() => Date.now())
+  const warnedDeadlineRef = useRef<string | null>(null)
 
   useEffect(() => {
     setNow(Date.now())
@@ -71,6 +74,25 @@ export function GameAuctionDialog({
 
     return () => window.clearInterval(interval)
   }, [deadline])
+
+  const deadlineMs = parseDeadline(deadline)
+  const remainingMs =
+    deadlineMs === null ? null : Math.max(0, deadlineMs - now)
+  const remainingSeconds =
+    remainingMs === null ? null : Math.ceil(remainingMs / 1_000)
+
+  useEffect(() => {
+    if (
+      deadline &&
+      remainingSeconds !== null &&
+      remainingSeconds > 0 &&
+      remainingSeconds <= 2 &&
+      warnedDeadlineRef.current !== deadline
+    ) {
+      warnedDeadlineRef.current = deadline
+      onCountdownWarning?.()
+    }
+  }, [deadline, onCountdownWarning, remainingSeconds])
 
   const auction = game.active_auction
   if (!auction) return null
@@ -97,11 +119,6 @@ export function GameAuctionDialog({
           auction.minimum_bid + 100,
         ]
       : [2, 10, 100].map((increment) => auction.current_bid + increment)
-  const deadlineMs = parseDeadline(auction.bid_deadline)
-  const remainingMs =
-    deadlineMs === null ? null : Math.max(0, deadlineMs - now)
-  const remainingSeconds =
-    remainingMs === null ? null : Math.ceil(remainingMs / 1_000)
   const timerProgress =
     remainingMs === null
       ? 0
