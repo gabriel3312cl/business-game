@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Business Game · Revisión de audio · Ronda 4</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #090c0f; color: #f3f6f8; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; overflow-x: hidden; background: radial-gradient(circle at 12% 0%, #18231c 0, #090c0f 34rem); }
+      header { position: sticky; top: 0; z-index: 2; padding: 24px clamp(18px, 4vw, 56px); background: rgba(9, 12, 15, .92); border-bottom: 1px solid #263129; backdrop-filter: blur(16px); }
+      h1 { margin: 0 0 6px; font-size: clamp(24px, 4vw, 38px); letter-spacing: -.04em; }
+      h1 span { color: #b8ff3d; }
+      header p { margin: 0; color: #9ba8a0; }
+      .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+      button, select, input { font: inherit; }
+      button, select { border: 1px solid #354239; border-radius: 10px; background: #151b17; color: #edf4ef; padding: 9px 12px; }
+      button { cursor: pointer; }
+      button:hover { border-color: #b8ff3d; }
+      .summary { flex: 1 0 100%; min-width: 0; margin-top: 2px; color: #b8ff3d; align-self: center; font-weight: 700; }
+      main { width: min(1180px, calc(100% - 32px)); margin: 28px auto 72px; }
+      section { margin: 32px 0; }
+      h2 { font-size: 18px; color: #b8ff3d; letter-spacing: .02em; }
+      .card { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(220px, 1.35fr) auto; gap: 16px; align-items: center; margin: 10px 0; padding: 14px; border: 1px solid #252e28; border-radius: 14px; background: rgba(18, 23, 20, .9); }
+      .event { font-weight: 800; }
+      .meta { margin-top: 4px; color: #89958e; font-size: 13px; }
+      .approved-r1 { display: inline-block; margin-top: 7px; padding: 3px 7px; border: 1px solid #52722e; border-radius: 999px; color: #b8ff3d; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+      audio { width: 100%; min-width: 220px; height: 36px; }
+      .audio-stack { display: grid; gap: 8px; }
+      .audio-row { display: grid; grid-template-columns: 86px 1fr; gap: 8px; align-items: center; }
+      .audio-label { color: #9ba8a0; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+      .vote { display: flex; gap: 6px; }
+      .vote button { min-width: 40px; padding: 8px; }
+      .vote button[data-active="true"] { color: #071006; background: #b8ff3d; border-color: #b8ff3d; }
+      .vote button.reject[data-active="true"] { color: white; background: #c43d4e; border-color: #c43d4e; }
+      .note { grid-column: 1 / -1; width: 100%; border: 1px solid #2e3932; border-radius: 9px; padding: 10px; color: white; background: #0d120f; }
+      .hidden { display: none; }
+      @media (max-width: 760px) { .card { grid-template-columns: 1fr; } .note { grid-column: auto; } .summary { width: 100%; margin-left: 0; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>BUSINESS<span>GAME</span> · Audio · Ronda 4</h1>
+      <p>47 sonidos aprobados y 3 matices de ficha metálica sobre madera. Esta página no está conectada al juego.</p>
+      <div class="toolbar">
+        <select id="filter" aria-label="Filtrar resultados">
+          <option value="all">Todos</option>
+          <option value="pending" selected>Pendientes</option>
+          <option value="approved">Aprobados</option>
+          <option value="rejected">Rechazados</option>
+        </select>
+        <button id="stop" type="button">Detener audio</button>
+        <button id="export" type="button">Exportar feedback</button>
+        <button id="reset" type="button">Borrar feedback</button>
+        <span class="summary" id="summary"></span>
+      </div>
+    </header>
+    <main id="catalog"></main>
+    <script src="catalog.js"></script>
+    <script>
+      const storageKey = 'business-game-audio-review-v4'
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}')
+      const catalog = document.querySelector('#catalog')
+      const filter = document.querySelector('#filter')
+
+      function decisionFor(item) {
+        return saved[item.id]?.vote || item.initialVote || 'pending'
+      }
+
+      function persist() {
+        localStorage.setItem(storageKey, JSON.stringify(saved))
+        renderSummary()
+        applyFilter()
+      }
+
+      function renderSummary() {
+        const approved = window.AUDIO_CANDIDATES.filter((item) => decisionFor(item) === 'approved').length
+        const rejected = window.AUDIO_CANDIDATES.filter((item) => decisionFor(item) === 'rejected').length
+        document.querySelector('#summary').textContent = `${approved} aprobados · ${rejected} rechazados · ${window.AUDIO_CANDIDATES.length - approved - rejected} pendientes`
+      }
+
+      function applyFilter() {
+        document.querySelectorAll('.card').forEach((card) => {
+          const item = window.AUDIO_CANDIDATES.find((candidate) => candidate.id === card.dataset.id)
+          const vote = decisionFor(item)
+          card.classList.toggle('hidden', filter.value !== 'all' && filter.value !== vote)
+        })
+      }
+
+      const groups = Map.groupBy(window.AUDIO_CANDIDATES, (item) => item.group)
+      groups.forEach((items, group) => {
+        const section = document.createElement('section')
+        const heading = document.createElement('h2')
+        heading.textContent = `${group} · ${items.length}`
+        section.append(heading)
+
+        items.forEach((item) => {
+          const card = document.createElement('article')
+          card.className = 'card'
+          card.dataset.id = item.id
+          const audioPlayers = item.previewFile
+            ? `<div class="audio-stack">
+                <div class="audio-row"><span class="audio-label">Un paso</span><audio controls preload="metadata" src="${item.file}"></audio></div>
+                <div class="audio-row"><span class="audio-label">6 casillas</span><audio controls preload="metadata" src="${item.previewFile}"></audio></div>
+              </div>`
+            : `<audio controls preload="metadata" src="${item.file}"></audio>`
+          card.innerHTML = `
+            <div><div class="event">${item.event}</div><div class="meta">${item.style}<br>${item.source}</div>${item.initialVote === 'approved' ? `<span class="approved-r1">Aprobado en ronda ${item.round}</span>` : ''}</div>
+            ${audioPlayers}
+            <div class="vote">
+              <button type="button" aria-label="Aprobar" data-vote="approved">✓</button>
+              <button type="button" class="reject" aria-label="Rechazar" data-vote="rejected">×</button>
+            </div>
+            <input class="note" type="text" placeholder="Comentario opcional" value="${saved[item.id]?.note || ''}" />`
+
+          card.querySelectorAll('[data-vote]').forEach((button) => {
+            const refresh = () => button.dataset.active = String(decisionFor(item) === button.dataset.vote)
+            refresh()
+            button.addEventListener('click', () => {
+              const current = saved[item.id] || {}
+              current.vote = decisionFor(item) === button.dataset.vote ? 'pending' : button.dataset.vote
+              saved[item.id] = current
+              card.querySelectorAll('[data-vote]').forEach((candidate) => candidate.dataset.active = String(current.vote === candidate.dataset.vote))
+              persist()
+            })
+          })
+
+          card.querySelector('.note').addEventListener('change', (event) => {
+            saved[item.id] = { ...(saved[item.id] || {}), note: event.target.value }
+            persist()
+          })
+
+          card.querySelectorAll('audio').forEach((player) => player.addEventListener('play', (event) => {
+            document.querySelectorAll('audio').forEach((audio) => { if (audio !== event.target) audio.pause() })
+          }))
+          section.append(card)
+        })
+        catalog.append(section)
+      })
+
+      filter.addEventListener('change', applyFilter)
+      document.querySelector('#stop').addEventListener('click', () => document.querySelectorAll('audio').forEach((audio) => audio.pause()))
+      document.querySelector('#export').addEventListener('click', () => {
+        const output = window.AUDIO_CANDIDATES.map((item) => ({ id: item.id, event: item.event, vote: decisionFor(item), note: saved[item.id]?.note || '', round: item.round }))
+        const link = document.createElement('a')
+        link.href = URL.createObjectURL(new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' }))
+        link.download = 'business-game-audio-feedback.json'
+        link.click()
+        URL.revokeObjectURL(link.href)
+      })
+      document.querySelector('#reset').addEventListener('click', () => {
+        if (!confirm('¿Borrar todas las decisiones y comentarios?')) return
+        Object.keys(saved).forEach((key) => delete saved[key])
+        localStorage.removeItem(storageKey)
+        location.reload()
+      })
+      renderSummary()
+      applyFilter()
+    </script>
+  </body>
+</html>
