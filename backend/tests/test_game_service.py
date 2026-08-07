@@ -34,6 +34,7 @@ from business_game.domain.models import (
     PlayerState,
     ProposeRentDebtPlanCommand,
     ProposeTradeCommand,
+    RentDebtPlanState,
     RentDebtPlanTemplate,
     RollCommand,
     SelectAuctionPropertyCommand,
@@ -890,6 +891,10 @@ async def test_accepted_rent_plan_collects_installments_on_future_turns(
 ) -> None:
     creditor = await create_user(session, "plan-creditor@example.com", "Creditor")
     debtor = await create_user(session, "plan-debtor@example.com", "Debtor")
+    pack = PackLoader(packs_dir).load("classic-demo")
+    requested_property_id = next(
+        tile.id for tile in pack.board.tiles if tile.is_purchasable
+    )
     games = GameService(session, PackLoader(packs_dir))
     game = await games.create("classic-demo", creditor)
     await games.join(game.id, debtor)
@@ -903,6 +908,7 @@ async def test_accepted_rent_plan_collects_installments_on_future_turns(
     await games.start(game.id, creditor.id)
     async with session.begin():
         persisted = await GameRepository(session).get(game.id, for_update=True)
+        persisted.owners[requested_property_id] = debtor.id
         persisted.active_debt = DebtState(
             debtor_id=debtor.id,
             creditor_id=creditor.id,
@@ -934,6 +940,7 @@ async def test_accepted_rent_plan_collects_installments_on_future_turns(
             installments=3,
             interest_percent=10,
             template=RentDebtPlanTemplate.CUSTOM,
+            requested_property_ids=[requested_property_id],
         ),
     )
     assert game.active_debt is not None
@@ -948,6 +955,7 @@ async def test_accepted_rent_plan_collects_installments_on_future_turns(
     assert game.active_debt is None
     assert len(game.rent_debt_plans) == 1
     assert game.rent_debt_plans[0].total_amount == 110
+    assert game.owners[requested_property_id] == creditor.id
 
     async with session.begin():
         persisted = await GameRepository(session).get(game.id, for_update=True)
@@ -968,6 +976,174 @@ async def test_accepted_rent_plan_collects_installments_on_future_turns(
     assert plan.installments_remaining == 2
     assert game.players[1].balance == 63
     assert any(event.type == "debt.installment_paid" for event in game.events)
+
+
+async def test_rent_debt_can_be_settled_with_multiple_properties(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    creditor = await create_user(
+        session,
+        "property-settlement-creditor@example.com",
+        "Creditor",
+    )
+    debtor = await create_user(
+        session,
+        "property-settlement-debtor@example.com",
+        "Debtor",
+    )
+    pack = PackLoader(packs_dir).load("classic-demo")
+    property_ids = [tile.id for tile in pack.board.tiles if tile.is_purchasable][:2]
+    games = GameService(session, PackLoader(packs_dir))
+    game = await games.create("classic-demo", creditor)
+    await games.join(game.id, debtor)
+    await games.update_settings(
+        game.id,
+        creditor.id,
+        UpdateGameSettingsRequest(
+            rules=OptionalRulesUpdate(custom_rent_debts_enabled=True)
+        ),
+    )
+    await games.start(game.id, creditor.id)
+    async with session.begin():
+        persisted = await GameRepository(session).get(game.id, for_update=True)
+        for property_id in property_ids:
+            persisted.owners[property_id] = debtor.id
+        persisted.active_debt = DebtState(
+            debtor_id=debtor.id,
+            creditor_id=creditor.id,
+            amount=100,
+            reason=DebtReason.RENT,
+            tile_id="property_03",
+        )
+        await GameRepository(session).save(persisted, len(persisted.events))
+
+    game = await games.execute(
+        game.id,
+        creditor.id,
+        ProposeRentDebtPlanCommand(
+            action="propose_rent_debt_plan",
+            installments=0,
+            interest_percent=0,
+            template=RentDebtPlanTemplate.CUSTOM,
+            requested_property_ids=property_ids,
+        ),
+    )
+    assert game.active_debt is not None
+    assert game.active_debt.plan_proposal is not None
+    assert game.active_debt.plan_proposal.requested_property_ids == property_ids
+
+    game = await games.execute(
+        game.id,
+        debtor.id,
+        AcceptRentDebtPlanCommand(action="accept_rent_debt_plan"),
+    )
+    assert game.active_debt is None
+    assert game.rent_debt_plans == []
+    assert all(game.owners[property_id] == creditor.id for property_id in property_ids)
+    accepted = game.events[-1]
+    assert accepted.type == "debt.plan_accepted"
+    assert accepted.data["requested_property_ids"] == property_ids
+
+
+async def test_overdue_rent_plan_waits_for_creditor_and_can_be_renegotiated(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    creditor = await create_user(
+        session,
+        "renegotiate-creditor@example.com",
+        "Creditor",
+    )
+    debtor = await create_user(
+        session,
+        "renegotiate-debtor@example.com",
+        "Debtor",
+    )
+    pack = PackLoader(packs_dir).load("classic-demo")
+    requested_property_id = next(
+        tile.id for tile in pack.board.tiles if tile.is_purchasable
+    )
+    games = GameService(session, PackLoader(packs_dir))
+    game = await games.create("classic-demo", creditor)
+    await games.join(game.id, debtor)
+    await games.update_settings(
+        game.id,
+        creditor.id,
+        UpdateGameSettingsRequest(
+            rules=OptionalRulesUpdate(custom_rent_debts_enabled=True)
+        ),
+    )
+    await games.start(game.id, creditor.id)
+    original_plan = RentDebtPlanState(
+        debtor_id=debtor.id,
+        creditor_id=creditor.id,
+        tile_id="property_03",
+        original_amount=100,
+        interest_percent=20,
+        total_amount=120,
+        remaining_amount=90,
+        installments_total=4,
+        installments_remaining=3,
+        template=RentDebtPlanTemplate.CUSTOM,
+        created_at_sequence=game.event_sequence,
+    )
+    async with session.begin():
+        persisted = await GameRepository(session).get(game.id, for_update=True)
+        persisted.current_player_index = 0
+        persisted.phase = TurnPhase.WAITING_FOR_END
+        persisted.players[1].balance = 0
+        persisted.owners[requested_property_id] = debtor.id
+        persisted.rent_debt_plans.append(original_plan)
+        await GameRepository(session).save(persisted, len(persisted.events))
+
+    game = await games.execute(
+        game.id,
+        creditor.id,
+        EndTurnCommand(action="end_turn"),
+    )
+    assert game.active_debt is not None
+    assert game.active_debt.reason is DebtReason.RENT_INSTALLMENT
+    assert game.active_debt.amount == 30
+    assert not game.active_debt.collection_demanded
+
+    with pytest.raises(ConflictError, match="creditor must choose"):
+        await games.execute(
+            game.id,
+            debtor.id,
+            PayDebtCommand(action="pay_debt"),
+        )
+
+    game = await games.execute(
+        game.id,
+        creditor.id,
+        ProposeRentDebtPlanCommand(
+            action="propose_rent_debt_plan",
+            installments=2,
+            interest_percent=0,
+            template=RentDebtPlanTemplate.FRIENDLY,
+            requested_property_ids=[requested_property_id],
+        ),
+    )
+    proposed = game.events[-1]
+    assert proposed.type == "debt.plan_proposed"
+    assert proposed.data["original_amount"] == 90
+    assert proposed.data["total_amount"] == 90
+
+    game = await games.execute(
+        game.id,
+        debtor.id,
+        AcceptRentDebtPlanCommand(action="accept_rent_debt_plan"),
+    )
+    assert game.active_debt is None
+    assert len(game.rent_debt_plans) == 1
+    replacement = game.rent_debt_plans[0]
+    assert replacement.id != original_plan.id
+    assert replacement.original_amount == 90
+    assert replacement.remaining_amount == 90
+    assert replacement.installments_remaining == 2
+    assert game.owners[requested_property_id] == creditor.id
+    assert game.events[-1].data["replaced_plan_id"] == str(original_plan.id)
 
 
 async def test_bankruptcy_transfers_assets_and_finishes_two_player_game(

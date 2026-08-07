@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.config import settings
-from business_game.domain.models import TradeOffer
+from business_game.domain.models import PanelLayoutPreferences, TradeOffer
 from business_game.infrastructure.db_models import (
     AuthSessionRecord,
     GameRecord,
@@ -38,6 +38,49 @@ async def register_and_login(
     )
     assert token.status_code == 200
     return {"Authorization": f"Bearer {token.json()['access_token']}"}
+
+
+def test_legacy_panel_layout_defaults_to_properties_view() -> None:
+    legacy_payload = {
+        "order": ["room", "heatmap", "players", "management", "chat"],
+        "zones": {
+            "room": "left",
+            "heatmap": "left",
+            "players": "right",
+            "management": "right",
+            "chat": "right",
+        },
+    }
+    layout = PanelLayoutPreferences.model_validate(legacy_payload)
+
+    assert layout.management.model_dump() == {
+        "order": ["properties", "trades", "bank", "market"],
+        "visible": ["properties"],
+        "heights": {},
+    }
+    assert layout.rail is None
+
+    prior_icon_rail = PanelLayoutPreferences.model_validate(
+        {
+            **legacy_payload,
+            "rail": {
+                "order": [
+                    "room",
+                    "heatmap",
+                    "players",
+                    "properties",
+                    "trades",
+                    "bank",
+                    "market",
+                    "chat",
+                ],
+                "visible": ["properties", "chat"],
+            },
+        }
+    )
+    assert prior_icon_rail.rail is not None
+    assert set(prior_icon_rail.rail.placements.values()) == {"right"}
+    assert prior_icon_rail.rail.windows == {}
 
 
 async def test_health(client: AsyncClient) -> None:
@@ -95,6 +138,38 @@ async def test_user_panel_layout_preferences_persist_per_account(
             "chat": "right",
         },
         "heights": {"chat": 420, "management": 500},
+        "management": {
+            "order": ["bank", "properties", "trades", "market"],
+            "visible": ["bank", "trades"],
+            "heights": {"bank": 360, "trades": 280},
+        },
+        "rail": {
+            "order": [
+                "room",
+                "bank",
+                "properties",
+                "trades",
+                "market",
+                "players",
+                "heatmap",
+                "chat",
+            ],
+            "visible": ["bank", "properties", "chat"],
+            "heights": {"bank": 360, "chat": 300},
+            "placements": {
+                "room": "right",
+                "heatmap": "right",
+                "players": "left",
+                "properties": "right",
+                "trades": "right",
+                "bank": "floating",
+                "market": "right",
+                "chat": "left",
+            },
+            "windows": {
+                "bank": {"x": 120, "y": 80, "width": 420, "height": 540}
+            },
+        },
     }
     updated = await client.patch(
         "/api/v1/users/me/preferences",
@@ -224,6 +299,59 @@ async def test_rejects_invalid_or_unauthenticated_panel_preferences(
         },
     )
     assert invalid.status_code == 422
+
+    invalid_management_layout = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=headers,
+        json={
+            "panel_layout": {
+                "order": ["room", "heatmap", "players", "management", "chat"],
+                "zones": {
+                    "room": "left",
+                    "heatmap": "left",
+                    "players": "right",
+                    "management": "right",
+                    "chat": "right",
+                },
+                "management": {
+                    "order": ["properties", "trades", "bank", "market"],
+                    "visible": ["bank", "bank"],
+                },
+            }
+        },
+    )
+    assert invalid_management_layout.status_code == 422
+
+    invalid_rail_layout = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=headers,
+        json={
+            "panel_layout": {
+                "order": ["room", "heatmap", "players", "management", "chat"],
+                "zones": {
+                    "room": "left",
+                    "heatmap": "left",
+                    "players": "right",
+                    "management": "right",
+                    "chat": "right",
+                },
+                "rail": {
+                    "order": [
+                        "room",
+                        "heatmap",
+                        "players",
+                        "properties",
+                        "trades",
+                        "bank",
+                        "market",
+                        "chat",
+                    ],
+                    "visible": ["bank", "bank"],
+                },
+            }
+        },
+    )
+    assert invalid_rail_layout.status_code == 422
 
     invalid_audio = await client.patch(
         "/api/v1/users/me/preferences",

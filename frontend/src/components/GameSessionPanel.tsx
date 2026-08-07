@@ -1,14 +1,20 @@
 import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded'
+import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded'
 import AccountCircleRoundedIcon from '@mui/icons-material/AccountCircleRounded'
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import ForumRoundedIcon from '@mui/icons-material/ForumRounded'
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
+import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded'
 import LayersRoundedIcon from '@mui/icons-material/LayersRounded'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded'
+import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded'
 import PaletteRoundedIcon from '@mui/icons-material/PaletteRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
+import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded'
+import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded'
+import VerticalAlignCenterRoundedIcon from '@mui/icons-material/VerticalAlignCenterRounded'
 import {
   Alert,
   BottomNavigation,
@@ -29,8 +35,9 @@ import {
   MenuItem,
   Select,
   Stack,
-  Tab,
-  Tabs,
+  ToggleButton,
+  ToggleButtonGroup,
+  Tooltip,
   Typography,
   useMediaQuery,
   useTheme,
@@ -67,11 +74,15 @@ import type {
   GameEvent,
   GameState,
   AudioPreferenceSettings,
+  ManagementPanelId,
   PanelId,
-  PanelLayoutPreferences as PanelLayout,
-  PanelZone,
+  PanelLayoutPreferences,
   TokenAppearanceSettings,
   User,
+  WorkspacePanelId,
+  WorkspacePanelLayoutPreferences,
+  WorkspacePanelPlacement,
+  WorkspacePanelWindowGeometry,
 } from '../types'
 import { nextAutomationCommand } from '../gameAutomation'
 import { BotManagementPanel } from './BotManagementPanel'
@@ -92,15 +103,35 @@ import {
   type MotionSettlement,
 } from './gameMotion'
 import { GamePlayersPanel } from './GamePlayersPanel'
+import { FloatingWorkspacePanel } from './FloatingWorkspacePanel'
 import { playerColors } from './gameColors'
 import { GameTradePanel } from './GameTradePanel'
 import { LobbySettingsPanel } from './LobbySettingsPanel'
+import {
+  clearManagementPanelHeights,
+  DEFAULT_MANAGEMENT_PANEL_LAYOUT,
+  isManagementPanelId,
+  keepManagementSelection,
+  MANAGEMENT_PANEL_IDS,
+  moveManagementPanel,
+  normalizeManagementPanelLayout,
+} from './managementPanelLayout'
 import { MarketPanel } from './MarketPanel'
 import { PersonalizablePanel } from './PersonalizablePanel'
 import { PropertyManagementPanel } from './PropertyManagementPanel'
 import { RentDebtResolutionPanel } from './RentDebtResolutionPanel'
 import { TokenCustomizationDialog } from './TokenCustomizationDialog'
 import { normalizeTokenAppearance } from './tokenAppearance'
+import {
+  clearWorkspacePanelHeights,
+  DEFAULT_WORKSPACE_PANEL_LAYOUT,
+  isWorkspacePanelId,
+  keepWorkspaceSelection,
+  moveWorkspacePanel,
+  normalizeWorkspacePanelLayout,
+  placeWorkspacePanel,
+  WORKSPACE_PANEL_IDS,
+} from './workspacePanelLayout'
 
 interface Props {
   game: GameState
@@ -134,6 +165,9 @@ type ConnectionState =
   | 'disconnected'
 
 type MobilePanel = 'room' | 'players' | 'manage' | 'heatmap' | 'chat' | null
+type PanelLayout = Omit<PanelLayoutPreferences, 'rail'> & {
+  rail: WorkspacePanelLayoutPreferences
+}
 
 const PANEL_IDS: PanelId[] = [
   'room',
@@ -152,6 +186,8 @@ const DEFAULT_PANEL_LAYOUT: PanelLayout = {
     chat: 'right',
   },
   heights: {},
+  management: DEFAULT_MANAGEMENT_PANEL_LAYOUT,
+  rail: DEFAULT_WORKSPACE_PANEL_LAYOUT,
 }
 const PANEL_LAYOUT_STORAGE_PREFIX = 'business-game:panel-layout:v1:'
 const TOKEN_APPEARANCE_STORAGE_PREFIX = 'business-game:token-appearance:v1:'
@@ -165,13 +201,17 @@ function readPanelLayout(userId: string): PanelLayout {
   try {
     const raw = localStorage.getItem(`${PANEL_LAYOUT_STORAGE_PREFIX}${userId}`)
     if (!raw) return DEFAULT_PANEL_LAYOUT
-    return normalizePanelLayout(JSON.parse(raw) as Partial<PanelLayout>)
+    return normalizePanelLayout(
+      JSON.parse(raw) as Partial<PanelLayoutPreferences>,
+    )
   } catch {
     return DEFAULT_PANEL_LAYOUT
   }
 }
 
-function normalizePanelLayout(stored: Partial<PanelLayout>): PanelLayout {
+function normalizePanelLayout(
+  stored: Partial<PanelLayoutPreferences>,
+): PanelLayout {
   const storedOrder = Array.isArray(stored.order)
     ? stored.order.filter(isPanelId)
     : []
@@ -188,7 +228,18 @@ function normalizePanelLayout(stored: Partial<PanelLayout>): PanelLayout {
       heights[panelId] = Math.round(height)
     }
   }
-  return { order, zones, heights }
+  const management = normalizeManagementPanelLayout(stored.management)
+  return {
+    order,
+    zones,
+    heights,
+    management,
+    rail: normalizeWorkspacePanelLayout(stored.rail, {
+      order,
+      heights,
+      management,
+    }),
+  }
 }
 
 function writePanelLayout(userId: string, layout: PanelLayout): void {
@@ -267,7 +318,6 @@ export function GameSessionPanel({
   const { t, i18n } = useTranslation()
   const theme = useTheme()
   const isTablet = useMediaQuery(theme.breakpoints.up('md'))
-  const isWide = useMediaQuery(theme.breakpoints.up('xl'))
   const socketRef = useRef<Socket | null>(null)
   const refreshingSocketRef = useRef(false)
   const [busy, setBusy] = useState(false)
@@ -278,7 +328,6 @@ export function GameSessionPanel({
   const [gameResultOpen, setGameResultOpen] = useState(
     game.status === 'finished',
   )
-  const [sideTab, setSideTab] = useState(0)
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null)
   const [panelLayout, setPanelLayout] = useState<PanelLayout>(() =>
     readPanelLayout(user.id),
@@ -301,7 +350,10 @@ export function GameSessionPanel({
   const restoringAudioSettingsRef = useRef(false)
   const audioSaveTimerRef = useRef<number | null>(null)
   const audioSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
-  const [draggedPanel, setDraggedPanel] = useState<PanelId | null>(null)
+  const [draggedWorkspacePanel, setDraggedWorkspacePanel] =
+    useState<WorkspacePanelId | null>(null)
+  const [draggedManagementPanel, setDraggedManagementPanel] =
+    useState<ManagementPanelId | null>(null)
   const chat = useGameChat(game.id)
   const receiveChatMessage = chat.receive
   const receiveChatMessageWithAudio = useCallback(
@@ -640,59 +692,208 @@ export function GameSessionPanel({
     [savePanelLayoutRemotely, user.id],
   )
 
-  const movePanel = useCallback(
-    (panelId: PanelId, targetId: PanelId | null, zone: PanelZone) => {
-      updatePanelLayout((current) => {
-        const order = current.order.filter((candidate) => candidate !== panelId)
-        const targetIndex = targetId === null ? -1 : order.indexOf(targetId)
-        if (targetIndex === -1) order.push(panelId)
-        else order.splice(targetIndex, 0, panelId)
-        return {
-          ...current,
-          order,
-          zones: isWide
-            ? { ...current.zones, [panelId]: zone }
-            : current.zones,
-        }
-      })
-    },
-    [isWide, updatePanelLayout],
-  )
-
-  const startPanelDrag = useCallback(
-    (panelId: PanelId, event: DragEvent<HTMLElement>) => {
-      setDraggedPanel(panelId)
-      event.dataTransfer.effectAllowed = 'move'
-      event.dataTransfer.setData('text/plain', panelId)
-    },
-    [],
-  )
-
-  const dropPanel = useCallback(
-    (
-      event: DragEvent<HTMLDivElement>,
-      targetId: PanelId | null,
-      zone: PanelZone,
-    ) => {
-      event.preventDefault()
-      event.stopPropagation()
-      const transferred = event.dataTransfer.getData('text/plain')
-      const panelId = draggedPanel ?? (isPanelId(transferred) ? transferred : null)
-      if (panelId && panelId !== targetId) movePanel(panelId, targetId, zone)
-      setDraggedPanel(null)
-    },
-    [draggedPanel, movePanel],
-  )
-
-  const resizePanel = useCallback(
-    (panelId: PanelId, height: number) => {
+  const selectWorkspacePanels = useCallback(
+    (nextVisible: unknown) => {
       updatePanelLayout((current) => ({
         ...current,
-        heights: { ...current.heights, [panelId]: height },
+        rail: {
+          ...current.rail,
+          visible: keepWorkspaceSelection(current.rail.visible, nextVisible),
+        },
       }))
     },
     [updatePanelLayout],
   )
+
+  const startWorkspacePanelDrag = useCallback(
+    (panelId: WorkspacePanelId, event: DragEvent<HTMLElement>) => {
+      event.stopPropagation()
+      setDraggedWorkspacePanel(panelId)
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('application/x-workspace-panel', panelId)
+    },
+    [],
+  )
+
+  const dropWorkspacePanel = useCallback(
+    (
+      event: DragEvent<HTMLDivElement>,
+      targetId: WorkspacePanelId | null,
+      placement: Exclude<WorkspacePanelPlacement, 'floating'>,
+    ) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const transferred = event.dataTransfer.getData(
+        'application/x-workspace-panel',
+      )
+      const panelId =
+        draggedWorkspacePanel ??
+        (isWorkspacePanelId(transferred) ? transferred : null)
+      if (
+        panelId &&
+        (panelId !== targetId ||
+          panelLayoutRef.current.rail.placements[panelId] !== placement)
+      ) {
+        updatePanelLayout((current) => ({
+          ...current,
+          rail: placeWorkspacePanel(
+            current.rail,
+            panelId,
+            placement,
+            targetId,
+          ),
+        }))
+      }
+      setDraggedWorkspacePanel(null)
+    },
+    [draggedWorkspacePanel, updatePanelLayout],
+  )
+
+  const placeWorkspacePanelIn = useCallback(
+    (panelId: WorkspacePanelId, placement: WorkspacePanelPlacement) => {
+      updatePanelLayout((current) => ({
+        ...current,
+        rail: placeWorkspacePanel(current.rail, panelId, placement),
+      }))
+    },
+    [updatePanelLayout],
+  )
+
+  const updateWorkspaceWindowGeometry = useCallback(
+    (panelId: WorkspacePanelId, geometry: WorkspacePanelWindowGeometry) => {
+      updatePanelLayout((current) => ({
+        ...current,
+        rail: {
+          ...current.rail,
+          windows: { ...current.rail.windows, [panelId]: geometry },
+        },
+      }))
+    },
+    [updatePanelLayout],
+  )
+
+  const bringWorkspaceWindowToFront = useCallback(
+    (panelId: WorkspacePanelId) => {
+      if (panelLayoutRef.current.rail.order.at(-1) === panelId) return
+      updatePanelLayout((current) => ({
+        ...current,
+        rail: {
+          ...current.rail,
+          order: moveWorkspacePanel(current.rail.order, panelId, null),
+        },
+      }))
+    },
+    [updatePanelLayout],
+  )
+
+  const resizeWorkspacePanel = useCallback(
+    (panelId: WorkspacePanelId, height: number) => {
+      updatePanelLayout((current) => ({
+        ...current,
+        rail: {
+          ...current.rail,
+          heights: { ...current.rail.heights, [panelId]: height },
+        },
+      }))
+    },
+    [updatePanelLayout],
+  )
+
+  const redistributeWorkspacePanelHeights = useCallback(() => {
+    updatePanelLayout((current) => ({
+      ...current,
+      rail: {
+        ...current.rail,
+        heights: clearWorkspacePanelHeights(
+          current.rail.heights,
+          current.rail.visible,
+        ),
+      },
+    }))
+  }, [updatePanelLayout])
+
+  const selectManagementPanels = useCallback(
+    (nextVisible: unknown) => {
+      updatePanelLayout((current) => ({
+        ...current,
+        management: {
+          ...current.management,
+          visible: keepManagementSelection(
+            current.management.visible,
+            nextVisible,
+          ),
+        },
+      }))
+    },
+    [updatePanelLayout],
+  )
+
+  const startManagementPanelDrag = useCallback(
+    (panelId: ManagementPanelId, event: DragEvent<HTMLElement>) => {
+      event.stopPropagation()
+      setDraggedManagementPanel(panelId)
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('application/x-management-panel', panelId)
+    },
+    [],
+  )
+
+  const dropManagementPanel = useCallback(
+    (
+      event: DragEvent<HTMLDivElement>,
+      targetId: ManagementPanelId | null,
+    ) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const transferred = event.dataTransfer.getData(
+        'application/x-management-panel',
+      )
+      const panelId =
+        draggedManagementPanel ??
+        (isManagementPanelId(transferred) ? transferred : null)
+      if (panelId && panelId !== targetId) {
+        updatePanelLayout((current) => ({
+          ...current,
+          management: {
+            ...current.management,
+            order: moveManagementPanel(
+              current.management.order,
+              panelId,
+              targetId,
+            ),
+          },
+        }))
+      }
+      setDraggedManagementPanel(null)
+    },
+    [draggedManagementPanel, updatePanelLayout],
+  )
+
+  const resizeManagementPanel = useCallback(
+    (panelId: ManagementPanelId, height: number) => {
+      updatePanelLayout((current) => ({
+        ...current,
+        management: {
+          ...current.management,
+          heights: { ...current.management.heights, [panelId]: height },
+        },
+      }))
+    },
+    [updatePanelLayout],
+  )
+
+  const redistributeManagementPanelHeights = useCallback(() => {
+    updatePanelLayout((current) => ({
+      ...current,
+      management: {
+        ...current.management,
+        heights: clearManagementPanelHeights(
+          current.management.heights,
+          current.management.visible,
+        ),
+      },
+    }))
+  }, [updatePanelLayout])
 
   useEffect(() => {
     const token = authToken.get()
@@ -1393,58 +1594,130 @@ export function GameSessionPanel({
     />
   )
 
-  const tabContent =
-    sideTab === 0
+  const managementPanelTitle = (panelId: ManagementPanelId) =>
+    panelId === 'properties'
+      ? t('properties')
+      : panelId === 'trades'
+        ? t('trades')
+        : panelId === 'bank'
+          ? t('bank')
+          : t('market')
+
+  const managementPanelIcon = (panelId: ManagementPanelId) =>
+    panelId === 'properties' ? (
+      <HomeWorkRoundedIcon fontSize="small" />
+    ) : panelId === 'trades' ? (
+      <SwapHorizRoundedIcon fontSize="small" />
+    ) : panelId === 'bank' ? (
+      <AccountBalanceRoundedIcon fontSize="small" />
+    ) : (
+      <TrendingUpRoundedIcon fontSize="small" />
+    )
+
+  const managementPanelContent = (panelId: ManagementPanelId) =>
+    panelId === 'properties'
       ? propertiesContent
-      : sideTab === 1
+      : panelId === 'trades'
         ? tradesContent
-        : sideTab === 2
+        : panelId === 'bank'
           ? bankContent
           : marketContent
 
+  const visibleManagementPanels = panelLayout.management.order.filter((panelId) =>
+    panelLayout.management.visible.includes(panelId),
+  )
+  const hasCustomManagementHeights = visibleManagementPanels.some(
+    (panelId) => panelLayout.management.heights[panelId] !== undefined,
+  )
+
   const managementContent = (
-    <>
-      <Tabs
-        value={sideTab}
-        onChange={(_, value: number) => setSideTab(value)}
-        variant="scrollable"
-        scrollButtons={false}
-        aria-label={t('gamePanels')}
+    <Stack spacing={1} sx={{ flex: 1, minHeight: 0, height: '100%' }}>
+      <Stack direction="row" spacing={0.75} alignItems="center">
+        <ToggleButtonGroup
+          value={panelLayout.management.visible}
+          onChange={(_, nextVisible) => selectManagementPanels(nextVisible)}
+          size="small"
+          aria-label={t('layout.managementViews')}
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            '& .MuiToggleButton-root': { flex: 1 },
+            '& .MuiToggleButton-root.Mui-selected': {
+              color: 'primary.main',
+              bgcolor: 'rgba(184,255,61,.12)',
+            },
+          }}
+        >
+          {MANAGEMENT_PANEL_IDS.map((panelId) => {
+            const title = managementPanelTitle(panelId)
+            return (
+              <ToggleButton
+                key={panelId}
+                value={panelId}
+                aria-label={title}
+                title={title}
+              >
+                {managementPanelIcon(panelId)}
+              </ToggleButton>
+            )
+          })}
+        </ToggleButtonGroup>
+        <Tooltip title={t('layout.redistributeHeights')}>
+          <span>
+            <IconButton
+              size="small"
+              disabled={!hasCustomManagementHeights}
+              aria-label={t('layout.redistributeHeights')}
+              onClick={redistributeManagementPanelHeights}
+            >
+              <VerticalAlignCenterRoundedIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+      </Stack>
+      <Stack
+        spacing={1}
+        onDragOver={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          event.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={(event) => dropManagementPanel(event, null)}
+        sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}
       >
-        <Tab
-          value={0}
-          id="game-panel-tab-0"
-          aria-controls="game-panel-0"
-          label={t('properties')}
-        />
-        <Tab
-          value={1}
-          id="game-panel-tab-1"
-          aria-controls="game-panel-1"
-          label={t('trades')}
-        />
-        <Tab
-          value={2}
-          id="game-panel-tab-2"
-          aria-controls="game-panel-2"
-          label={t('bank')}
-        />
-        <Tab
-          value={3}
-          id="game-panel-tab-3"
-          aria-controls="game-panel-3"
-          label={t('market')}
-        />
-      </Tabs>
-      <Box
-        role="tabpanel"
-        id={`game-panel-${sideTab}`}
-        aria-labelledby={`game-panel-tab-${sideTab}`}
-        sx={{ pt: 2, minWidth: 0 }}
-      >
-        {tabContent}
-      </Box>
-    </>
+        {visibleManagementPanels.map((panelId) => {
+          const title = managementPanelTitle(panelId)
+          return (
+            <PersonalizablePanel
+              key={panelId}
+              id={`management-panel-${panelId}`}
+              title={title}
+              personalizable={isTablet}
+              height={
+                isTablet ? panelLayout.management.heights[panelId] : undefined
+              }
+              fillAvailableHeight={isTablet}
+              dragging={draggedManagementPanel === panelId}
+              dragLabel={t('layout.dragPanel', { panel: title })}
+              resizeLabel={t('layout.resizePanel', { panel: title })}
+              onDragStart={(event) => startManagementPanelDrag(panelId, event)}
+              onDragEnd={() => setDraggedManagementPanel(null)}
+              onDragOver={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                event.dataTransfer.dropEffect = 'move'
+              }}
+              onDrop={(event) => dropManagementPanel(event, panelId)}
+              onHeightChange={(height) =>
+                resizeManagementPanel(panelId, height)
+              }
+            >
+              {managementPanelContent(panelId)}
+            </PersonalizablePanel>
+          )
+        })}
+      </Stack>
+    </Stack>
   )
 
   const criticalAlerts = (
@@ -1473,6 +1746,7 @@ export function GameSessionPanel({
         >
           <RentDebtResolutionPanel
             game={game}
+            pack={pack}
             user={user}
             busy={busy}
             playerName={playerName}
@@ -1483,21 +1757,158 @@ export function GameSessionPanel({
     </>
   )
 
-  const renderSidebarPanel = (
-    panelId: PanelId,
-    zone: PanelZone,
-    personalizable = true,
+  const panelTitle = (panelId: PanelId) =>
+    panelId === 'room'
+      ? t('room')
+      : panelId === 'heatmap'
+        ? t('heatmap.title')
+        : panelId === 'players'
+          ? t('playersPanel')
+          : panelId === 'management'
+            ? t('manage')
+            : t('chat.title')
+
+  const workspacePanelTitle = (panelId: WorkspacePanelId) =>
+    panelId === 'room'
+      ? t('room')
+      : panelId === 'heatmap'
+        ? t('heatmap.title')
+        : panelId === 'players'
+          ? t('playersPanel')
+          : panelId === 'chat'
+            ? t('chat.title')
+            : managementPanelTitle(panelId)
+
+  const workspacePanelIcon = (panelId: WorkspacePanelId) =>
+    panelId === 'room' ? (
+      <MenuRoundedIcon fontSize="small" />
+    ) : panelId === 'heatmap' ? (
+      <LayersRoundedIcon fontSize="small" />
+    ) : panelId === 'players' ? (
+      <GroupsRoundedIcon fontSize="small" />
+    ) : panelId === 'chat' ? (
+      <ForumRoundedIcon fontSize="small" />
+    ) : (
+      managementPanelIcon(panelId)
+    )
+
+  const workspacePanelContent = (panelId: WorkspacePanelId) =>
+    panelId === 'room'
+      ? roomContent
+      : panelId === 'heatmap'
+        ? heatmapContent
+        : panelId === 'players'
+          ? playersContent
+          : panelId === 'chat'
+            ? (
+                <GameChatPanel
+                  game={game}
+                  user={user}
+                  chat={chat}
+                  showHeader={false}
+                  fillAvailableHeight
+                  onSend={sendChatMessage}
+                />
+              )
+            : managementPanelContent(panelId)
+
+  const visibleWorkspacePanels = panelLayout.rail.order.filter((panelId) =>
+    panelLayout.rail.visible.includes(panelId),
+  )
+  const leftWorkspacePanels = visibleWorkspacePanels.filter(
+    (panelId) => panelLayout.rail.placements[panelId] === 'left',
+  )
+  const rightWorkspacePanels = visibleWorkspacePanels.filter(
+    (panelId) => panelLayout.rail.placements[panelId] === 'right',
+  )
+  const floatingWorkspacePanels = visibleWorkspacePanels.filter(
+    (panelId) => panelLayout.rail.placements[panelId] === 'floating',
+  )
+  const dockedWorkspacePanels = [
+    ...leftWorkspacePanels,
+    ...rightWorkspacePanels,
+  ]
+  const hasCustomWorkspaceHeights = dockedWorkspacePanels.some(
+    (panelId) => panelLayout.rail.heights[panelId] !== undefined,
+  )
+
+  const renderDockedWorkspacePanel = (
+    panelId: WorkspacePanelId,
+    placement: Exclude<WorkspacePanelPlacement, 'floating'>,
   ) => {
-    const title =
-      panelId === 'room'
-        ? t('room')
-        : panelId === 'heatmap'
-          ? t('heatmap.title')
-          : panelId === 'players'
-            ? t('playersPanel')
-            : panelId === 'management'
-              ? t('manage')
-              : t('chat.title')
+    const title = workspacePanelTitle(panelId)
+    return (
+      <PersonalizablePanel
+        key={panelId}
+        id={`workspace-panel-${panelId}`}
+        title={title}
+        personalizable
+        height={panelLayout.rail.heights[panelId]}
+        fillAvailableHeight
+        dragging={draggedWorkspacePanel === panelId}
+        dragLabel={t('layout.dragPanel', { panel: title })}
+        resizeLabel={t('layout.resizePanel', { panel: title })}
+        headerActions={
+          <Tooltip title={t('layout.floatPanel', { panel: title })}>
+            <IconButton
+              size="small"
+              aria-label={t('layout.floatPanel', { panel: title })}
+              onClick={() => placeWorkspacePanelIn(panelId, 'floating')}
+            >
+              <OpenInNewRoundedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        }
+        onDragStart={(event) => startWorkspacePanelDrag(panelId, event)}
+        onDragEnd={() => setDraggedWorkspacePanel(null)}
+        onDragOver={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          event.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={(event) => dropWorkspacePanel(event, panelId, placement)}
+        onHeightChange={(height) => resizeWorkspacePanel(panelId, height)}
+      >
+        {workspacePanelContent(panelId)}
+      </PersonalizablePanel>
+    )
+  }
+
+  const renderFloatingWorkspacePanel = (panelId: WorkspacePanelId) => {
+    const title = workspacePanelTitle(panelId)
+    const geometry = panelLayout.rail.windows[panelId]
+    if (!geometry) return null
+    return (
+      <FloatingWorkspacePanel
+        key={panelId}
+        title={title}
+        geometry={geometry}
+        zIndex={100 + panelLayout.rail.order.indexOf(panelId)}
+        moveLabel={t('layout.moveWindow', { panel: title })}
+        resizeLabel={t('layout.resizeWindow', { panel: title })}
+        dockLeftLabel={t('layout.dockLeft', { panel: title })}
+        dockRightLabel={t('layout.dockRight', { panel: title })}
+        closeLabel={t('layout.closePanel', { panel: title })}
+        closeDisabled={panelLayout.rail.visible.length === 1}
+        onActivate={() => bringWorkspaceWindowToFront(panelId)}
+        onGeometryChange={(nextGeometry) =>
+          updateWorkspaceWindowGeometry(panelId, nextGeometry)
+        }
+        onDockLeft={() => placeWorkspacePanelIn(panelId, 'left')}
+        onDockRight={() => placeWorkspacePanelIn(panelId, 'right')}
+        onClose={() =>
+          selectWorkspacePanels(
+            panelLayout.rail.visible.filter((candidate) => candidate !== panelId),
+          )
+        }
+      >
+        {workspacePanelContent(panelId)}
+      </FloatingWorkspacePanel>
+    )
+  }
+
+  const renderMobilePanel = (panelId: PanelId) => {
+    const title = panelTitle(panelId)
     const content =
       panelId === 'room'
         ? roomContent
@@ -1510,50 +1921,94 @@ export function GameSessionPanel({
               : (
                   <GameChatPanel
                     game={game}
-                    user={user}
-                    chat={chat}
-                    showHeader={false}
-                    fillAvailableHeight={personalizable}
-                    onSend={sendChatMessage}
+                  user={user}
+                  chat={chat}
+                  showHeader={false}
+                  fillAvailableHeight={false}
+                  onSend={sendChatMessage}
                   />
                 )
 
     return (
       <PersonalizablePanel
         key={panelId}
-        id={`game-panel-${panelId}`}
+        id={`mobile-panel-${panelId}`}
         title={title}
-        personalizable={personalizable}
-        height={personalizable ? panelLayout.heights[panelId] : undefined}
-        defaultHeight={
-          personalizable
-            ? panelId === 'room'
-              ? 'calc(68dvh - 12px)'
-              : panelId === 'heatmap'
-                ? 'calc(32dvh - 28px)'
-                : panelId === 'players'
-                  ? '30dvh'
-                  : panelId === 'management'
-                    ? '40dvh'
-                    : 'calc(30dvh - 40px)'
-            : undefined
-        }
-        dragging={draggedPanel === panelId}
-        dragLabel={t('layout.dragPanel', { panel: title })}
-        resizeLabel={t('layout.resizePanel', { panel: title })}
-        onDragStart={(event) => startPanelDrag(panelId, event)}
-        onDragEnd={() => setDraggedPanel(null)}
-        onDragOver={(event) => {
-          event.preventDefault()
-          event.dataTransfer.dropEffect = 'move'
-        }}
-        onDrop={(event) => dropPanel(event, panelId, zone)}
-        onHeightChange={(height) => resizePanel(panelId, height)}
       >
         {content}
       </PersonalizablePanel>
     )
   }
+
+  const leftDockColumn =
+    leftWorkspacePanels.length > 0
+      ? 'clamp(260px, 24vw, 380px)'
+      : draggedWorkspacePanel
+        ? '96px'
+        : '0px'
+  const rightDockColumn =
+    rightWorkspacePanels.length > 0
+      ? 'clamp(260px, 24vw, 380px)'
+      : draggedWorkspacePanel
+        ? '96px'
+        : '0px'
+
+  const renderWorkspaceDock = (
+    placement: Exclude<WorkspacePanelPlacement, 'floating'>,
+    panelIds: WorkspacePanelId[],
+  ) => (
+    <Stack
+      gridArea={placement}
+      spacing={1}
+      onDragOver={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        event.dataTransfer.dropEffect = 'move'
+      }}
+      onDrop={(event) => dropWorkspacePanel(event, null, placement)}
+      sx={{
+        width: '100%',
+        height: '100%',
+        minWidth: 0,
+        minHeight: 0,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        overscrollBehaviorY: 'contain',
+        touchAction: 'pan-y',
+        WebkitOverflowScrolling: 'touch',
+        p: panelIds.length > 0 || draggedWorkspacePanel ? 1 : 0,
+        borderRight:
+          placement === 'left' && (panelIds.length > 0 || draggedWorkspacePanel)
+            ? '1px solid rgba(255,255,255,.08)'
+            : undefined,
+        borderLeft:
+          placement === 'right' && (panelIds.length > 0 || draggedWorkspacePanel)
+            ? '1px solid rgba(255,255,255,.08)'
+            : undefined,
+        bgcolor:
+          panelIds.length === 0 && draggedWorkspacePanel
+            ? 'rgba(184,255,61,.06)'
+            : undefined,
+        transition: 'background-color 120ms ease',
+      }}
+    >
+      {panelIds.length === 0 && draggedWorkspacePanel && (
+        <Typography
+          variant="caption"
+          color="primary.main"
+          textAlign="center"
+          sx={{ m: 'auto', writingMode: 'vertical-rl' }}
+        >
+          {placement === 'left'
+            ? t('layout.dropLeft')
+            : t('layout.dropRight')}
+        </Typography>
+      )}
+      {panelIds.map((panelId) =>
+        renderDockedWorkspacePanel(panelId, placement),
+      )}
+    </Stack>
+  )
 
   return (
     <Box
@@ -1563,6 +2018,7 @@ export function GameSessionPanel({
         height: '100dvh',
         maxHeight: '100dvh',
         overflow: 'hidden',
+        position: 'relative',
       }}
     >
       <Box
@@ -1574,45 +2030,16 @@ export function GameSessionPanel({
           gridTemplateRows: 'minmax(0, 1fr)',
           gridTemplateColumns: {
             xs: 'minmax(0, 1fr)',
-            md: 'minmax(0, 1fr) clamp(240px, 25vw, 280px)',
-            lg: 'minmax(0, 1fr) clamp(280px, 25vw, 330px)',
-            xl: 'clamp(230px, 16vw, 280px) minmax(0, 1fr) clamp(310px, 22vw, 360px)',
+            md: `${leftDockColumn} minmax(0, 1fr) ${rightDockColumn} 56px`,
           },
           gridTemplateAreas: {
             xs: '"board"',
-            md: '"board right"',
-            xl: '"left board right"',
+            md: '"left board right rail"',
           },
           gap: 0,
           alignItems: 'stretch',
         }}
       >
-        {isWide && (
-          <Stack
-            gridArea="left"
-            spacing={1.25}
-            onDragOver={(event) => {
-              event.preventDefault()
-              event.dataTransfer.dropEffect = 'move'
-            }}
-            onDrop={(event) => dropPanel(event, null, 'left')}
-            sx={{
-              height: '100%',
-              minHeight: 0,
-              overflowY: 'auto',
-              overscrollBehaviorY: 'contain',
-              scrollbarGutter: 'stable',
-              p: 1,
-              borderRight: '1px solid rgba(255,255,255,.08)',
-              '& > *': { flexShrink: 0 },
-            }}
-          >
-            {panelLayout.order
-              .filter((panelId) => panelLayout.zones[panelId] === 'left')
-              .map((panelId) => renderSidebarPanel(panelId, 'left'))}
-          </Stack>
-        )}
-
         <Stack
           gridArea="board"
           spacing={0}
@@ -1692,36 +2119,78 @@ export function GameSessionPanel({
         </Stack>
 
         {isTablet && (
-          <Stack
-            gridArea="right"
-            spacing={1.25}
-            onDragOver={(event) => {
-              event.preventDefault()
-              event.dataTransfer.dropEffect = 'move'
-            }}
-            onDrop={(event) => dropPanel(event, null, 'right')}
-            sx={{
-              height: '100%',
-              minHeight: 0,
-              overflowY: 'auto',
-              overscrollBehaviorY: 'contain',
-              touchAction: 'pan-y',
-              WebkitOverflowScrolling: 'touch',
-              scrollbarGutter: 'stable',
-              p: 1,
-              borderLeft: '1px solid rgba(255,255,255,.08)',
-              '& > *': { flexShrink: 0 },
-            }}
-          >
-            {panelLayout.order
-              .filter(
-                (panelId) =>
-                  !isWide || panelLayout.zones[panelId] === 'right',
-              )
-              .map((panelId) => renderSidebarPanel(panelId, 'right'))}
-          </Stack>
+          <>
+            {renderWorkspaceDock('left', leftWorkspacePanels)}
+            {renderWorkspaceDock('right', rightWorkspacePanels)}
+            <Stack
+              gridArea="rail"
+              alignItems="center"
+              sx={{
+                height: '100%',
+                minHeight: 0,
+                py: 1,
+                px: 0.5,
+                borderLeft: '1px solid rgba(255,255,255,.1)',
+                bgcolor: 'rgba(10,8,18,.96)',
+                position: 'relative',
+                zIndex: 500,
+              }}
+            >
+              <ToggleButtonGroup
+                orientation="vertical"
+                value={panelLayout.rail.visible}
+                onChange={(_, nextVisible) =>
+                  selectWorkspacePanels(nextVisible)
+                }
+                size="small"
+                aria-label={t('layout.workspaceViews')}
+                sx={{
+                  width: '100%',
+                  '& .MuiToggleButton-root': {
+                    width: '100%',
+                    minWidth: 0,
+                    minHeight: 42,
+                    px: 0.5,
+                  },
+                  '& .MuiToggleButton-root.Mui-selected': {
+                    color: 'primary.main',
+                    bgcolor: 'rgba(184,255,61,.14)',
+                  },
+                }}
+              >
+                {WORKSPACE_PANEL_IDS.map((panelId) => {
+                  const title = workspacePanelTitle(panelId)
+                  return (
+                    <ToggleButton
+                      key={panelId}
+                      value={panelId}
+                      aria-label={title}
+                      title={title}
+                    >
+                      {workspacePanelIcon(panelId)}
+                    </ToggleButton>
+                  )
+                })}
+              </ToggleButtonGroup>
+              <Box sx={{ flex: 1 }} />
+              <Tooltip title={t('layout.redistributeHeights')} placement="left">
+                <span>
+                  <IconButton
+                    size="small"
+                    disabled={!hasCustomWorkspaceHeights}
+                    aria-label={t('layout.redistributeHeights')}
+                    onClick={redistributeWorkspacePanelHeights}
+                  >
+                    <VerticalAlignCenterRoundedIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Stack>
+          </>
         )}
       </Box>
+
+      {isTablet && floatingWorkspacePanels.map(renderFloatingWorkspacePanel)}
 
       {!isTablet && (
         <>
@@ -1799,15 +2268,15 @@ export function GameSessionPanel({
             </Stack>
             <Box sx={{ overflow: 'auto' }}>
               {mobilePanel === 'room' &&
-                renderSidebarPanel('room', 'left', false)}
+                renderMobilePanel('room')}
               {mobilePanel === 'players' &&
-                renderSidebarPanel('players', 'right', false)}
+                renderMobilePanel('players')}
               {mobilePanel === 'manage' &&
-                renderSidebarPanel('management', 'right', false)}
+                renderMobilePanel('management')}
               {mobilePanel === 'heatmap' &&
-                renderSidebarPanel('heatmap', 'left', false)}
+                renderMobilePanel('heatmap')}
               {mobilePanel === 'chat' &&
-                renderSidebarPanel('chat', 'right', false)}
+                renderMobilePanel('chat')}
             </Box>
           </Drawer>
         </>

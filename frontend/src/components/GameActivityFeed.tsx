@@ -28,6 +28,7 @@ import {
   activityPresentation,
   type ActivityTone,
 } from './gameActivityFeedPresentation'
+import { institutionRevenueSourceKey } from './institutionRevenue'
 
 interface Props {
   events: GameEvent[]
@@ -377,6 +378,27 @@ function eventMessage(
         amount,
       })
     case 'debt.plan_proposed':
+      if (numberValue(event, 'installments') === 0) {
+        return t('activity.debtPropertySettlementProposed', {
+          creditor: playerName(textValue(event, 'creditor_id')),
+          debtor: playerName(textValue(event, 'debtor_id')),
+          properties: Array.isArray(event.data.requested_property_ids)
+            ? event.data.requested_property_ids.length
+            : 0,
+        })
+      }
+      if (
+        Array.isArray(event.data.requested_property_ids) &&
+        event.data.requested_property_ids.length > 0
+      ) {
+        return t('activity.debtMixedSettlementProposed', {
+          creditor: playerName(textValue(event, 'creditor_id')),
+          debtor: playerName(textValue(event, 'debtor_id')),
+          total: numberValue(event, 'total_amount'),
+          installments: numberValue(event, 'installments'),
+          properties: event.data.requested_property_ids.length,
+        })
+      }
       return t('activity.debtPlanProposed', {
         creditor: playerName(textValue(event, 'creditor_id')),
         debtor: playerName(textValue(event, 'debtor_id')),
@@ -569,6 +591,11 @@ function eventMessage(
         amount: `$${numberValue(event, 'dividends') ?? 0}`,
       })
     case 'investment.institution_revenue': {
+      const source = t(
+        `bankPanel.activity.revenueSources.${institutionRevenueSourceKey(
+          textValue(event, 'revenue_type'),
+        )}`,
+      )
       if (numberValue(event, 'dividend_accrued_units') !== undefined) {
         const paid = numberValue(event, 'dividends') ?? 0
         return t(
@@ -578,6 +605,7 @@ function eventMessage(
           {
             instrument: investment,
             amount: `$${amount ?? 0}`,
+            source,
             accrued: preciseMoney(
               numberValue(event, 'dividend_accrued_units') ?? 0,
               locale,
@@ -589,6 +617,7 @@ function eventMessage(
       return t('bankPanel.activity.institutionRevenue', {
         instrument: investment,
         amount: `$${amount ?? 0}`,
+        source,
         dividends: `$${numberValue(event, 'dividends') ?? 0}`,
       })
     }

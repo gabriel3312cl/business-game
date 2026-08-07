@@ -3623,6 +3623,15 @@ class GameService:
             plan.remaining_amount + plan.installments_remaining - 1
         ) // plan.installments_remaining
 
+    def _rent_debt_settlement_amount(
+        self,
+        game: GameState,
+        debt: DebtState,
+    ) -> int:
+        if debt.installment_plan_id is None:
+            return debt.amount
+        return self._rent_plan(game, debt.installment_plan_id).remaining_amount
+
     def _require_custom_rent_debt(self, game: GameState) -> DebtState:
         debt = game.active_debt
         if not game.settings.rules.custom_rent_debts_enabled:
@@ -3641,14 +3650,12 @@ class GameService:
             game.settings.rules.custom_rent_debts_enabled
             and debt is not None
             and debt.creditor_id is not None
-            and debt.reason is DebtReason.RENT
+            and debt.reason in {DebtReason.RENT, DebtReason.RENT_INSTALLMENT}
             and not debt.collection_demanded
         )
 
     def _demand_rent_debt(self, game: GameState, actor_id: UUID) -> None:
         debt = self._require_custom_rent_debt(game)
-        if debt.reason is not DebtReason.RENT or debt.installment_plan_id is not None:
-            raise ConflictError("only an original rent debt can be demanded")
         if debt.creditor_id != actor_id:
             raise ForbiddenError("only the rent creditor can demand payment")
         if debt.collection_demanded:
@@ -3699,31 +3706,44 @@ class GameService:
         command: ProposeRentDebtPlanCommand,
     ) -> None:
         debt = self._require_custom_rent_debt(game)
-        if debt.reason is not DebtReason.RENT or debt.installment_plan_id is not None:
-            raise ConflictError("an installment debt cannot be financed again")
         if debt.creditor_id != actor_id:
             raise ForbiddenError("only the rent creditor can propose payment terms")
-        if debt.collection_demanded:
+        if debt.reason is DebtReason.RENT and debt.collection_demanded:
             raise ConflictError("payment has already been demanded")
+        settlement_amount = self._rent_debt_settlement_amount(game, debt)
+        self._validate_trade_assets(
+            game,
+            proposer_id=actor_id,
+            recipient_id=debt.debtor_id,
+            offered_cash=0,
+            requested_cash=0,
+            offered_property_ids=[],
+            requested_property_ids=command.requested_property_ids,
+        )
         debt.plan_proposal = RentDebtPlanProposal(
             installments=command.installments,
             interest_percent=command.interest_percent,
             template=command.template,
+            requested_property_ids=command.requested_property_ids,
         )
+        debt.collection_demanded = False
         total_amount = (
-            debt.amount * (100 + command.interest_percent) + 99
-        ) // 100
+            (settlement_amount * (100 + command.interest_percent) + 99) // 100
+            if command.installments
+            else 0
+        )
         self._append_event(
             game,
             "debt.plan_proposed",
             {
                 "debtor_id": str(debt.debtor_id),
                 "creditor_id": str(actor_id),
-                "original_amount": debt.amount,
+                "original_amount": settlement_amount,
                 "total_amount": total_amount,
                 "installments": command.installments,
                 "interest_percent": command.interest_percent,
                 "template": command.template.value,
+                "requested_property_ids": command.requested_property_ids,
                 "tile_id": debt.tile_id,
             },
         )
@@ -3732,43 +3752,70 @@ class GameService:
         debt = self._require_custom_rent_debt(game)
         if debt.debtor_id != actor_id:
             raise ForbiddenError("only the debtor can accept the payment plan")
-        if debt.reason is not DebtReason.RENT or debt.installment_plan_id is not None:
-            raise ConflictError("an installment debt cannot be financed again")
         proposal = debt.plan_proposal
         if proposal is None:
             raise ConflictError("there is no payment plan to accept")
         assert debt.creditor_id is not None
-        total_amount = (
-            debt.amount * (100 + proposal.interest_percent) + 99
-        ) // 100
-        plan = RentDebtPlanState(
-            debtor_id=debt.debtor_id,
-            creditor_id=debt.creditor_id,
-            tile_id=debt.tile_id,
-            original_amount=debt.amount,
-            interest_percent=proposal.interest_percent,
-            total_amount=total_amount,
-            remaining_amount=total_amount,
-            installments_total=proposal.installments,
-            installments_remaining=proposal.installments,
-            template=proposal.template,
-            created_at_sequence=game.event_sequence + 1,
+        replaced_plan = (
+            self._rent_plan(game, debt.installment_plan_id)
+            if debt.installment_plan_id is not None
+            else None
         )
-        game.rent_debt_plans.append(plan)
+        settlement_amount = (
+            replaced_plan.remaining_amount if replaced_plan is not None else debt.amount
+        )
+        self._validate_trade_assets(
+            game,
+            proposer_id=debt.creditor_id,
+            recipient_id=debt.debtor_id,
+            offered_cash=0,
+            requested_cash=0,
+            offered_property_ids=[],
+            requested_property_ids=proposal.requested_property_ids,
+        )
+        for property_id in proposal.requested_property_ids:
+            game.owners[property_id] = debt.creditor_id
+        if replaced_plan is not None:
+            game.rent_debt_plans.remove(replaced_plan)
+        total_amount = (
+            (settlement_amount * (100 + proposal.interest_percent) + 99) // 100
+            if proposal.installments
+            else 0
+        )
+        plan = None
+        if proposal.installments:
+            plan = RentDebtPlanState(
+                debtor_id=debt.debtor_id,
+                creditor_id=debt.creditor_id,
+                tile_id=debt.tile_id,
+                original_amount=settlement_amount,
+                interest_percent=proposal.interest_percent,
+                total_amount=total_amount,
+                remaining_amount=total_amount,
+                installments_total=proposal.installments,
+                installments_remaining=proposal.installments,
+                template=proposal.template,
+                created_at_sequence=game.event_sequence + 1,
+            )
+            game.rent_debt_plans.append(plan)
         game.active_debt = None
         self._append_event(
             game,
             "debt.plan_accepted",
             {
-                "plan_id": str(plan.id),
-                "debtor_id": str(plan.debtor_id),
-                "creditor_id": str(plan.creditor_id),
-                "original_amount": plan.original_amount,
-                "total_amount": plan.total_amount,
-                "installments": plan.installments_total,
-                "interest_percent": plan.interest_percent,
-                "template": plan.template.value,
-                "tile_id": plan.tile_id,
+                "plan_id": str(plan.id) if plan else None,
+                "replaced_plan_id": (
+                    str(replaced_plan.id) if replaced_plan is not None else None
+                ),
+                "debtor_id": str(debt.debtor_id),
+                "creditor_id": str(debt.creditor_id),
+                "original_amount": settlement_amount,
+                "total_amount": total_amount,
+                "installments": proposal.installments,
+                "interest_percent": proposal.interest_percent,
+                "template": proposal.template.value,
+                "requested_property_ids": proposal.requested_property_ids,
+                "tile_id": debt.tile_id,
             },
         )
         self._process_card_payments(game)
@@ -3842,7 +3889,7 @@ class GameService:
                     reason=DebtReason.RENT_INSTALLMENT,
                     tile_id=plan.tile_id,
                     installment_plan_id=plan.id,
-                    collection_demanded=True,
+                    collection_demanded=False,
                 )
                 self._append_event(
                     game,

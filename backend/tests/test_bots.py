@@ -37,7 +37,10 @@ from business_game.domain.models import (
     PayDebtCommand,
     PlayerState,
     ProposeTradeCommand,
+    RejectRentDebtPlanCommand,
     RejectTradeCommand,
+    RentDebtPlanProposal,
+    RentDebtPlanTemplate,
     RequestLoanCommand,
     RollCommand,
     SellGroupRoundCommand,
@@ -290,6 +293,24 @@ def test_bot_waits_for_human_creditor_rent_choice(packs_dir: Path) -> None:
     )
 
     assert BotPolicy().choose_action(game, pack) is None
+
+    game.active_debt.reason = DebtReason.RENT_INSTALLMENT
+    assert BotPolicy().choose_action(game, pack) is None
+    game.active_debt.reason = DebtReason.RENT
+
+    requested_property = next(tile for tile in pack.board.tiles if tile.is_purchasable)
+    game.owners[requested_property.id] = debtor.user_id
+    game.active_debt.amount = 1
+    game.active_debt.plan_proposal = RentDebtPlanProposal(
+        installments=0,
+        interest_percent=0,
+        template=RentDebtPlanTemplate.CUSTOM,
+        requested_property_ids=[requested_property.id],
+    )
+    action = BotPolicy().choose_action(game, pack)
+    assert action is not None
+    assert isinstance(action.command, RejectRentDebtPlanCommand)
+    game.active_debt.plan_proposal = None
 
     creditor.is_bot = True
     creditor.bot_personality = BotPersonality.BALANCED

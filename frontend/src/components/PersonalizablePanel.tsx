@@ -24,10 +24,12 @@ interface Props {
   children: ReactNode
   height?: number
   defaultHeight?: number | string
+  fillAvailableHeight?: boolean
   personalizable?: boolean
   dragging?: boolean
   dragLabel?: string
   resizeLabel?: string
+  headerActions?: ReactNode
   onDragStart?: (event: DragEvent<HTMLElement>) => void
   onDragEnd?: () => void
   onDragOver?: (event: DragEvent<HTMLDivElement>) => void
@@ -48,10 +50,12 @@ export function PersonalizablePanel({
   children,
   height,
   defaultHeight,
+  fillAvailableHeight = false,
   personalizable = false,
   dragging = false,
   dragLabel,
   resizeLabel,
+  headerActions,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -66,6 +70,8 @@ export function PersonalizablePanel({
   useEffect(() => setDraftHeight(null), [height])
 
   const currentHeight = draftHeight ?? height ?? defaultHeight
+  const fillsAvailableHeight = expanded && fillAvailableHeight && !currentHeight
+  const keepsContentHeight = expanded && Boolean(currentHeight)
 
   const handleResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
     const measuredHeight = panelRef.current?.getBoundingClientRect().height
@@ -116,10 +122,11 @@ export function PersonalizablePanel({
       sx={{
         position: 'relative',
         minWidth: 0,
-        height: expanded && currentHeight ? currentHeight : 'auto',
-        minHeight: expanded && currentHeight ? MIN_PANEL_HEIGHT : undefined,
-        maxHeight: expanded && currentHeight ? 'calc(100dvh - 16px)' : undefined,
-        flexShrink: 0,
+        height: keepsContentHeight ? currentHeight : 'auto',
+        minHeight:
+          keepsContentHeight || fillsAvailableHeight ? MIN_PANEL_HEIGHT : undefined,
+        maxHeight: keepsContentHeight ? 'calc(100dvh - 16px)' : undefined,
+        flex: fillsAvailableHeight ? '1 1 0' : '0 0 auto',
         opacity: dragging ? 0.55 : 1,
         transition: 'opacity 120ms ease',
       }}
@@ -130,7 +137,7 @@ export function PersonalizablePanel({
         disableGutters
         sx={{
           minWidth: 0,
-          height: expanded && currentHeight ? '100%' : 'auto',
+          height: keepsContentHeight || fillsAvailableHeight ? '100%' : 'auto',
           display: 'flex',
           flexDirection: 'column',
           border: '1px solid rgba(255,255,255,.08)',
@@ -138,7 +145,7 @@ export function PersonalizablePanel({
           bgcolor: 'background.paper',
           overflow: 'hidden',
           '&::before': { display: 'none' },
-          ...(expanded && currentHeight
+          ...(keepsContentHeight || fillsAvailableHeight
             ? {
                 '& > .MuiCollapse-root': {
                   minHeight: 0,
@@ -195,12 +202,25 @@ export function PersonalizablePanel({
           <Typography fontWeight={850} noWrap title={title}>
             {title}
           </Typography>
+          {headerActions && (
+            <Box
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+              sx={{
+                ml: 'auto',
+                display: 'inline-flex',
+                alignItems: 'center',
+              }}
+            >
+              {headerActions}
+            </Box>
+          )}
         </AccordionSummary>
         <AccordionDetails
           id={`${id}-content`}
           sx={{
             minHeight: 0,
-            flex: expanded && currentHeight ? 1 : '0 0 auto',
+            flex: keepsContentHeight || fillsAvailableHeight ? 1 : '0 0 auto',
             display: 'flex',
             flexDirection: 'column',
             overflowY: 'auto',

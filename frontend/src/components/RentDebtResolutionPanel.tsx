@@ -1,7 +1,13 @@
 import {
+  Box,
   Button,
+  Checkbox,
+  Chip,
   FormControl,
+  FormControlLabel,
   InputLabel,
+  ListItemText,
+  ListSubheader,
   MenuItem,
   Select,
   Stack,
@@ -13,12 +19,15 @@ import { useTranslation } from 'react-i18next'
 import type {
   GameCommand,
   GameState,
+  ContentPack,
   RentDebtPlanTemplate,
   User,
 } from '../types'
+import { groupPropertyIds } from './propertyGrouping'
 
 interface Props {
   game: GameState
+  pack: ContentPack
   user: User
   busy: boolean
   playerName: (playerId: string | null) => string
@@ -36,6 +45,7 @@ const TEMPLATES: Record<
 
 export function RentDebtResolutionPanel({
   game,
+  pack,
   user,
   busy,
   playerName,
@@ -53,6 +63,12 @@ export function RentDebtResolutionPanel({
   const [interestPercent, setInterestPercent] = useState(
     proposal?.interest_percent ?? TEMPLATES.standard.interestPercent,
   )
+  const [includeInstallments, setIncludeInstallments] = useState(
+    proposal ? proposal.installments > 0 : true,
+  )
+  const [requestedPropertyIds, setRequestedPropertyIds] = useState<string[]>(
+    proposal?.requested_property_ids ?? [],
+  )
 
   useEffect(() => {
     setTemplate(proposal?.template ?? 'standard')
@@ -60,6 +76,8 @@ export function RentDebtResolutionPanel({
     setInterestPercent(
       proposal?.interest_percent ?? TEMPLATES.standard.interestPercent,
     )
+    setIncludeInstallments(proposal ? proposal.installments > 0 : true)
+    setRequestedPropertyIds(proposal?.requested_property_ids ?? [])
   }, [debt?.debtor_id, debt?.tile_id, proposal])
 
   const activePlan = useMemo(
@@ -82,11 +100,43 @@ export function RentDebtResolutionPanel({
     (debt.reason === 'rent' || debt.reason === 'rent_installment')
   const debtorCanResolve =
     !isCustomRentDebt ||
-    debt.reason === 'rent_installment' ||
     debt.collection_demanded
+  const settlementAmount = activePlan?.remaining_amount ?? debt.amount
   const totalWithInterest = Math.ceil(
-    (debt.amount * (100 + interestPercent)) / 100,
+    (settlementAmount * (100 + interestPercent)) / 100,
   )
+  const debtorPropertyIds = Object.entries(game.owners)
+    .filter(
+      ([propertyId, ownerId]) =>
+        ownerId === debt.debtor_id &&
+        (game.building_levels[propertyId] ?? 0) === 0,
+    )
+    .map(([propertyId]) => propertyId)
+  const debtorPropertyGroups = groupPropertyIds(pack, debtorPropertyIds)
+  const propertyName = (propertyId: string) => {
+    const tile = pack.board.tiles.find((candidate) => candidate.id === propertyId)
+    return tile ? pack.messages[tile.name_key] : propertyId
+  }
+  const propertyContext = (propertyId: string) => {
+    const tile = pack.board.tiles.find((candidate) => candidate.id === propertyId)
+    const group = pack.board.groups?.find(
+      (candidate) => candidate.id === tile?.group,
+    )
+    const ownedInGroup = tile?.group
+      ? pack.board.tiles.filter(
+          (candidate) =>
+            candidate.group === tile.group && game.owners[candidate.id] === user.id,
+        ).length
+      : 0
+    return {
+      name: tile ? pack.messages[tile.name_key] : propertyId,
+      groupName: group
+        ? (pack.messages[group.name_key] ?? group.id)
+        : t('rentDebt.noPropertyGroup'),
+      color: group?.color ?? tile?.color ?? '#8f8a9d',
+      ownedInGroup,
+    }
+  }
 
   const selectTemplate = (next: RentDebtPlanTemplate) => {
     setTemplate(next)
@@ -115,15 +165,28 @@ export function RentDebtResolutionPanel({
       )}
 
       {proposal && (
-        <Typography variant="caption" fontWeight={700}>
-          {t('rentDebt.proposalSummary', {
-            total: Math.ceil(
-              (debt.amount * (100 + proposal.interest_percent)) / 100,
-            ),
-            installments: proposal.installments,
-            interest: proposal.interest_percent,
-          })}
-        </Typography>
+        <Stack spacing={0.25}>
+          {proposal.installments > 0 && (
+            <Typography variant="caption" fontWeight={700}>
+              {t('rentDebt.proposalSummary', {
+                total: Math.ceil(
+                  (settlementAmount * (100 + proposal.interest_percent)) / 100,
+                ),
+                installments: proposal.installments,
+                interest: proposal.interest_percent,
+              })}
+            </Typography>
+          )}
+          {proposal.requested_property_ids.length > 0 && (
+            <Typography variant="caption" fontWeight={700}>
+              {t('rentDebt.proposalProperties', {
+                properties: proposal.requested_property_ids
+                  .map(propertyName)
+                  .join(', '),
+              })}
+            </Typography>
+          )}
+        </Stack>
       )}
 
       {isDebtor && proposal && (
@@ -174,117 +237,256 @@ export function RentDebtResolutionPanel({
 
       {isCustomRentDebt && isCreditor && (
         <Stack spacing={1}>
-          {activePlan ? (
-            <Button
-              color="inherit"
-              variant="outlined"
-              disabled={busy}
-              onClick={() => void onCommand({ action: 'forgive_rent_debt' })}
-              sx={{ alignSelf: 'flex-start' }}
-            >
-              {t('rentDebt.forgivePlan')}
-            </Button>
-          ) : debt.collection_demanded ? (
+          {debt.collection_demanded && !activePlan ? (
             <Typography variant="caption" fontWeight={700}>
               {t('rentDebt.collectionDemanded')}
             </Typography>
           ) : (
             <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-              <Button
-                color="inherit"
-                variant="contained"
-                disabled={busy}
-                onClick={() => void onCommand({ action: 'demand_rent_debt' })}
-              >
-                {t('rentDebt.demandNow')}
-              </Button>
+              {!debt.collection_demanded && (
+                <Button
+                  color="inherit"
+                  variant="contained"
+                  disabled={busy}
+                  onClick={() => void onCommand({ action: 'demand_rent_debt' })}
+                >
+                  {t('rentDebt.demandNow')}
+                </Button>
+              )}
               <Button
                 color="inherit"
                 variant="outlined"
                 disabled={busy}
                 onClick={() => void onCommand({ action: 'forgive_rent_debt' })}
               >
-                {t('rentDebt.forgiveDebt')}
+                {activePlan
+                  ? t('rentDebt.forgivePlan')
+                  : t('rentDebt.forgiveDebt')}
               </Button>
             </Stack>
           )}
 
-          {debt.reason === 'rent' && !debt.collection_demanded && (
+          {((debt.reason === 'rent' && !debt.collection_demanded) ||
+            activePlan) && (
             <>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                <FormControl size="small" sx={{ minWidth: 150 }}>
-                  <InputLabel>{t('rentDebt.template')}</InputLabel>
-                  <Select
-                    value={template}
-                    label={t('rentDebt.template')}
-                    disabled={busy}
-                    onChange={(event) =>
-                      selectTemplate(event.target.value as RentDebtPlanTemplate)
-                    }
-                  >
-                    {(
-                      ['friendly', 'standard', 'flexible', 'custom'] as const
-                    ).map((option) => (
-                      <MenuItem key={option} value={option}>
-                        {t(`rentDebt.templates.${option}`)}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <TextField
-                  size="small"
-                  type="number"
-                  label={t('rentDebt.installments')}
-                  value={installments}
-                  disabled={busy}
-                  slotProps={{ htmlInput: { min: 2, max: 12 } }}
+              {activePlan && (
+                <Typography variant="caption" fontWeight={700}>
+                  {t('rentDebt.renegotiateBalance', {
+                    amount: activePlan.remaining_amount,
+                  })}
+                </Typography>
+              )}
+              <FormControl size="small" sx={{ width: '100%' }}>
+                <InputLabel>{t('rentDebt.requestProperties')}</InputLabel>
+                <Select
+                  multiple
+                  value={requestedPropertyIds}
+                  label={t('rentDebt.requestProperties')}
+                  disabled={busy || debtorPropertyIds.length === 0}
                   onChange={(event) => {
-                    setTemplate('custom')
-                    setInstallments(Number(event.target.value))
+                    const value = event.target.value
+                    setRequestedPropertyIds(
+                      typeof value === 'string' ? value.split(',') : value,
+                    )
                   }}
-                />
-                <TextField
-                  size="small"
-                  type="number"
-                  label={t('rentDebt.interest')}
-                  value={interestPercent}
-                  disabled={busy}
-                  slotProps={{ htmlInput: { min: 0, max: 100 } }}
-                  onChange={(event) => {
-                    setTemplate('custom')
-                    setInterestPercent(Number(event.target.value))
-                  }}
-                />
-              </Stack>
+                  renderValue={(selected) => (
+                    <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+                      {selected.map((propertyId) => {
+                        const context = propertyContext(propertyId)
+                        return (
+                          <Chip
+                            key={propertyId}
+                            size="small"
+                            label={`${context.name}${
+                              context.ownedInGroup > 0
+                                ? ` · +${context.ownedInGroup}`
+                                : ''
+                            }`}
+                            sx={{
+                              borderLeft: `5px solid ${context.color}`,
+                              bgcolor: `${context.color}18`,
+                            }}
+                          />
+                        )
+                      })}
+                    </Stack>
+                  )}
+                >
+                  {debtorPropertyGroups.flatMap((group) => [
+                    <ListSubheader
+                      key={`${group.key}:header`}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                        py: 0.75,
+                        color: 'text.primary',
+                        bgcolor: 'background.paper',
+                        borderBottom: `1px solid ${group.accent}55`,
+                      }}
+                    >
+                      <Box
+                        aria-hidden="true"
+                        sx={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: '50%',
+                          bgcolor: group.accent,
+                          boxShadow: `0 0 8px ${group.accent}88`,
+                        }}
+                      />
+                      <Box component="span" sx={{ flexGrow: 1, fontWeight: 850 }}>
+                        {group.name ?? t(`tileKind.${group.kind}`)}
+                      </Box>
+                      <Chip size="small" label={group.propertyIds.length} />
+                    </ListSubheader>,
+                    ...group.propertyIds.map((propertyId) => {
+                      const context = propertyContext(propertyId)
+                      return (
+                        <MenuItem key={propertyId} value={propertyId}>
+                          <Box
+                            aria-hidden="true"
+                            sx={{
+                              width: 8,
+                              height: 36,
+                              flexShrink: 0,
+                              borderRadius: 1,
+                              bgcolor: context.color,
+                              boxShadow: `0 0 9px ${context.color}66`,
+                            }}
+                          />
+                          <Checkbox
+                            checked={requestedPropertyIds.includes(propertyId)}
+                          />
+                          <ListItemText
+                            primary={context.name}
+                            secondary={context.groupName}
+                          />
+                          {context.ownedInGroup > 0 && (
+                            <Chip
+                              size="small"
+                              label={t('rentDebt.ownedInPropertyGroup', {
+                                count: context.ownedInGroup,
+                              })}
+                              sx={{
+                                ml: 1,
+                                fontWeight: 800,
+                                color: context.color,
+                                borderColor: `${context.color}99`,
+                                bgcolor: `${context.color}14`,
+                              }}
+                              variant="outlined"
+                            />
+                          )}
+                        </MenuItem>
+                      )
+                    }),
+                  ])}
+                </Select>
+              </FormControl>
+              {debtorPropertyIds.length === 0 && (
+                <Typography variant="caption">
+                  {t('rentDebt.noTransferableProperties')}
+                </Typography>
+              )}
               <Typography variant="caption">
-                {t('rentDebt.preview', {
-                  total: totalWithInterest,
-                  installments,
-                })}
+                {t('rentDebt.propertyTermsHelp')}
               </Typography>
+
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={includeInstallments}
+                    disabled={busy}
+                    onChange={(_, checked) => setIncludeInstallments(checked)}
+                  />
+                }
+                label={t('rentDebt.includeInstallments')}
+              />
+
+              {includeInstallments && (
+                <>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                    <FormControl size="small" sx={{ minWidth: 150 }}>
+                      <InputLabel>{t('rentDebt.template')}</InputLabel>
+                      <Select
+                        value={template}
+                        label={t('rentDebt.template')}
+                        disabled={busy}
+                        onChange={(event) =>
+                          selectTemplate(
+                            event.target.value as RentDebtPlanTemplate,
+                          )
+                        }
+                      >
+                        {(
+                          ['friendly', 'standard', 'flexible', 'custom'] as const
+                        ).map((option) => (
+                          <MenuItem key={option} value={option}>
+                            {t(`rentDebt.templates.${option}`)}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <TextField
+                      size="small"
+                      type="number"
+                      label={t('rentDebt.installments')}
+                      value={installments}
+                      disabled={busy}
+                      slotProps={{ htmlInput: { min: 2, max: 12 } }}
+                      onChange={(event) => {
+                        setTemplate('custom')
+                        setInstallments(Number(event.target.value))
+                      }}
+                    />
+                    <TextField
+                      size="small"
+                      type="number"
+                      label={t('rentDebt.interest')}
+                      value={interestPercent}
+                      disabled={busy}
+                      slotProps={{ htmlInput: { min: 0, max: 100 } }}
+                      onChange={(event) => {
+                        setTemplate('custom')
+                        setInterestPercent(Number(event.target.value))
+                      }}
+                    />
+                  </Stack>
+                  <Typography variant="caption">
+                    {t('rentDebt.preview', {
+                      total: totalWithInterest,
+                      installments,
+                    })}
+                  </Typography>
+                </>
+              )}
               <Button
                 color="inherit"
                 variant="contained"
                 disabled={
                   busy ||
-                  installments < 2 ||
-                  installments > 12 ||
-                  interestPercent < 0 ||
-                  interestPercent > 100
+                  (!includeInstallments && requestedPropertyIds.length === 0) ||
+                  (includeInstallments &&
+                    (installments < 2 ||
+                      installments > 12 ||
+                      interestPercent < 0 ||
+                      interestPercent > 100))
                 }
                 onClick={() =>
                   void onCommand({
                     action: 'propose_rent_debt_plan',
-                    installments,
-                    interest_percent: interestPercent,
-                    template,
+                    installments: includeInstallments ? installments : 0,
+                    interest_percent: includeInstallments ? interestPercent : 0,
+                    template: includeInstallments ? template : 'custom',
+                    requested_property_ids: requestedPropertyIds,
                   })
                 }
                 sx={{ alignSelf: 'flex-start' }}
               >
                 {proposal
-                  ? t('rentDebt.updatePlan')
-                  : t('rentDebt.proposePlan')}
+                  ? t('rentDebt.updateSettlement')
+                  : t('rentDebt.proposeSettlement')}
               </Button>
             </>
           )}

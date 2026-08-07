@@ -21,6 +21,7 @@ import {
   IconButton,
   InputLabel,
   ListItemText,
+  ListSubheader,
   MenuItem,
   Paper,
   Select,
@@ -47,6 +48,7 @@ import type {
 } from '../types'
 import { perimeterPosition } from './boardGeometry'
 import { playerColors } from './gameColors'
+import { groupPropertyIds } from './propertyGrouping'
 import { defaultTileColor } from './tilePresentation'
 
 const AdvisorMarkdown = lazy(() => import('../advisor/AdvisorMarkdown'))
@@ -584,6 +586,8 @@ export function GameTradePanel({
                 selectedPropertyIds={offeredPropertyIds}
                 onPropertyChange={setOfferedPropertyIds}
                 pack={pack}
+                game={game}
+                viewerId={user.id}
               />
               <SwapHorizRoundedIcon
                 color="secondary"
@@ -600,6 +604,8 @@ export function GameTradePanel({
                 selectedPropertyIds={requestedPropertyIds}
                 onPropertyChange={setRequestedPropertyIds}
                 pack={pack}
+                game={game}
+                viewerId={user.id}
               />
             </Box>
           )}
@@ -658,6 +664,7 @@ function TradeDetailSide({
   pack,
 }: TradeDetailSideProps) {
   const { t } = useTranslation()
+  const propertyGroups = groupPropertyIds(pack, propertyIds)
   return (
     <Box
       sx={{
@@ -677,9 +684,32 @@ function TradeDetailSide({
         {t('properties')}
       </Typography>
       {propertyIds.length > 0 ? (
-        <Stack spacing={1}>
-          {propertyIds.map((propertyId) => (
-            <TradePropertyCard key={propertyId} propertyId={propertyId} pack={pack} />
+        <Stack spacing={1.5}>
+          {propertyGroups.map((group) => (
+            <Stack key={group.key} spacing={0.75}>
+              <Stack direction="row" alignItems="center" spacing={0.75}>
+                <Box
+                  aria-hidden="true"
+                  sx={{
+                    width: 11,
+                    height: 11,
+                    borderRadius: '50%',
+                    bgcolor: group.accent,
+                  }}
+                />
+                <Typography variant="caption" fontWeight={850}>
+                  {group.name ?? t(`tileKind.${group.kind}`)}
+                </Typography>
+                <Chip size="small" label={group.propertyIds.length} />
+              </Stack>
+              {group.propertyIds.map((propertyId) => (
+                <TradePropertyCard
+                  key={propertyId}
+                  propertyId={propertyId}
+                  pack={pack}
+                />
+              ))}
+            </Stack>
           ))}
         </Stack>
       ) : (
@@ -1016,6 +1046,8 @@ interface TradeSideProps {
   selectedPropertyIds: string[]
   onPropertyChange: (propertyIds: string[]) => void
   pack: ContentPack
+  game: GameState
+  viewerId: string
 }
 
 function TradeSide({
@@ -1026,8 +1058,11 @@ function TradeSide({
   selectedPropertyIds,
   onPropertyChange,
   pack,
+  game,
+  viewerId,
 }: TradeSideProps) {
   const { t } = useTranslation()
+  const propertyGroups = groupPropertyIds(pack, propertyIds)
   return (
     <Stack spacing={2}>
       <Typography variant="h6" fontWeight={850} textAlign="center">
@@ -1057,28 +1092,80 @@ function TradeSide({
             t('selectedProperties', { count: selected.length })
           }
         >
-          {propertyIds.map((propertyId) => {
-            const info = tradePropertyInfo(pack, propertyId)
-            return (
-              <MenuItem
-                key={propertyId}
-                value={propertyId}
-                sx={{ borderLeft: `4px solid ${info?.accent ?? 'transparent'}` }}
-              >
-                <Checkbox checked={selectedPropertyIds.includes(propertyId)} />
-                <ListItemText
-                  primary={info?.name ?? propertyId}
-                  secondary={t('tradePropertyMeta', {
-                    group:
-                      info?.groupName ??
-                      (info ? t(`tileKind.${info.tile.kind}`) : t('property')),
-                    position: (info?.position ?? 0) + 1,
-                    total: pack.manifest.tile_count,
-                  })}
-                />
-              </MenuItem>
-            )
-          })}
+          {propertyGroups.flatMap((group) => [
+            <ListSubheader
+              key={`${group.key}:header`}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                py: 0.75,
+                color: 'text.primary',
+                bgcolor: 'background.paper',
+                borderBottom: `1px solid ${group.accent}55`,
+              }}
+            >
+              <Box
+                aria-hidden="true"
+                sx={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  bgcolor: group.accent,
+                }}
+              />
+              <Box component="span" sx={{ flexGrow: 1, fontWeight: 850 }}>
+                {group.name ?? t(`tileKind.${group.kind}`)}
+              </Box>
+              <Chip size="small" label={group.propertyIds.length} />
+            </ListSubheader>,
+            ...group.propertyIds.map((propertyId) => {
+              const info = tradePropertyInfo(pack, propertyId)
+              const ownedInGroup = info?.tile.group
+                ? pack.board.tiles.filter(
+                    (tile) =>
+                      tile.group === info.tile.group &&
+                      game.owners[tile.id] === viewerId,
+                  ).length
+                : 0
+              return (
+                <MenuItem
+                  key={propertyId}
+                  value={propertyId}
+                  sx={{
+                    borderLeft: `4px solid ${info?.accent ?? 'transparent'}`,
+                  }}
+                >
+                  <Checkbox checked={selectedPropertyIds.includes(propertyId)} />
+                  <ListItemText
+                    primary={info?.name ?? propertyId}
+                    secondary={t('tradePropertyMeta', {
+                      group:
+                        info?.groupName ??
+                        (info ? t(`tileKind.${info.tile.kind}`) : t('property')),
+                      position: (info?.position ?? 0) + 1,
+                      total: pack.manifest.tile_count,
+                    })}
+                  />
+                  {ownedInGroup > 0 && (
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={t('rentDebt.ownedInPropertyGroup', {
+                        count: ownedInGroup,
+                      })}
+                      sx={{
+                        ml: 1,
+                        fontWeight: 800,
+                        color: info?.accent,
+                        borderColor: `${info?.accent ?? '#8f8a9d'}99`,
+                      }}
+                    />
+                  )}
+                </MenuItem>
+              )
+            }),
+          ])}
         </Select>
       </FormControl>
     </Stack>

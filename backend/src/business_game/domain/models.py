@@ -563,12 +563,108 @@ class UserUpdate(BaseModel):
 PanelId = Literal["room", "heatmap", "players", "management", "chat"]
 PanelZone = Literal["left", "right"]
 PANEL_IDS = {"room", "heatmap", "players", "management", "chat"}
+ManagementPanelId = Literal["properties", "trades", "bank", "market"]
+MANAGEMENT_PANEL_IDS = {"properties", "trades", "bank", "market"}
+WorkspacePanelId = Literal[
+    "room",
+    "heatmap",
+    "players",
+    "properties",
+    "trades",
+    "bank",
+    "market",
+    "chat",
+]
+WORKSPACE_PANEL_IDS = {
+    "room",
+    "heatmap",
+    "players",
+    "properties",
+    "trades",
+    "bank",
+    "market",
+    "chat",
+}
+WorkspacePanelPlacement = Literal["left", "right", "floating"]
+
+
+class ManagementPanelLayoutPreferences(ContentModel):
+    order: list[ManagementPanelId] = Field(
+        default_factory=lambda: ["properties", "trades", "bank", "market"],
+        min_length=4,
+        max_length=4,
+    )
+    visible: list[ManagementPanelId] = Field(
+        default_factory=lambda: ["properties"],
+        min_length=1,
+        max_length=4,
+    )
+    heights: dict[ManagementPanelId, int] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_complete_layout(self) -> ManagementPanelLayoutPreferences:
+        if (
+            len(set(self.order)) != len(self.order)
+            or set(self.order) != MANAGEMENT_PANEL_IDS
+        ):
+            raise ValueError("management order must contain every panel exactly once")
+        if len(set(self.visible)) != len(self.visible):
+            raise ValueError("visible management panels must be unique")
+        if not set(self.heights).issubset(MANAGEMENT_PANEL_IDS):
+            raise ValueError("management heights contain an unknown panel")
+        if any(height < 144 or height > 4000 for height in self.heights.values()):
+            raise ValueError("management heights must be between 144 and 4000")
+        return self
+
+
+class WorkspacePanelWindowGeometry(ContentModel):
+    x: int = Field(ge=0, le=10000)
+    y: int = Field(ge=0, le=10000)
+    width: int = Field(ge=280, le=2000)
+    height: int = Field(ge=180, le=4000)
+
+
+class WorkspacePanelLayoutPreferences(ContentModel):
+    order: list[WorkspacePanelId] = Field(min_length=8, max_length=8)
+    visible: list[WorkspacePanelId] = Field(min_length=1, max_length=8)
+    heights: dict[WorkspacePanelId, int] = Field(default_factory=dict)
+    placements: dict[WorkspacePanelId, WorkspacePanelPlacement] = Field(
+        default_factory=lambda: {
+            panel_id: "right" for panel_id in WORKSPACE_PANEL_IDS
+        }
+    )
+    windows: dict[WorkspacePanelId, WorkspacePanelWindowGeometry] = Field(
+        default_factory=dict
+    )
+
+    @model_validator(mode="after")
+    def validate_complete_layout(self) -> WorkspacePanelLayoutPreferences:
+        if (
+            len(set(self.order)) != len(self.order)
+            or set(self.order) != WORKSPACE_PANEL_IDS
+        ):
+            raise ValueError("workspace order must contain every panel exactly once")
+        if len(set(self.visible)) != len(self.visible):
+            raise ValueError("visible workspace panels must be unique")
+        if set(self.placements) != WORKSPACE_PANEL_IDS:
+            raise ValueError("workspace placements must contain every panel exactly once")
+        if not set(self.heights).issubset(WORKSPACE_PANEL_IDS):
+            raise ValueError("workspace heights contain an unknown panel")
+        if not set(self.windows).issubset(WORKSPACE_PANEL_IDS):
+            raise ValueError("workspace windows contain an unknown panel")
+        if any(height < 144 or height > 4000 for height in self.heights.values()):
+            raise ValueError("workspace heights must be between 144 and 4000")
+        return self
 
 
 class PanelLayoutPreferences(ContentModel):
     order: list[PanelId] = Field(min_length=5, max_length=5)
     zones: dict[PanelId, PanelZone]
     heights: dict[PanelId, int] = Field(default_factory=dict)
+    management: ManagementPanelLayoutPreferences = Field(
+        default_factory=ManagementPanelLayoutPreferences
+    )
+    rail: WorkspacePanelLayoutPreferences | None = None
 
     @model_validator(mode="after")
     def validate_complete_layout(self) -> PanelLayoutPreferences:
@@ -743,9 +839,22 @@ class RentDebtPlanTemplate(StrEnum):
 
 
 class RentDebtPlanProposal(BaseModel):
-    installments: int = Field(ge=2, le=12)
+    installments: int = Field(ge=0, le=12)
     interest_percent: int = Field(ge=0, le=100)
     template: RentDebtPlanTemplate
+    requested_property_ids: list[str] = Field(default_factory=list, max_length=40)
+
+    @model_validator(mode="after")
+    def validate_terms(self) -> RentDebtPlanProposal:
+        if self.installments == 1:
+            raise ValueError("installment settlements require at least two payments")
+        if len(self.requested_property_ids) != len(set(self.requested_property_ids)):
+            raise ValueError("requested properties cannot be repeated")
+        if self.installments == 0 and not self.requested_property_ids:
+            raise ValueError("a settlement requires installments or properties")
+        if self.installments == 0 and self.interest_percent != 0:
+            raise ValueError("a property-only settlement cannot charge interest")
+        return self
 
 
 class DebtState(BaseModel):
@@ -1288,9 +1397,22 @@ class ForgiveRentDebtCommand(BaseModel):
 
 class ProposeRentDebtPlanCommand(BaseModel):
     action: Literal["propose_rent_debt_plan"]
-    installments: int = Field(ge=2, le=12)
+    installments: int = Field(ge=0, le=12)
     interest_percent: int = Field(ge=0, le=100)
     template: RentDebtPlanTemplate
+    requested_property_ids: list[str] = Field(default_factory=list, max_length=40)
+
+    @model_validator(mode="after")
+    def validate_terms(self) -> ProposeRentDebtPlanCommand:
+        if self.installments == 1:
+            raise ValueError("installment settlements require at least two payments")
+        if len(self.requested_property_ids) != len(set(self.requested_property_ids)):
+            raise ValueError("requested properties cannot be repeated")
+        if self.installments == 0 and not self.requested_property_ids:
+            raise ValueError("a settlement requires installments or properties")
+        if self.installments == 0 and self.interest_percent != 0:
+            raise ValueError("a property-only settlement cannot charge interest")
+        return self
 
 
 class AcceptRentDebtPlanCommand(BaseModel):

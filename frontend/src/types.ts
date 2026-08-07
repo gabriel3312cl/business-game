@@ -165,11 +165,42 @@ export interface User {
 
 export type PanelId = 'room' | 'heatmap' | 'players' | 'management' | 'chat'
 export type PanelZone = 'left' | 'right'
+export type ManagementPanelId = 'properties' | 'trades' | 'bank' | 'market'
+export type WorkspacePanelId =
+  | 'room'
+  | 'heatmap'
+  | 'players'
+  | ManagementPanelId
+  | 'chat'
+export type WorkspacePanelPlacement = 'left' | 'right' | 'floating'
+
+export interface WorkspacePanelWindowGeometry {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface ManagementPanelLayoutPreferences {
+  order: ManagementPanelId[]
+  visible: ManagementPanelId[]
+  heights: Partial<Record<ManagementPanelId, number>>
+}
+
+export interface WorkspacePanelLayoutPreferences {
+  order: WorkspacePanelId[]
+  visible: WorkspacePanelId[]
+  heights: Partial<Record<WorkspacePanelId, number>>
+  placements: Record<WorkspacePanelId, WorkspacePanelPlacement>
+  windows: Partial<Record<WorkspacePanelId, WorkspacePanelWindowGeometry>>
+}
 
 export interface PanelLayoutPreferences {
   order: PanelId[]
   zones: Record<PanelId, PanelZone>
   heights: Partial<Record<PanelId, number>>
+  management: ManagementPanelLayoutPreferences
+  rail?: WorkspacePanelLayoutPreferences | null
 }
 
 export interface AudioPreferenceSettings {
@@ -303,6 +334,7 @@ export interface RentDebtPlanProposal {
   installments: number
   interest_percent: number
   template: RentDebtPlanTemplate
+  requested_property_ids: string[]
 }
 
 export interface RentDebtPlanState {
@@ -588,6 +620,7 @@ export type GameCommand =
       installments: number
       interest_percent: number
       template: RentDebtPlanTemplate
+      requested_property_ids: string[]
     }
   | { action: 'accept_rent_debt_plan' }
   | { action: 'reject_rent_debt_plan' }

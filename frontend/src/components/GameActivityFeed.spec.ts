@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { GameEvent, GameEventType } from '../types'
 import { activityTone } from './gameActivityFeedPresentation'
+import { institutionRevenueSourceKey } from './institutionRevenue'
 
 function event(type: GameEventType, data: Record<string, unknown> = {}): GameEvent {
   return {
@@ -41,5 +42,19 @@ describe('activityTone', () => {
     expect(activityTone(event('trade.proposed'))).toBe('trade')
     expect(activityTone(event('auction.started'))).toBe('property')
     expect(activityTone(event('player.bankrupt'))).toBe('alert')
+  })
+})
+
+describe('institutionRevenueSourceKey', () => {
+  it.each([
+    ['loan_interest', 'loanInterest'],
+    ['market_fee', 'marketFee'],
+    ['card', 'card'],
+    ['jail_fine', 'jailFine'],
+    ['tax', 'tax'],
+    [undefined, 'other'],
+    ['unknown', 'other'],
+  ])('maps %s to %s', (revenueType, expected) => {
+    expect(institutionRevenueSourceKey(revenueType)).toBe(expected)
   })
 })

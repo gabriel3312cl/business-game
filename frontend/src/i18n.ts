@@ -299,11 +299,19 @@ void i18n.use(initReactI18next).init({
             dividendAccruedAndPaid:
               '{{instrument}} devengó {{accrued}} en dividendos y abonó {{paid}}.',
             institutionRevenue:
-              '{{instrument}} recaudó {{amount}} y distribuyó {{dividends}}.',
+              '{{instrument}} recaudó {{amount}} por {{source}} y distribuyó {{dividends}}.',
             institutionRevenueAccrued:
-              '{{instrument}} recaudó {{amount}} y devengó {{accrued}} en dividendos acumulados.',
+              '{{instrument}} recaudó {{amount}} por {{source}} y devengó {{accrued}} en dividendos acumulados.',
             institutionRevenueAccruedAndPaid:
-              '{{instrument}} recaudó {{amount}}, devengó {{accrued}} y abonó {{paid}} en dividendos.',
+              '{{instrument}} recaudó {{amount}} por {{source}}, devengó {{accrued}} y abonó {{paid}} en dividendos.',
+            revenueSources: {
+              loanInterest: 'intereses de préstamos',
+              marketFee: 'comisiones bursátiles',
+              card: 'pagos de tarjetas',
+              jailFine: 'multas de cárcel',
+              tax: 'impuestos',
+              other: 'ingresos operacionales',
+            },
             marketExpanded:
               'Se incorporaron {{count}} nuevas instituciones al mercado.',
             positionLiquidated:
@@ -797,8 +805,18 @@ void i18n.use(initReactI18next).init({
           interest: 'Interés %',
           proposePlan: 'Proponer plan',
           updatePlan: 'Modificar propuesta',
-          acceptPlan: 'Aceptar cuotas',
-          rejectPlan: 'Rechazar cuotas',
+          proposeSettlement: 'Proponer acuerdo',
+          updateSettlement: 'Modificar acuerdo',
+          acceptPlan: 'Aceptar acuerdo',
+          rejectPlan: 'Rechazar acuerdo',
+          requestProperties: 'Propiedades solicitadas',
+          noPropertyGroup: 'Sin grupo',
+          ownedInPropertyGroup: '+{{count}} tuyas',
+          noTransferableProperties:
+            'El deudor no tiene propiedades transferibles sin construcciones.',
+          includeInstallments: 'Incluir pago en cuotas',
+          propertyTermsHelp:
+            'Las propiedades seleccionadas forman parte del pago. Si incluyes cuotas, ambos términos se aplican.',
           awaitingCreditor:
             'Esperando que el acreedor elija cobrar, perdonar o proponer cuotas.',
           collectionDemanded:
@@ -806,8 +824,11 @@ void i18n.use(initReactI18next).init({
           preview: 'Total ${{total}} en {{installments}} cuotas.',
           proposalSummary:
             'Propuesta: ${{total}} en {{installments}} cuotas, con {{interest}}% de interés.',
+          proposalProperties: 'Propiedades solicitadas: {{properties}}.',
           activePlan:
             'Plan activo: saldo ${{remaining}}, {{installments}} cuotas pendientes.',
+          renegotiateBalance:
+            'Renegociar el saldo completo del plan: ${{amount}}.',
           templates: {
             friendly: 'Amistosa',
             standard: 'Estándar',
@@ -854,8 +875,19 @@ void i18n.use(initReactI18next).init({
           probabilityValue: '{{value}}% de probabilidad de llegar',
         },
         layout: {
+          managementViews: 'Vistas de gestión',
+          workspaceViews: 'Paneles de la partida',
+          redistributeHeights: 'Redistribuir alturas',
           dragPanel: 'Arrastrar panel {{panel}}',
           resizePanel: 'Ajustar altura de {{panel}}',
+          floatPanel: 'Convertir {{panel}} en ventana',
+          moveWindow: 'Mover ventana {{panel}}',
+          resizeWindow: 'Redimensionar ventana {{panel}}',
+          dockLeft: 'Fijar {{panel}} a la izquierda',
+          dockRight: 'Fijar {{panel}} a la derecha',
+          closePanel: 'Cerrar {{panel}}',
+          dropLeft: 'Soltar a la izquierda',
+          dropRight: 'Soltar a la derecha',
         },
         activity: {
           title: 'Actividad de la partida',
@@ -892,8 +924,12 @@ void i18n.use(initReactI18next).init({
             '{{creditor}} perdonó ${{amount}} de la deuda de {{debtor}}.',
           debtPlanProposed:
             '{{creditor}} propuso a {{debtor}} pagar ${{total}} en {{installments}} cuotas.',
-          debtPlanAccepted: '{{player}} aceptó el plan de cuotas.',
-          debtPlanRejected: '{{player}} rechazó el plan de cuotas.',
+          debtPropertySettlementProposed:
+            '{{creditor}} solicitó {{properties}} propiedad(es) a {{debtor}} para saldar la deuda.',
+          debtMixedSettlementProposed:
+            '{{creditor}} solicitó a {{debtor}} ${{total}} en {{installments}} cuotas y {{properties}} propiedad(es).',
+          debtPlanAccepted: '{{player}} aceptó el acuerdo de pago.',
+          debtPlanRejected: '{{player}} rechazó el acuerdo de pago.',
           debtInstallmentPaid:
             '{{player}} pagó una cuota de ${{amount}}. Saldo: ${{remaining}}.',
           debtPlanCompleted: '{{player}} completó el plan de cuotas.',
@@ -1367,11 +1403,19 @@ void i18n.use(initReactI18next).init({
             dividendAccruedAndPaid:
               '{{instrument}} accrued {{accrued}} in dividends and paid {{paid}}.',
             institutionRevenue:
-              '{{instrument}} collected {{amount}} and distributed {{dividends}}.',
+              '{{instrument}} collected {{amount}} from {{source}} and distributed {{dividends}}.',
             institutionRevenueAccrued:
-              '{{instrument}} collected {{amount}} and accrued {{accrued}} in pending dividends.',
+              '{{instrument}} collected {{amount}} from {{source}} and accrued {{accrued}} in pending dividends.',
             institutionRevenueAccruedAndPaid:
-              '{{instrument}} collected {{amount}}, accrued {{accrued}}, and paid {{paid}} in dividends.',
+              '{{instrument}} collected {{amount}} from {{source}}, accrued {{accrued}}, and paid {{paid}} in dividends.',
+            revenueSources: {
+              loanInterest: 'loan interest',
+              marketFee: 'market fees',
+              card: 'card payments',
+              jailFine: 'jail fines',
+              tax: 'taxes',
+              other: 'operating revenue',
+            },
             marketExpanded: '{{count}} new institutions joined the market.',
             positionLiquidated:
               "{{player}}'s investment position was liquidated for {{amount}}.",
@@ -1855,8 +1899,18 @@ void i18n.use(initReactI18next).init({
           interest: 'Interest %',
           proposePlan: 'Propose plan',
           updatePlan: 'Update proposal',
-          acceptPlan: 'Accept installments',
-          rejectPlan: 'Reject installments',
+          proposeSettlement: 'Propose settlement',
+          updateSettlement: 'Update settlement',
+          acceptPlan: 'Accept settlement',
+          rejectPlan: 'Reject settlement',
+          requestProperties: 'Requested properties',
+          noPropertyGroup: 'No group',
+          ownedInPropertyGroup: '+{{count}} yours',
+          noTransferableProperties:
+            'The debtor has no transferable properties without buildings.',
+          includeInstallments: 'Include installment payments',
+          propertyTermsHelp:
+            'Selected properties are part of the payment. If installments are included, both terms apply.',
           awaitingCreditor:
             'Waiting for the creditor to demand payment, forgive, or propose installments.',
           collectionDemanded:
@@ -1864,8 +1918,11 @@ void i18n.use(initReactI18next).init({
           preview: 'Total ${{total}} in {{installments}} installments.',
           proposalSummary:
             'Proposal: ${{total}} in {{installments}} installments at {{interest}}% interest.',
+          proposalProperties: 'Requested properties: {{properties}}.',
           activePlan:
             'Active plan: ${{remaining}} remaining, {{installments}} installments left.',
+          renegotiateBalance:
+            'Renegotiate the full remaining plan balance: ${{amount}}.',
           templates: {
             friendly: 'Friendly',
             standard: 'Standard',
@@ -1912,8 +1969,19 @@ void i18n.use(initReactI18next).init({
           probabilityValue: '{{value}}% chance of arriving',
         },
         layout: {
+          managementViews: 'Management views',
+          workspaceViews: 'Game panels',
+          redistributeHeights: 'Redistribute heights',
           dragPanel: 'Drag {{panel}} panel',
           resizePanel: 'Resize {{panel}} panel height',
+          floatPanel: 'Open {{panel}} as a window',
+          moveWindow: 'Move {{panel}} window',
+          resizeWindow: 'Resize {{panel}} window',
+          dockLeft: 'Dock {{panel}} on the left',
+          dockRight: 'Dock {{panel}} on the right',
+          closePanel: 'Close {{panel}}',
+          dropLeft: 'Drop on the left',
+          dropRight: 'Drop on the right',
         },
         activity: {
           title: 'Game activity',
@@ -1950,8 +2018,12 @@ void i18n.use(initReactI18next).init({
             '{{creditor}} forgave ${{amount}} of {{debtor}}’s debt.',
           debtPlanProposed:
             '{{creditor}} proposed that {{debtor}} pay ${{total}} in {{installments}} installments.',
-          debtPlanAccepted: '{{player}} accepted the installment plan.',
-          debtPlanRejected: '{{player}} rejected the installment plan.',
+          debtPropertySettlementProposed:
+            '{{creditor}} requested {{properties}} property/properties from {{debtor}} to settle the debt.',
+          debtMixedSettlementProposed:
+            '{{creditor}} requested ${{total}} in {{installments}} installments and {{properties}} property/properties from {{debtor}}.',
+          debtPlanAccepted: '{{player}} accepted the payment settlement.',
+          debtPlanRejected: '{{player}} rejected the payment settlement.',
           debtInstallmentPaid:
             '{{player}} paid a ${{amount}} installment. Remaining: ${{remaining}}.',
           debtPlanCompleted: '{{player}} completed the installment plan.',

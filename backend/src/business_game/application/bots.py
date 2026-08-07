@@ -187,8 +187,12 @@ class BotPolicy:
                 command: GameCommand
                 proposal = game.active_debt.plan_proposal
                 if proposal is not None:
-                    command = AcceptRentDebtPlanCommand(
-                        action="accept_rent_debt_plan"
+                    command = (
+                        RejectRentDebtPlanCommand(action="reject_rent_debt_plan")
+                        if proposal.requested_property_ids
+                        else AcceptRentDebtPlanCommand(
+                            action="accept_rent_debt_plan"
+                        )
                     )
                 elif bot.balance >= game.active_debt.amount:
                     command = PayDebtCommand(action="pay_debt")
@@ -316,7 +320,7 @@ class BotPolicy:
             game.settings.rules.custom_rent_debts_enabled
             and debt is not None
             and debt.creditor_id is not None
-            and debt.reason is DebtReason.RENT
+            and debt.reason in {DebtReason.RENT, DebtReason.RENT_INSTALLMENT}
             and not debt.collection_demanded
             and debt.plan_proposal is None
         )
@@ -332,7 +336,25 @@ class BotPolicy:
         assert debt is not None
         if debt.plan_proposal is not None:
             proposal = debt.plan_proposal
-            if proposal.interest_percent <= 25 and proposal.installments <= 6:
+            cash_cost = (
+                (debt.amount * (100 + proposal.interest_percent) + 99) // 100
+                if proposal.installments
+                else 0
+            )
+            property_cost = sum(
+                engine.strategic_value(
+                    bot.user_id,
+                    self._tile(pack, property_id),
+                    game.owners,
+                )
+                for property_id in proposal.requested_property_ids
+            )
+            reasonable_cost = cash_cost + property_cost <= debt.amount * 125 // 100
+            if (
+                proposal.interest_percent <= 25
+                and proposal.installments <= 6
+                and reasonable_cost
+            ):
                 return BotAction(
                     bot.user_id,
                     AcceptRentDebtPlanCommand(action="accept_rent_debt_plan"),
