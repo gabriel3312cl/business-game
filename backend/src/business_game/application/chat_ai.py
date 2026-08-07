@@ -21,6 +21,7 @@ from uuid import UUID
 import httpx
 
 from business_game.application.negotiation import NegotiationEngine, TradeCandidate
+from business_game.application.relationships import relationship_score
 from business_game.domain.chat_models import ChatMessage
 from business_game.domain.models import (
     ContentPack,
@@ -244,6 +245,11 @@ def build_bot_chat_context(
                 and game.owners.get(tile.id) != player.user_id
                 and engine.completes_group(player.user_id, tile)
             ],
+            "relationship_with_you": (
+                None
+                if player.user_id == bot.user_id
+                else relationship_score(game, bot.user_id, player.user_id)
+            ),
         }
         for player in game.players
     ]

@@ -26,6 +26,7 @@ from business_game.domain.models import (
     TileKind,
     TradeAnalysisResponse,
     TradeOffer,
+    TradeSideAnalysis,
     TradeStatus,
 )
 
@@ -41,6 +42,7 @@ AVERAGE_DICE_ROLL = 7
 MOOD_SPREAD = 9
 BEHIND_RELIEF_PERCENT = 12
 AHEAD_GUARD_PERCENT = 10
+RELATIONSHIP_THRESHOLD_SPREAD = 12
 COUNTER_WINDOW_PERCENT = 30
 COUNTER_MARGIN_PERCENT = 106
 PRICING_SAFETY_PERCENT = 105
@@ -51,6 +53,7 @@ MAX_SPARES_CONSIDERED = 4
 MAX_CANDIDATES = 12
 MAX_NEGOTIATION_ROUNDS = 3
 MAX_COUNTER_LOOKBACK = 5
+DICE_OUTCOME_COUNT = 36
 
 
 class TradeVerdict(StrEnum):
@@ -184,6 +187,14 @@ class TradeAssessment:
     verdict: TradeVerdict
     reason: str
     counter: ProposeTradeCommand | None = None
+
+
+@dataclass(frozen=True)
+class LandingExposure:
+    payment_probability: int
+    expected_payments: int
+    expected_rent_income: int
+    highest_payment: int
 
 
 @dataclass(frozen=True)
@@ -341,14 +352,60 @@ class NegotiationEngine:
             offered_property_ids=trade.offered_property_ids,
             requested_property_ids=trade.requested_property_ids,
         )
-        if actor.user_id == trade.recipient_id:
-            perspective = "recipient"
-            perspective_trade = trade
-            gain = valuation.recipient_gain
-            cost = valuation.recipient_cost
-            cash_after = actor.balance + trade.offered_cash - trade.requested_cash
-        else:
-            perspective = "proposer"
+        proposer = self._player(trade.proposer_id)
+        recipient = self._player(trade.recipient_id)
+        if proposer is None or recipient is None:
+            raise ValueError("the trade participants are not in the game")
+        owners_after = dict(self._game.owners)
+        for property_id in trade.offered_property_ids:
+            owners_after[property_id] = trade.recipient_id
+        for property_id in trade.requested_property_ids:
+            owners_after[property_id] = trade.proposer_id
+        proposer_analysis = self._analyze_trade_side(
+            proposer,
+            "proposer",
+            trade,
+            valuation,
+            owners_after,
+        )
+        recipient_analysis = self._analyze_trade_side(
+            recipient,
+            "recipient",
+            trade,
+            valuation,
+            owners_after,
+        )
+        selected = (
+            proposer_analysis
+            if actor.user_id == trade.proposer_id
+            else recipient_analysis
+        )
+        return TradeAnalysisResponse(
+            trade_id=trade.id,
+            perspective=selected.role,
+            verdict=selected.verdict,
+            convenience_level=selected.convenience_level,
+            reason_code=selected.reason_code,
+            estimated_gain=selected.estimated_gain,
+            estimated_cost=selected.estimated_cost,
+            estimated_surplus=selected.estimated_surplus,
+            risk_adjusted_surplus=selected.risk_adjusted_surplus,
+            cash_after=selected.cash_after,
+            liquidity_floor=selected.liquidity_floor,
+            proposer_analysis=proposer_analysis,
+            recipient_analysis=recipient_analysis,
+            snapshot_sequence=self._game.event_sequence,
+        )
+
+    def _analyze_trade_side(
+        self,
+        player: PlayerState,
+        role: str,
+        trade: TradeOffer,
+        valuation: TradeValuation,
+        owners_after: dict[str, UUID],
+    ) -> TradeSideAnalysis:
+        if role == "proposer":
             perspective_trade = TradeOffer(
                 proposer_id=trade.recipient_id,
                 recipient_id=trade.proposer_id,
@@ -359,30 +416,268 @@ class NegotiationEngine:
             )
             gain = valuation.proposer_gain
             cost = valuation.proposer_cost
-            cash_after = actor.balance + trade.requested_cash - trade.offered_cash
-        assessment = self.assess_incoming(actor, perspective_trade)
-        return TradeAnalysisResponse(
-            trade_id=trade.id,
-            perspective=perspective,
-            verdict=assessment.verdict.value,
-            reason_code=assessment.reason,
+            cash_after = player.balance + trade.requested_cash - trade.offered_cash
+        else:
+            perspective_trade = trade
+            gain = valuation.recipient_gain
+            cost = valuation.recipient_cost
+            cash_after = player.balance + trade.offered_cash - trade.requested_cash
+        assessment = self.assess_incoming(player, perspective_trade)
+        before = self._landing_exposure(player, self._game.owners, player.balance)
+        after = self._landing_exposure(player, owners_after, cash_after)
+        surplus = gain - cost
+        risk_adjusted_surplus = (
+            surplus
+            + after.expected_rent_income
+            - before.expected_rent_income
+            - after.expected_payments
+            + before.expected_payments
+        )
+        liquidity_floor = self._liquidity_floor(player, owners_after)
+        convenience_level = self._convenience_level(
+            risk_adjusted_surplus,
+            gain,
+            cost,
+            cash_after,
+            liquidity_floor,
+        )
+        verdict = self._verdict_for_convenience(convenience_level)
+        risk_drag = (
+            after.expected_payments
+            - before.expected_payments
+            - after.expected_rent_income
+            + before.expected_rent_income
+        )
+        reason_code = assessment.reason
+        if cash_after < liquidity_floor:
+            reason_code = "reject_liquidity_risk"
+        elif verdict == "reject" and risk_drag > 0:
+            reason_code = "reject_landing_exposure"
+        elif verdict == "accept" and risk_drag < 0:
+            reason_code = "accept_rent_outlook"
+        elif verdict == "counter":
+            reason_code = "counter_rebalanced"
+        return TradeSideAnalysis(
+            player_id=player.user_id,
+            role=role,
+            verdict=verdict,
+            convenience_level=convenience_level,
+            reason_code=reason_code,
             estimated_gain=gain,
             estimated_cost=cost,
-            estimated_surplus=gain - cost,
+            estimated_surplus=surplus,
+            risk_adjusted_surplus=risk_adjusted_surplus,
+            cash_before=player.balance,
             cash_after=cash_after,
-            liquidity_floor=self.liquidity_floor(actor),
-            snapshot_sequence=self._game.event_sequence,
+            liquidity_floor=liquidity_floor,
+            payment_probability_before=before.payment_probability,
+            payment_probability_after=after.payment_probability,
+            expected_payments_before=before.expected_payments,
+            expected_payments_after=after.expected_payments,
+            expected_rent_income_before=before.expected_rent_income,
+            expected_rent_income_after=after.expected_rent_income,
+            highest_payment_before=before.highest_payment,
+            highest_payment_after=after.highest_payment,
+        )
+
+    @staticmethod
+    def _convenience_level(
+        risk_adjusted_surplus: int,
+        gain: int,
+        cost: int,
+        cash_after: int,
+        liquidity_floor: int,
+    ) -> str:
+        if cash_after < 0:
+            return "very_unfavorable"
+        margin_percent = risk_adjusted_surplus * 100 // max(gain, cost, 1)
+        if margin_percent <= -25:
+            return "very_unfavorable"
+        if cash_after < liquidity_floor or margin_percent <= -5:
+            return "unfavorable"
+        if margin_percent < 5:
+            return "balanced"
+        if margin_percent < 25:
+            return "favorable"
+        return "very_favorable"
+
+    @staticmethod
+    def _verdict_for_convenience(convenience_level: str) -> str:
+        if convenience_level in {"very_favorable", "favorable"}:
+            return "accept"
+        if convenience_level == "balanced":
+            return "counter"
+        return "reject"
+
+    def _landing_exposure(
+        self,
+        player: PlayerState,
+        owners: dict[str, UUID],
+        cash: int,
+    ) -> LandingExposure:
+        payment_outcomes = 0
+        weighted_payments = 0
+        weighted_income = 0
+        highest_payment = 0
+        for first in range(1, 7):
+            for second in range(1, 7):
+                dice_total = first + second
+                position = self._next_position(player, first, second)
+                tile = self._pack.board.tiles[position]
+                payment = self._landing_payment(
+                    player,
+                    tile,
+                    owners,
+                    cash,
+                    dice_total,
+                )
+                weighted_payments += payment
+                highest_payment = max(highest_payment, payment)
+                if payment > 0:
+                    payment_outcomes += 1
+        for rival in self._game.players:
+            if rival.user_id == player.user_id or rival.bankrupt:
+                continue
+            for first in range(1, 7):
+                for second in range(1, 7):
+                    position = self._next_position(rival, first, second)
+                    tile = self._pack.board.tiles[position]
+                    if (
+                        owners.get(tile.id) != player.user_id
+                        or tile.id in self._game.mortgaged_property_ids
+                    ):
+                        continue
+                    weighted_income += self._rent_for(
+                        tile,
+                        player.user_id,
+                        owners,
+                        first + second,
+                    )
+        return LandingExposure(
+            payment_probability=(payment_outcomes * 100 + 18) // DICE_OUTCOME_COUNT,
+            expected_payments=(weighted_payments + 18) // DICE_OUTCOME_COUNT,
+            expected_rent_income=(weighted_income + 18) // DICE_OUTCOME_COUNT,
+            highest_payment=highest_payment,
+        )
+
+    def _next_position(
+        self,
+        player: PlayerState,
+        first: int,
+        second: int,
+    ) -> int:
+        tile_count = self._pack.manifest.tile_count
+        is_double = first == second
+        if player.in_jail:
+            forced_release = (
+                player.jail_failed_rolls + 1
+                >= self._pack.manifest.jail_max_failed_rolls
+            )
+            return (
+                (player.position + first + second) % tile_count
+                if is_double or forced_release
+                else player.position
+            )
+        if (
+            self._game.current_player is not None
+            and self._game.current_player.user_id == player.user_id
+            and is_double
+            and self._game.consecutive_doubles + 1
+            >= self._pack.manifest.max_consecutive_doubles
+        ):
+            jail_position = next(
+                (
+                    index
+                    for index, tile in enumerate(self._pack.board.tiles)
+                    if tile.kind is TileKind.JAIL
+                ),
+                player.position,
+            )
+            return jail_position
+        return (player.position + first + second) % tile_count
+
+    def _landing_payment(
+        self,
+        player: PlayerState,
+        tile: TileDefinition,
+        owners: dict[str, UUID],
+        cash: int,
+        dice_total: int,
+    ) -> int:
+        owner_id = owners.get(tile.id)
+        if (
+            owner_id is not None
+            and owner_id != player.user_id
+            and tile.id not in self._game.mortgaged_property_ids
+        ):
+            return self._rent_for(tile, owner_id, owners, dice_total)
+        if tile.kind is TileKind.TAX:
+            return self._tax_for(player, tile, owners, cash)
+        return 0
+
+    def _tax_for(
+        self,
+        player: PlayerState,
+        tile: TileDefinition,
+        owners: dict[str, UUID],
+        cash: int,
+    ) -> int:
+        if tile.amount is not None:
+            return tile.amount
+        if tile.net_worth_percent is not None:
+            net_worth = cash + sum(
+                (owned_tile.price or 0)
+                + min(self._game.building_levels.get(owned_tile.id, 0), 4)
+                * (owned_tile.build_cost or 0)
+                + (
+                    owned_tile.hotel_cost or owned_tile.build_cost or 0
+                    if self._game.building_levels.get(owned_tile.id, 0) == 5
+                    else 0
+                )
+                for owned_tile in self._pack.board.tiles
+                if owners.get(owned_tile.id) == player.user_id
+            )
+            return net_worth * tile.net_worth_percent // 100
+        if tile.complete_group_amount is not None:
+            complete_groups = sum(
+                bool(group)
+                and all(owners.get(item.id) == player.user_id for item in group)
+                for group in self._groups.values()
+            )
+            return complete_groups * tile.complete_group_amount
+        house_count = sum(
+            level if level < 5 else 0
+            for property_id, level in self._game.building_levels.items()
+            if owners.get(property_id) == player.user_id
+        )
+        hotel_count = sum(
+            level == 5
+            for property_id, level in self._game.building_levels.items()
+            if owners.get(property_id) == player.user_id
+        )
+        return house_count * (tile.house_amount or 0) + hotel_count * (
+            tile.hotel_amount or 0
         )
 
     # ------------------------------------------------------------- pressures
 
     def expected_rent(self, tile: TileDefinition, owner_id: UUID) -> int:
-        if (
-            not tile.is_purchasable
-            or tile.id in self._game.mortgaged_property_ids
-        ):
+        return self._rent_for(
+            tile,
+            owner_id,
+            self._game.owners,
+            AVERAGE_DICE_ROLL,
+        )
+
+    def _rent_for(
+        self,
+        tile: TileDefinition,
+        owner_id: UUID,
+        owners: dict[str, UUID],
+        dice_total: int,
+    ) -> int:
+        if not tile.is_purchasable or tile.id in self._game.mortgaged_property_ids:
             return 0
-        owners = self._game.owners
         if tile.kind is TileKind.PROPERTY:
             levels = tile.rent_levels or [tile.base_rent or 0]
             level = self._game.building_levels.get(tile.id, 0)
@@ -391,6 +686,8 @@ class NegotiationEngine:
             group = self._groups.get(tile.group or "", [tile])
             if len(group) > 1 and all(
                 owners.get(item.id) == owner_id for item in group
+            ) and not any(
+                item.id in self._game.mortgaged_property_ids for item in group
             ):
                 return (tile.base_rent or 0) * self._pack.manifest.monopoly_rent_multiplier
             return tile.base_rent or 0
@@ -399,27 +696,39 @@ class NegotiationEngine:
         if tile.kind is TileKind.UTILITY:
             multipliers = tile.rent_multipliers or [0]
             index = min(owned - 1, len(multipliers) - 1)
-            return multipliers[index] * AVERAGE_DICE_ROLL
+            return multipliers[index] * dice_total
         levels = tile.rent_levels or [tile.base_rent or 0]
         return levels[min(owned - 1, len(levels) - 1)]
 
-    def rent_threat(self, player: PlayerState) -> int:
+    def rent_threat(
+        self,
+        player: PlayerState,
+        owners: dict[str, UUID] | None = None,
+    ) -> int:
         """Worst single rent the board can charge ``player`` right now."""
+        scenario_owners = owners if owners is not None else self._game.owners
         threats = [
-            self.expected_rent(tile, owner_id)
+            self._rent_for(tile, owner_id, scenario_owners, AVERAGE_DICE_ROLL)
             for tile in self._pack.board.tiles
-            if (owner_id := self._game.owners.get(tile.id)) is not None
+            if (owner_id := scenario_owners.get(tile.id)) is not None
             and owner_id != player.user_id
         ]
         return max(threats, default=0)
 
     def liquidity_floor(self, player: PlayerState) -> int:
+        return self._liquidity_floor(player, self._game.owners)
+
+    def _liquidity_floor(
+        self,
+        player: PlayerState,
+        owners: dict[str, UUID],
+    ) -> int:
         profile = profile_for(player)
         reserve = max(
             self._pack.manifest.starting_balance * profile.cash_reserve_percent // 100,
             1,
         )
-        return max(reserve, self.rent_threat(player))
+        return max(reserve, self.rent_threat(player, owners))
 
     def net_worth(self, player: PlayerState) -> int:
         total = player.balance
@@ -476,6 +785,16 @@ class NegotiationEngine:
             threshold += AHEAD_GUARD_PERCENT
         if self._refused_a_fair_deal(player.user_id, counterpart.user_id):
             threshold += profile.grudge
+        relationship = next(
+            (
+                item.score
+                for item in self._game.bot_relationships
+                if item.bot_id == player.user_id
+                and item.player_id == counterpart.user_id
+            ),
+            0,
+        )
+        threshold -= relationship * RELATIONSHIP_THRESHOLD_SPREAD // 100
         return max(threshold, 60)
 
     def clears_bar(

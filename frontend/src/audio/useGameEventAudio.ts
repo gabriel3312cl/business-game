@@ -6,6 +6,7 @@ import { IMMEDIATE_AUDIO_EVENTS, soundCuesForEvent, type SoundCue } from './game
 interface Cursor {
   gameId: string
   sequence: number
+  armed: boolean
 }
 
 export function useGameEventAudio(
@@ -13,27 +14,31 @@ export function useGameEventAudio(
   visibleEvents: GameEvent[],
   pack: ContentPack,
   userId: string,
+  synchronized: boolean,
 ): void {
   const immediateCursor = useRef<Cursor>({
     gameId: game.id,
     sequence: latestSequence(game.events),
+    armed: false,
   })
   const settledCursor = useRef<Cursor>({
     gameId: game.id,
-    sequence: latestSequence(visibleEvents),
+    sequence: latestSequence(game.events),
+    armed: false,
   })
   const timers = useRef(new Set<number>())
 
   useEffect(() => {
     for (const timer of timers.current) window.clearTimeout(timer)
     timers.current.clear()
-  }, [game.id])
+  }, [game.id, synchronized])
 
   useEffect(() => {
     const cursor = immediateCursor.current
-    if (cursor.gameId !== game.id) {
+    if (!synchronized || cursor.gameId !== game.id || !cursor.armed) {
       cursor.gameId = game.id
       cursor.sequence = latestSequence(game.events)
+      cursor.armed = synchronized
       return
     }
     const events = game.events.filter(
@@ -41,13 +46,14 @@ export function useGameEventAudio(
     )
     cursor.sequence = Math.max(cursor.sequence, latestSequence(game.events))
     scheduleEvents(events, pack, userId, timers.current)
-  }, [game.events, game.id, pack, userId])
+  }, [game.events, game.id, pack, synchronized, userId])
 
   useEffect(() => {
     const cursor = settledCursor.current
-    if (cursor.gameId !== game.id) {
+    if (!synchronized || cursor.gameId !== game.id || !cursor.armed) {
       cursor.gameId = game.id
-      cursor.sequence = latestSequence(visibleEvents)
+      cursor.sequence = latestSequence(game.events)
+      cursor.armed = synchronized
       return
     }
     const events = visibleEvents.filter(
@@ -56,7 +62,7 @@ export function useGameEventAudio(
     )
     cursor.sequence = Math.max(cursor.sequence, latestSequence(visibleEvents))
     scheduleEvents(events, pack, userId, timers.current)
-  }, [game.id, pack, userId, visibleEvents])
+  }, [game.events, game.id, pack, synchronized, userId, visibleEvents])
 
   useEffect(
     () => () => {

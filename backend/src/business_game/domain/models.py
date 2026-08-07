@@ -435,18 +435,27 @@ class RuleOptionName(StrEnum):
     AUCTION_UNPURCHASED_PROPERTIES = "auction_unpurchased_properties"
     FREE_PARKING_JACKPOT = "free_parking_jackpot"
     DOUBLE_SALARY_ON_START = "double_salary_on_start"
+    LOANS_ENABLED = "loans_enabled"
+    STOCK_MARKET_ENABLED = "stock_market_enabled"
+    CUSTOM_RENT_DEBTS_ENABLED = "custom_rent_debts_enabled"
 
 
 class OptionalRules(ContentModel):
     auction_unpurchased_properties: bool = True
     free_parking_jackpot: bool = False
     double_salary_on_start: bool = False
+    loans_enabled: bool = False
+    stock_market_enabled: bool = False
+    custom_rent_debts_enabled: bool = False
 
 
 class OptionalRulesUpdate(BaseModel):
     auction_unpurchased_properties: bool | None = None
     free_parking_jackpot: bool | None = None
     double_salary_on_start: bool | None = None
+    loans_enabled: bool | None = None
+    stock_market_enabled: bool | None = None
+    custom_rent_debts_enabled: bool | None = None
 
     @model_validator(mode="after")
     def validate_change(self) -> OptionalRulesUpdate:
@@ -477,6 +486,21 @@ class PackManifest(ContentModel):
     max_consecutive_doubles: int = Field(default=3, ge=1, le=10)
     house_supply: int = Field(default=32, ge=0, le=1000)
     hotel_supply: int = Field(default=12, ge=0, le=1000)
+    bank_money_supply: int | None = Field(default=None, ge=1)
+    bank_minimum_reserve_percent: int = Field(default=20, ge=0, le=90)
+    loan_interest_percent: int = Field(default=15, ge=0, le=100)
+    loan_term_laps: int = Field(default=5, ge=1, le=20)
+    loan_max_term_laps: int = Field(default=10, ge=1, le=20)
+    loan_salary_payment_percent: int = Field(default=35, ge=1, le=100)
+    investment_share_count: int = Field(default=20, ge=1, le=1000)
+    investment_dividend_percent: int = Field(default=30, ge=0, le=80)
+    investment_transaction_fee_percent: int = Field(default=1, ge=0, le=25)
+    investment_revenue_fee_percent: int = Field(default=5, ge=0, le=25)
+    investment_max_ownership_percent: int = Field(default=30, ge=1, le=100)
+    investment_spread_percent: int = Field(default=1, ge=0, le=15)
+    loan_investment_max_net_worth_percent: int = Field(default=20, ge=1, le=50)
+    loan_investment_reserve_salary_percent: int = Field(default=50, ge=0, le=200)
+    loan_investment_installment_reserve: int = Field(default=2, ge=1, le=10)
     default_rules: OptionalRules = Field(default_factory=OptionalRules)
     configurable_rules: list[RuleOptionName] = Field(default_factory=list)
 
@@ -488,8 +512,18 @@ class PackManifest(ContentModel):
             raise ValueError("default_locale must be listed in locales")
         if self.min_players > self.max_players:
             raise ValueError("min_players cannot exceed max_players")
+        if self.loan_term_laps > self.loan_max_term_laps:
+            raise ValueError("loan_term_laps cannot exceed loan_max_term_laps")
         if len(self.configurable_rules) != len(set(self.configurable_rules)):
             raise ValueError("configurable_rules cannot contain duplicates")
+        if (
+            self.investment_dividend_percent
+            + self.investment_revenue_fee_percent
+            > 100
+        ):
+            raise ValueError(
+                "investment dividends and revenue fees cannot exceed 100 percent"
+            )
         return self
 
 
@@ -585,16 +619,24 @@ class TokenAppearancePreferences(ContentModel):
     icon: TokenIcon
 
 
+class AutomationPreferences(ContentModel):
+    auto_reject_trades: bool = False
+    auto_roll_dice: bool = False
+    auto_end_turns: bool = False
+
+
 class UserPreferences(ContentModel):
     panel_layout: PanelLayoutPreferences | None = None
     audio_settings: AudioPreferences | None = None
     token_appearance: TokenAppearancePreferences | None = None
+    automation_settings: AutomationPreferences | None = None
 
 
 class UserPreferencesUpdate(ContentModel):
     panel_layout: PanelLayoutPreferences | None = None
     audio_settings: AudioPreferences | None = None
     token_appearance: TokenAppearancePreferences | None = None
+    automation_settings: AutomationPreferences | None = None
 
     @model_validator(mode="after")
     def validate_non_empty_update(self) -> UserPreferencesUpdate:
@@ -602,6 +644,7 @@ class UserPreferencesUpdate(ContentModel):
             self.panel_layout is None
             and self.audio_settings is None
             and self.token_appearance is None
+            and self.automation_settings is None
         ):
             raise ValueError("at least one preference must be provided")
         return self
@@ -633,6 +676,7 @@ class PlayerState(BaseModel):
     bot_controller: BotController | None = None
     position: int = 0
     balance: int = 1500
+    pending_dividend_units: int = Field(default=0, ge=0)
     bankrupt: bool = False
     in_jail: bool = False
     jail_failed_rolls: int = Field(default=0, ge=0)
@@ -683,10 +727,25 @@ class TradeStatus(StrEnum):
 
 class DebtReason(StrEnum):
     RENT = "rent"
+    RENT_INSTALLMENT = "rent_installment"
     TAX = "tax"
     CARD = "card"
     JAIL_FINE = "jail_fine"
+    BANK_LOAN = "bank_loan"
     RESIGNATION = "resignation"
+
+
+class RentDebtPlanTemplate(StrEnum):
+    FRIENDLY = "friendly"
+    STANDARD = "standard"
+    FLEXIBLE = "flexible"
+    CUSTOM = "custom"
+
+
+class RentDebtPlanProposal(BaseModel):
+    installments: int = Field(ge=2, le=12)
+    interest_percent: int = Field(ge=0, le=100)
+    template: RentDebtPlanTemplate
 
 
 class DebtState(BaseModel):
@@ -695,6 +754,24 @@ class DebtState(BaseModel):
     amount: int = Field(gt=0)
     reason: DebtReason
     tile_id: str
+    installment_plan_id: UUID | None = None
+    plan_proposal: RentDebtPlanProposal | None = None
+    collection_demanded: bool = False
+
+
+class RentDebtPlanState(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    debtor_id: UUID
+    creditor_id: UUID
+    tile_id: str
+    original_amount: int = Field(gt=0)
+    interest_percent: int = Field(ge=0, le=100)
+    total_amount: int = Field(gt=0)
+    remaining_amount: int = Field(gt=0)
+    installments_total: int = Field(ge=2, le=12)
+    installments_remaining: int = Field(ge=1, le=12)
+    template: RentDebtPlanTemplate
+    created_at_sequence: int = Field(ge=0)
 
 
 class CardPaymentState(BaseModel):
@@ -722,22 +799,182 @@ class TradeOffer(BaseModel):
     requested_cash: int = Field(default=0, ge=0)
     offered_property_ids: list[str] = Field(default_factory=list, max_length=40)
     requested_property_ids: list[str] = Field(default_factory=list, max_length=40)
+    parent_trade_id: UUID | None = None
     status: TradeStatus = TradeStatus.PENDING
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     resolved_at: datetime | None = None
+
+
+class TradeSideAnalysis(BaseModel):
+    player_id: UUID
+    role: Literal["proposer", "recipient"]
+    verdict: Literal["accept", "counter", "reject"]
+    convenience_level: Literal[
+        "very_favorable",
+        "favorable",
+        "balanced",
+        "unfavorable",
+        "very_unfavorable",
+    ]
+    reason_code: str
+    estimated_gain: int = Field(ge=0)
+    estimated_cost: int = Field(ge=0)
+    estimated_surplus: int
+    risk_adjusted_surplus: int
+    cash_before: int
+    cash_after: int
+    liquidity_floor: int = Field(ge=0)
+    payment_probability_before: int = Field(ge=0, le=100)
+    payment_probability_after: int = Field(ge=0, le=100)
+    expected_payments_before: int = Field(ge=0)
+    expected_payments_after: int = Field(ge=0)
+    expected_rent_income_before: int = Field(ge=0)
+    expected_rent_income_after: int = Field(ge=0)
+    highest_payment_before: int = Field(ge=0)
+    highest_payment_after: int = Field(ge=0)
 
 
 class TradeAnalysisResponse(BaseModel):
     trade_id: UUID
     perspective: Literal["proposer", "recipient"]
     verdict: Literal["accept", "counter", "reject"]
+    convenience_level: Literal[
+        "very_favorable",
+        "favorable",
+        "balanced",
+        "unfavorable",
+        "very_unfavorable",
+    ]
     reason_code: str
     estimated_gain: int = Field(ge=0)
     estimated_cost: int = Field(ge=0)
     estimated_surplus: int
+    risk_adjusted_surplus: int
     cash_after: int
     liquidity_floor: int = Field(ge=0)
+    proposer_analysis: TradeSideAnalysis
+    recipient_analysis: TradeSideAnalysis
     snapshot_sequence: int = Field(ge=0)
+
+
+class BotRelationshipState(BaseModel):
+    bot_id: UUID
+    player_id: UUID
+    score: int = Field(default=0, ge=-100, le=100)
+    interaction_count: int = Field(default=0, ge=0)
+    last_reason: str | None = None
+    last_event_sequence: int | None = Field(default=None, ge=1)
+
+
+class BankLoanState(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    player_id: UUID
+    principal: int = Field(gt=0)
+    interest_amount: int = Field(ge=0)
+    interest_paid: int = Field(default=0, ge=0)
+    interest_percent: int = Field(default=15, ge=0, le=100)
+    remaining_balance: int = Field(gt=0)
+    installment_amount: int = Field(gt=0)
+    installments_remaining: int = Field(gt=0)
+    scheduled_payments_made: int = Field(default=0, ge=0)
+    issued_at_sequence: int = Field(ge=0)
+
+
+class BankCreditProfileState(BaseModel):
+    score: int = Field(default=600, ge=300, le=850)
+    successful_loans: int = Field(default=0, ge=0)
+    on_time_payments: int = Field(default=0, ge=0)
+    late_payments: int = Field(default=0, ge=0)
+    defaults: int = Field(default=0, ge=0)
+    total_borrowed: int = Field(default=0, ge=0)
+    current_interest_percent: int = Field(default=15, ge=0, le=100)
+    current_limit: int = Field(default=0, ge=0)
+    maximum_term_laps: int = Field(default=10, ge=1, le=20)
+
+
+class InvestmentInstrumentState(BaseModel):
+    id: str = Field(min_length=1, max_length=160)
+    tile_id: str = Field(min_length=1, max_length=120)
+    name_key: str = Field(min_length=1, max_length=200)
+    instrument_kind: Literal["asset", "bank", "jail", "tax", "index"] = "asset"
+    total_shares: int = Field(gt=0)
+    available_shares: int = Field(ge=0)
+    base_price: int = Field(gt=0)
+    current_price: int = Field(gt=0)
+    dividend_percent: int = Field(ge=0, le=80)
+    transaction_fee_percent: int = Field(ge=0, le=25)
+    revenue_fee_percent: int = Field(ge=0, le=25)
+    max_ownership_percent: int = Field(ge=1, le=100)
+    spread_percent: int = Field(default=2, ge=0, le=15)
+    holdings: dict[UUID, Annotated[int, Field(gt=0)]] = Field(
+        default_factory=dict,
+    )
+    gross_revenue: int = Field(default=0, ge=0)
+    period_revenue: int = Field(default=0, ge=0)
+    dividends_paid: int = Field(default=0, ge=0)
+    dividends_accrued_units: int = Field(default=0, ge=0)
+    pending_dividend_units: dict[UUID, Annotated[int, Field(ge=0)]] = Field(
+        default_factory=dict,
+    )
+    last_settlement_sequence: int = Field(default=0, ge=0)
+    buy_volume: int = Field(default=0, ge=0)
+    sell_volume: int = Field(default=0, ge=0)
+    trade_count: int = Field(default=0, ge=0)
+    last_trade_price: int | None = Field(default=None, gt=0)
+    session_high: int = Field(default=0, ge=0)
+    session_low: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_share_supply(self) -> InvestmentInstrumentState:
+        held_shares = sum(self.holdings.values())
+        if held_shares + self.available_shares > self.total_shares:
+            raise ValueError("investment shares cannot exceed the instrument supply")
+        return self
+
+
+class MarketOrderSide(StrEnum):
+    BUY = "buy"
+    SELL = "sell"
+
+
+class MarketOrderState(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    instrument_id: str = Field(min_length=1, max_length=160)
+    player_id: UUID
+    side: MarketOrderSide
+    limit_price: int = Field(gt=0)
+    original_quantity: int = Field(gt=0, le=1000)
+    remaining_quantity: int = Field(gt=0, le=1000)
+    reserved_cash: int = Field(default=0, ge=0)
+    created_at_sequence: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_reservation(self) -> MarketOrderState:
+        if self.remaining_quantity > self.original_quantity:
+            raise ValueError("remaining order quantity cannot exceed the original")
+        if self.side is MarketOrderSide.SELL and self.reserved_cash != 0:
+            raise ValueError("sell orders cannot reserve cash")
+        return self
+
+
+class BankState(BaseModel):
+    initialized: bool = False
+    monetary_base: int = Field(default=0, ge=0)
+    cash: int = Field(default=0, ge=0)
+    emergency_issuance: int = Field(default=0, ge=0)
+    dividend_cash_reserve: int = Field(default=0, ge=0)
+    dividend_unfunded_units: int = Field(default=0, ge=0, lt=10_000)
+    market_round: int = Field(default=0, ge=0)
+    minimum_reserve_percent: int = Field(default=20, ge=0, le=90)
+    loans: list[BankLoanState] = Field(default_factory=list, max_length=12)
+    credit_profiles: dict[UUID, BankCreditProfileState] = Field(
+        default_factory=dict,
+    )
+    investments: list[InvestmentInstrumentState] = Field(
+        default_factory=list,
+        max_length=40,
+    )
+    market_orders: list[MarketOrderState] = Field(default_factory=list, max_length=200)
 
 
 class GameEvent(BaseModel):
@@ -766,10 +1003,15 @@ class GameState(BaseModel):
     pending_auction_minimum_bid: int | None = Field(default=None, ge=1)
     active_auction: AuctionState | None = None
     active_debt: DebtState | None = None
+    rent_debt_plans: list[RentDebtPlanState] = Field(
+        default_factory=list,
+        max_length=100,
+    )
     pending_card_payments: list[CardPaymentState] = Field(
         default_factory=list,
         max_length=12,
     )
+    bank: BankState = Field(default_factory=BankState)
     bank_pot: int = Field(default=0, ge=0)
     mortgaged_property_ids: list[str] = Field(default_factory=list)
     building_levels: dict[
@@ -785,6 +1027,10 @@ class GameState(BaseModel):
     bank_auction_queue: list[str] = Field(default_factory=list)
     last_card_id: str | None = None
     trades: list[TradeOffer] = Field(default_factory=list, max_length=100)
+    bot_relationships: list[BotRelationshipState] = Field(
+        default_factory=list,
+        max_length=132,
+    )
     last_roll: tuple[int, int] | None = None
     events: list[GameEvent] = Field(default_factory=list)
     event_sequence: int = Field(default=0, ge=0)
@@ -815,6 +1061,66 @@ class GameState(BaseModel):
             raise ValueError("spectators cannot be repeated")
         if player_ids & spectator_ids:
             raise ValueError("a user cannot be a player and spectator")
+        if self.bank.initialized:
+            expected_cash = (
+                self.bank.monetary_base
+                + self.bank.emergency_issuance
+                - sum(player.balance for player in self.players)
+                - self.bank_pot
+            )
+            if expected_cash < 0:
+                self.bank.emergency_issuance += -expected_cash
+                expected_cash = 0
+            self.bank.cash = expected_cash
+            loan_player_ids = [loan.player_id for loan in self.bank.loans]
+            if len(loan_player_ids) != len(set(loan_player_ids)):
+                raise ValueError("a player cannot have more than one bank loan")
+            if not set(loan_player_ids).issubset(player_ids):
+                raise ValueError("bank loans require an active game player")
+            investment_ids = [item.id for item in self.bank.investments]
+            if len(investment_ids) != len(set(investment_ids)):
+                raise ValueError("investment instruments cannot be repeated")
+            investment_tile_ids = [item.tile_id for item in self.bank.investments]
+            if len(investment_tile_ids) != len(set(investment_tile_ids)):
+                raise ValueError("a tile cannot back more than one investment")
+            if any(
+                not set(instrument.holdings).issubset(player_ids)
+                for instrument in self.bank.investments
+            ):
+                raise ValueError("investment holders must be game players")
+            instrument_by_id = {
+                instrument.id: instrument for instrument in self.bank.investments
+            }
+            if any(
+                order.player_id not in player_ids
+                or order.instrument_id not in instrument_by_id
+                for order in self.bank.market_orders
+            ):
+                raise ValueError("market orders require valid players and instruments")
+            for instrument in self.bank.investments:
+                reserved_shares = sum(
+                    order.remaining_quantity
+                    for order in self.bank.market_orders
+                    if order.instrument_id == instrument.id
+                    and order.side is MarketOrderSide.SELL
+                )
+                if (
+                    sum(instrument.holdings.values())
+                    + instrument.available_shares
+                    + reserved_shares
+                    != instrument.total_shares
+                ):
+                    raise ValueError(
+                        "held, available, and reserved investment shares must match supply"
+                    )
+        relationship_pairs = [
+            (relationship.bot_id, relationship.player_id)
+            for relationship in self.bot_relationships
+        ]
+        if len(relationship_pairs) != len(set(relationship_pairs)):
+            raise ValueError("bot relationships cannot be repeated")
+        if any(bot_id == player_id for bot_id, player_id in relationship_pairs):
+            raise ValueError("a bot cannot have a relationship with itself")
         if len(self.mortgaged_property_ids) != len(
             set(self.mortgaged_property_ids)
         ):
@@ -832,6 +1138,22 @@ class GameState(BaseModel):
             player.user_id == self.active_debt.debtor_id for player in self.players
         ):
             raise ValueError("the debt debtor must be a game participant")
+        if any(
+            plan.debtor_id not in player_ids or plan.creditor_id not in player_ids
+            for plan in self.rent_debt_plans
+        ):
+            raise ValueError("rent debt plans require game participants")
+        if any(plan.debtor_id == plan.creditor_id for plan in self.rent_debt_plans):
+            raise ValueError("rent debt plans require different participants")
+        plan_ids = [plan.id for plan in self.rent_debt_plans]
+        if len(plan_ids) != len(set(plan_ids)):
+            raise ValueError("rent debt plans cannot be repeated")
+        if (
+            self.active_debt is not None
+            and self.active_debt.installment_plan_id is not None
+            and self.active_debt.installment_plan_id not in plan_ids
+        ):
+            raise ValueError("an installment debt requires its rent debt plan")
         if (
             self.pending_auction_selector_id is not None
             and self.pending_auction_selector_id not in player_ids
@@ -902,13 +1224,81 @@ class BuildPropertyCommand(BaseModel):
     property_id: str
 
 
+class BuildGroupRoundCommand(BaseModel):
+    action: Literal["build_group_round"]
+    group_id: str = Field(min_length=1, max_length=160)
+
+
 class SellBuildingCommand(BaseModel):
     action: Literal["sell_building"]
     property_id: str
 
 
+class SellGroupRoundCommand(BaseModel):
+    action: Literal["sell_group_round"]
+    group_id: str = Field(min_length=1, max_length=160)
+
+
+class RequestLoanCommand(BaseModel):
+    action: Literal["request_loan"]
+    amount: int = Field(gt=0)
+
+
+class RepayLoanCommand(BaseModel):
+    action: Literal["repay_loan"]
+    amount: int | None = Field(default=None, gt=0)
+
+
+class BuySharesCommand(BaseModel):
+    action: Literal["buy_shares"]
+    instrument_id: str = Field(min_length=1, max_length=160)
+    quantity: int = Field(gt=0, le=1000)
+
+
+class SellSharesCommand(BaseModel):
+    action: Literal["sell_shares"]
+    instrument_id: str = Field(min_length=1, max_length=160)
+    quantity: int = Field(gt=0, le=1000)
+
+
+class PlaceLimitOrderCommand(BaseModel):
+    action: Literal["place_limit_order"]
+    instrument_id: str = Field(min_length=1, max_length=160)
+    side: MarketOrderSide
+    quantity: int = Field(gt=0, le=1000)
+    limit_price: int = Field(gt=0)
+
+
+class CancelMarketOrderCommand(BaseModel):
+    action: Literal["cancel_market_order"]
+    order_id: UUID
+
+
 class PayDebtCommand(BaseModel):
     action: Literal["pay_debt"]
+
+
+class DemandRentDebtCommand(BaseModel):
+    action: Literal["demand_rent_debt"]
+
+
+class ForgiveRentDebtCommand(BaseModel):
+    action: Literal["forgive_rent_debt"]
+
+
+class ProposeRentDebtPlanCommand(BaseModel):
+    action: Literal["propose_rent_debt_plan"]
+    installments: int = Field(ge=2, le=12)
+    interest_percent: int = Field(ge=0, le=100)
+    template: RentDebtPlanTemplate
+
+
+class AcceptRentDebtPlanCommand(BaseModel):
+    action: Literal["accept_rent_debt_plan"]
+
+
+class RejectRentDebtPlanCommand(BaseModel):
+    action: Literal["reject_rent_debt_plan"]
 
 
 class DeclareBankruptcyCommand(BaseModel):
@@ -934,6 +1324,34 @@ class ProposeTradeCommand(BaseModel):
             )
         ):
             raise ValueError("a trade must exchange cash or properties")
+        if len(set(self.offered_property_ids)) != len(self.offered_property_ids):
+            raise ValueError("offered properties cannot be repeated")
+        if len(set(self.requested_property_ids)) != len(self.requested_property_ids):
+            raise ValueError("requested properties cannot be repeated")
+        if set(self.offered_property_ids) & set(self.requested_property_ids):
+            raise ValueError("a property cannot be offered and requested")
+        return self
+
+
+class CounterTradeCommand(BaseModel):
+    action: Literal["counter_trade"]
+    trade_id: UUID
+    offered_cash: int = Field(default=0, ge=0)
+    requested_cash: int = Field(default=0, ge=0)
+    offered_property_ids: list[str] = Field(default_factory=list, max_length=40)
+    requested_property_ids: list[str] = Field(default_factory=list, max_length=40)
+
+    @model_validator(mode="after")
+    def validate_contents(self) -> CounterTradeCommand:
+        if not any(
+            (
+                self.offered_cash,
+                self.requested_cash,
+                self.offered_property_ids,
+                self.requested_property_ids,
+            )
+        ):
+            raise ValueError("a counter-offer must exchange cash or properties")
         if len(set(self.offered_property_ids)) != len(self.offered_property_ids):
             raise ValueError("offered properties cannot be repeated")
         if len(set(self.requested_property_ids)) != len(self.requested_property_ids):
@@ -971,10 +1389,24 @@ GameCommand = Annotated[
     | MortgagePropertyCommand
     | UnmortgagePropertyCommand
     | BuildPropertyCommand
+    | BuildGroupRoundCommand
     | SellBuildingCommand
+    | SellGroupRoundCommand
+    | RequestLoanCommand
+    | RepayLoanCommand
+    | BuySharesCommand
+    | SellSharesCommand
+    | PlaceLimitOrderCommand
+    | CancelMarketOrderCommand
     | PayDebtCommand
+    | DemandRentDebtCommand
+    | ForgiveRentDebtCommand
+    | ProposeRentDebtPlanCommand
+    | AcceptRentDebtPlanCommand
+    | RejectRentDebtPlanCommand
     | DeclareBankruptcyCommand
     | ProposeTradeCommand
+    | CounterTradeCommand
     | AcceptTradeCommand
     | RejectTradeCommand
     | CancelTradeCommand,

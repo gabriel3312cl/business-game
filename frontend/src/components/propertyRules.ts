@@ -32,6 +32,11 @@ export interface PropertyActionAvailability {
   reason?: PropertyRuleReason
 }
 
+export interface GroupRoundAvailability extends PropertyActionAvailability {
+  amount: number
+  propertyCount: number
+}
+
 export function propertyGroupTiles(
   pack: ContentPack,
   tile: TileDefinition,
@@ -108,6 +113,91 @@ export function sellBuildingAvailability(
   return { allowed: true }
 }
 
+export function buildGroupRoundAvailability(
+  game: GameState,
+  groupTiles: TileDefinition[],
+  actorId: string,
+): GroupRoundAvailability {
+  const blocked = commonActionBlock(game, actorId, false)
+  if (blocked) return groupDenied(blocked.reason)
+  if (
+    groupTiles.length === 0 ||
+    groupTiles.some(
+      (tile) => tile.kind !== 'property' || game.owners[tile.id] !== actorId,
+    )
+  ) {
+    return groupDenied('completeGroupRequired')
+  }
+  if (groupTiles.some((tile) => game.mortgaged_property_ids.includes(tile.id))) {
+    return groupDenied('mortgagedGroup')
+  }
+  const levels = groupTiles.map((tile) => game.building_levels[tile.id] ?? 0)
+  const minimumLevel = Math.min(...levels)
+  const maximumLevel = Math.max(...levels)
+  if (maximumLevel - minimumLevel > 1) return groupDenied('buildEvenly')
+  if (minimumLevel >= 5) return groupDenied('hotelAlreadyBuilt')
+  const targetTiles = groupTiles.filter(
+    (tile) => (game.building_levels[tile.id] ?? 0) === minimumLevel,
+  )
+  const amount = targetTiles.reduce(
+    (total, tile) =>
+      total +
+      (minimumLevel === 4 && tile.hotel_cost != null
+        ? tile.hotel_cost
+        : (tile.build_cost ?? 0)),
+    0,
+  )
+  const player = game.players.find((candidate) => candidate.user_id === actorId)
+  if (!player || player.balance < amount) return groupDenied('insufficientBalance')
+  if (minimumLevel < 4 && game.houses_remaining < targetTiles.length) {
+    return groupDenied('noHousesAvailable')
+  }
+  if (minimumLevel === 4 && game.hotels_remaining < targetTiles.length) {
+    return groupDenied('noHotelsAvailable')
+  }
+  return { allowed: true, amount, propertyCount: targetTiles.length }
+}
+
+export function sellGroupRoundAvailability(
+  game: GameState,
+  pack: ContentPack,
+  groupTiles: TileDefinition[],
+  actorId: string,
+): GroupRoundAvailability {
+  const blocked = commonActionBlock(game, actorId, true)
+  if (blocked) return groupDenied(blocked.reason)
+  if (
+    groupTiles.length === 0 ||
+    groupTiles.some(
+      (tile) => tile.kind !== 'property' || game.owners[tile.id] !== actorId,
+    )
+  ) {
+    return groupDenied('completeGroupRequired')
+  }
+  const levels = groupTiles.map((tile) => game.building_levels[tile.id] ?? 0)
+  const minimumLevel = Math.min(...levels)
+  const maximumLevel = Math.max(...levels)
+  if (maximumLevel - minimumLevel > 1) return groupDenied('sellEvenly')
+  if (maximumLevel <= 0) return groupDenied('noBuilding')
+  const targetTiles = groupTiles.filter(
+    (tile) => (game.building_levels[tile.id] ?? 0) === maximumLevel,
+  )
+  const hotelsToSell = targetTiles.filter(
+    (tile) => (game.building_levels[tile.id] ?? 0) === 5,
+  ).length
+  if (game.houses_remaining < hotelsToSell * 4) {
+    return groupDenied('fourHousesRequired')
+  }
+  const amount = targetTiles.reduce((total, tile) => {
+    const cost =
+      maximumLevel === 5 && tile.hotel_cost != null
+        ? tile.hotel_cost
+        : (tile.build_cost ?? 0)
+    return total + Math.floor((cost * pack.manifest.building_sell_percent) / 100)
+  }, 0)
+  return { allowed: true, amount, propertyCount: targetTiles.length }
+}
+
 export function mortgageAvailability(
   game: GameState,
   pack: ContentPack,
@@ -176,6 +266,10 @@ function commonActionBlock(
     if (!allowedForDebtor) return denied('debtBlocksAction')
   }
   return null
+}
+
+function groupDenied(reason?: PropertyRuleReason): GroupRoundAvailability {
+  return { allowed: false, reason, amount: 0, propertyCount: 0 }
 }
 
 function denied(reason: PropertyRuleReason): PropertyActionAvailability {

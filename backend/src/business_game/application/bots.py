@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from business_game.application.economy import (
+    credit_offer,
+    market_order_quote,
+    minimum_reserve,
+)
 from business_game.application.negotiation import (
     MAX_COUNTER_LOOKBACK,
     NegotiationEngine,
@@ -11,15 +16,20 @@ from business_game.application.negotiation import (
     profile_for,
 )
 from business_game.domain.models import (
+    AcceptRentDebtPlanCommand,
     AcceptTradeCommand,
     BidCommand,
     BotPersonality,
-    BuildPropertyCommand,
+    BuildGroupRoundCommand,
     BuyPropertyCommand,
+    BuySharesCommand,
     CancelTradeCommand,
     ContentPack,
+    CounterTradeCommand,
+    DebtReason,
     DeclareBankruptcyCommand,
     DeclinePropertyCommand,
+    DemandRentDebtCommand,
     EndTurnCommand,
     GameCommand,
     GameState,
@@ -29,10 +39,14 @@ from business_game.domain.models import (
     PayDebtCommand,
     PayJailFineCommand,
     PlayerState,
+    RejectRentDebtPlanCommand,
     RejectTradeCommand,
+    RepayLoanCommand,
+    RequestLoanCommand,
     RollCommand,
     SelectAuctionPropertyCommand,
-    SellBuildingCommand,
+    SellGroupRoundCommand,
+    SellSharesCommand,
     TileDefinition,
     TradeStatus,
     TurnPhase,
@@ -74,6 +88,15 @@ class BotPolicy:
                 "select_property_worth_winning",
             )
         if game.active_debt is not None:
+            if self._rent_debt_waits_for_creditor(game):
+                creditor = self._bot(game, game.active_debt.creditor_id)
+                if creditor is None:
+                    return None
+                return BotAction(
+                    creditor.user_id,
+                    DemandRentDebtCommand(action="demand_rent_debt"),
+                    "demand_rent_payment",
+                )
             debtor = self._bot(game, game.active_debt.debtor_id)
             if debtor is None:
                 return None
@@ -105,6 +128,9 @@ class BotPolicy:
             build = self._build_action(game, pack, engine, player, profile)
             if build is not None:
                 return build
+            finance = self._financial_action(game, pack, engine, player)
+            if finance is not None:
+                return finance
             return BotAction(
                 player.user_id,
                 EndTurnCommand(action="end_turn"),
@@ -147,10 +173,24 @@ class BotPolicy:
                     "safeguard_select_auction_property",
                 )
         if game.active_debt is not None:
+            if self._rent_debt_waits_for_creditor(game):
+                creditor = self._bot(game, game.active_debt.creditor_id)
+                if creditor is not None:
+                    return BotAction(
+                        creditor.user_id,
+                        DemandRentDebtCommand(action="demand_rent_debt"),
+                        "safeguard_demand_rent_payment",
+                    )
+                return None
             bot = self._bot(game, game.active_debt.debtor_id)
             if bot is not None:
                 command: GameCommand
-                if bot.balance >= game.active_debt.amount:
+                proposal = game.active_debt.plan_proposal
+                if proposal is not None:
+                    command = AcceptRentDebtPlanCommand(
+                        action="accept_rent_debt_plan"
+                    )
+                elif bot.balance >= game.active_debt.amount:
                     command = PayDebtCommand(action="pay_debt")
                 else:
                     command = DeclareBankruptcyCommand(action="declare_bankruptcy")
@@ -269,6 +309,18 @@ class BotPolicy:
 
     # -------------------------------------------------------------------- debt
 
+    @staticmethod
+    def _rent_debt_waits_for_creditor(game: GameState) -> bool:
+        debt = game.active_debt
+        return bool(
+            game.settings.rules.custom_rent_debts_enabled
+            and debt is not None
+            and debt.creditor_id is not None
+            and debt.reason is DebtReason.RENT
+            and not debt.collection_demanded
+            and debt.plan_proposal is None
+        )
+
     def _debt_action(
         self,
         game: GameState,
@@ -278,8 +330,76 @@ class BotPolicy:
     ) -> BotAction:
         debt = game.active_debt
         assert debt is not None
+        if debt.plan_proposal is not None:
+            proposal = debt.plan_proposal
+            if proposal.interest_percent <= 25 and proposal.installments <= 6:
+                return BotAction(
+                    bot.user_id,
+                    AcceptRentDebtPlanCommand(action="accept_rent_debt_plan"),
+                    "accept_reasonable_rent_plan",
+                )
+            return BotAction(
+                bot.user_id,
+                RejectRentDebtPlanCommand(action="reject_rent_debt_plan"),
+                "reject_expensive_rent_plan",
+            )
         if bot.balance >= debt.amount:
             return BotAction(bot.user_id, PayDebtCommand(action="pay_debt"), "pay_debt")
+
+        shortfall = debt.amount - bot.balance
+        if game.settings.rules.stock_market_enabled:
+            bank_capacity = max(0, game.bank.cash - minimum_reserve(game))
+            sellable = []
+            for instrument in game.bank.investments:
+                held = instrument.holdings.get(bot.user_id, 0)
+                maximum_quantity = 0
+                for quantity in range(1, held + 1):
+                    gross = instrument.current_price * quantity
+                    proceeds = (
+                        gross
+                        - gross * instrument.transaction_fee_percent // 100
+                    )
+                    if proceeds <= bank_capacity:
+                        maximum_quantity = quantity
+                if maximum_quantity:
+                    sellable.append((instrument, maximum_quantity))
+            if sellable:
+                instrument, maximum_quantity = max(
+                    sellable,
+                    key=lambda item: (
+                        item[0].current_price * 100 // item[0].base_price,
+                        item[0].current_price,
+                        item[0].id,
+                    ),
+                )
+                per_share = max(
+                    1,
+                    instrument.current_price
+                    * (100 - instrument.transaction_fee_percent)
+                    // 100,
+                )
+                quantity = min(
+                    maximum_quantity,
+                    max(1, (shortfall + per_share - 1) // per_share),
+                )
+                return BotAction(
+                    bot.user_id,
+                    SellSharesCommand(
+                        action="sell_shares",
+                        instrument_id=instrument.id,
+                        quantity=quantity,
+                    ),
+                    "sell_liquid_investment_for_debt",
+                )
+
+        if game.settings.rules.loans_enabled:
+            offer = credit_offer(game, pack, bot)
+            if shortfall <= offer.maximum_amount and offer.interest_percent <= 25:
+                return BotAction(
+                    bot.user_id,
+                    RequestLoanCommand(action="request_loan", amount=shortfall),
+                    "borrow_to_preserve_productive_assets",
+                )
 
         # Mortgaging comes first: it is reversible and keeps the rent flowing,
         # while selling a building gives back only part of what it cost.
@@ -304,26 +424,45 @@ class BotPolicy:
                 "mortgage_least_valuable_for_debt",
             )
 
-        sellable = [
-            tile
-            for tile in pack.board.tiles
-            if game.owners.get(tile.id) == bot.user_id
-            and game.building_levels.get(tile.id, 0) > 0
-            and self._can_sell_building(game, pack, tile)
-        ]
-        if sellable:
-            tile = max(
-                sellable,
-                key=lambda item: (
-                    game.building_levels.get(item.id, 0),
-                    item.build_cost or 0,
-                    item.id,
-                ),
+        sellable_groups = []
+        seen_groups: set[str] = set()
+        for tile in pack.board.tiles:
+            if tile.group is None or tile.group in seen_groups:
+                continue
+            seen_groups.add(tile.group)
+            group = self._group_tiles(pack, tile)
+            if not all(game.owners.get(item.id) == bot.user_id for item in group):
+                continue
+            levels = {item.id: game.building_levels.get(item.id, 0) for item in group}
+            minimum_level = min(levels.values())
+            maximum_level = max(levels.values())
+            if maximum_level <= 0 or maximum_level - minimum_level > 1:
+                continue
+            targets = [item for item in group if levels[item.id] == maximum_level]
+            if any(levels[item.id] == 5 for item in targets):
+                houses_required = 4 * sum(levels[item.id] == 5 for item in targets)
+                if game.houses_remaining < houses_required:
+                    continue
+            refund = sum(
+                (
+                    item.hotel_cost
+                    if levels[item.id] == 5 and item.hotel_cost is not None
+                    else item.build_cost or 0
+                )
+                * pack.manifest.building_sell_percent
+                // 100
+                for item in targets
             )
+            sellable_groups.append((refund, maximum_level, tile.group))
+        if sellable_groups:
+            _, _, group_id = max(sellable_groups)
             return BotAction(
                 bot.user_id,
-                SellBuildingCommand(action="sell_building", property_id=tile.id),
-                "liquidate_building_for_debt",
+                SellGroupRoundCommand(
+                    action="sell_group_round",
+                    group_id=group_id,
+                ),
+                "liquidate_group_round_for_debt",
             )
 
         return BotAction(
@@ -378,7 +517,18 @@ class BotPolicy:
                 continue
             if assessment.counter is None:
                 continue
-            return BotAction(bot.user_id, assessment.counter, assessment.reason)
+            return BotAction(
+                bot.user_id,
+                CounterTradeCommand(
+                    action="counter_trade",
+                    trade_id=trade.id,
+                    offered_cash=assessment.counter.offered_cash,
+                    requested_cash=assessment.counter.requested_cash,
+                    offered_property_ids=assessment.counter.offered_property_ids,
+                    requested_property_ids=assessment.counter.requested_property_ids,
+                ),
+                assessment.reason,
+            )
         return None
 
     def _stale_outgoing_trade_action(self, game: GameState) -> BotAction | None:
@@ -455,6 +605,29 @@ class BotPolicy:
                 BuyPropertyCommand(action="buy_property"),
                 "buy_completes_group" if completes else "buy_within_strategy",
             )
+        if worthwhile and game.settings.rules.loans_enabled:
+            target_reserve = floor // 2 if completes else floor
+            required_credit = max(1, price + target_reserve - bot.balance)
+            offer = credit_offer(game, pack, bot)
+            financed_cost = price + (
+                required_credit * offer.interest_percent + 99
+            ) // 100
+            if (
+                required_credit <= offer.maximum_amount
+                and (
+                    completes
+                    or value * 100
+                    >= financed_cost * profile.buy_required_percent
+                )
+            ):
+                return BotAction(
+                    bot.user_id,
+                    RequestLoanCommand(
+                        action="request_loan",
+                        amount=required_credit,
+                    ),
+                    "finance_strategic_property",
+                )
         return BotAction(
             bot.user_id,
             DeclinePropertyCommand(action="decline_property"),
@@ -548,35 +721,167 @@ class BotPolicy:
             1,
         )
         candidates = []
+        seen_groups: set[str] = set()
         for tile in pack.board.tiles:
-            if tile.group is None or game.owners.get(tile.id) != bot.user_id:
+            if tile.group is None or tile.group in seen_groups:
                 continue
+            seen_groups.add(tile.group)
             group = self._group_tiles(pack, tile)
             if not all(game.owners.get(item.id) == bot.user_id for item in group):
                 continue
             if any(item.id in game.mortgaged_property_ids for item in group):
                 continue
             levels = {item.id: game.building_levels.get(item.id, 0) for item in group}
-            level = levels[tile.id]
-            if level >= 5 or level != min(levels.values()):
+            minimum_level = min(levels.values())
+            maximum_level = max(levels.values())
+            if minimum_level >= 5 or maximum_level - minimum_level > 1:
                 continue
-            cost = (
-                tile.hotel_cost
-                if level == 4 and tile.hotel_cost is not None
-                else tile.build_cost or 0
+            targets = [item for item in group if levels[item.id] == minimum_level]
+            total_cost = sum(
+                (
+                    item.hotel_cost
+                    if minimum_level == 4 and item.hotel_cost is not None
+                    else item.build_cost or 0
+                )
+                for item in targets
             )
             supply_available = (
-                game.hotels_remaining > 0 if level == 4 else game.houses_remaining > 0
+                game.hotels_remaining >= len(targets)
+                if minimum_level == 4
+                else game.houses_remaining >= len(targets)
             )
-            if supply_available and cost > 0 and bot.balance - cost >= reserve:
-                candidates.append((engine.expected_rent(tile, bot.user_id), tile))
+            if supply_available and total_cost > 0 and bot.balance - total_cost >= reserve:
+                rent_score = sum(
+                    item.rent_levels[min(minimum_level + 1, len(item.rent_levels) - 1)]
+                    if item.rent_levels
+                    else engine.expected_rent(item, bot.user_id)
+                    for item in targets
+                )
+                candidates.append((rent_score, -total_cost, tile.group))
         if not candidates:
             return None
-        tile = max(candidates, key=lambda item: (item[0], item[1].id))[1]
+        group_id = max(candidates)[2]
         return BotAction(
             bot.user_id,
-            BuildPropertyCommand(action="build_property", property_id=tile.id),
-            "develop_complete_group",
+            BuildGroupRoundCommand(
+                action="build_group_round",
+                group_id=group_id,
+            ),
+            "develop_complete_group_round",
+        )
+
+    def _financial_action(
+        self,
+        game: GameState,
+        pack: ContentPack,
+        engine: NegotiationEngine,
+        bot: PlayerState,
+    ) -> BotAction | None:
+        if self._financial_action_during_current_turn(game, bot.user_id):
+            return None
+        floor = engine.liquidity_floor(bot)
+        loan = next(
+            (item for item in game.bank.loans if item.player_id == bot.user_id),
+            None,
+        )
+        repayment_action = None
+        if loan is not None:
+            amount = min(loan.installment_amount, loan.remaining_balance)
+            if bot.balance - amount >= floor:
+                repayment_action = BotAction(
+                    bot.user_id,
+                    RepayLoanCommand(action="repay_loan", amount=amount),
+                    "repay_credit_while_liquid",
+                )
+        if not game.settings.rules.stock_market_enabled:
+            return repayment_action
+        personality = bot.bot_personality or BotPersonality.BALANCED
+        reserve_percent = {
+            BotPersonality.CONSERVATIVE: 100,
+            BotPersonality.BALANCED: 75,
+            BotPersonality.AGGRESSIVE: 50,
+            BotPersonality.NEGOTIATOR: 75,
+        }[personality]
+        required_reserve = floor * reserve_percent // 100
+        candidates = []
+        for instrument in game.bank.investments:
+            held = instrument.holdings.get(bot.user_id, 0)
+            maximum = max(
+                1,
+                instrument.total_shares
+                * instrument.max_ownership_percent
+                // 100,
+            )
+            quote = market_order_quote(instrument, 1, buying=True)
+            fee = (
+                quote.gross * instrument.transaction_fee_percent + 99
+            ) // 100
+            cost = quote.gross + fee
+            historic_dividend = instrument.dividends_paid // instrument.total_shares
+            attractively_priced = (
+                instrument.current_price * 100 <= instrument.base_price * 120
+                or historic_dividend * 100 >= instrument.current_price * 5
+            )
+            if loan is not None:
+                credit = game.bank.credit_profiles.get(bot.user_id)
+                required_reserve = (
+                    loan.installment_amount
+                    * pack.manifest.loan_investment_installment_reserve
+                    + pack.manifest.pass_start_salary
+                    * pack.manifest.loan_investment_reserve_salary_percent
+                    // 100
+                )
+                exposure = sum(
+                    item.current_price * item.holdings.get(bot.user_id, 0)
+                    for item in game.bank.investments
+                )
+                exposure_limit = max(
+                    0,
+                    (
+                        engine.net_worth(bot)
+                        + exposure
+                        - loan.remaining_balance
+                    )
+                    * pack.manifest.loan_investment_max_net_worth_percent
+                    // 100,
+                )
+                attractively_priced = (
+                    attractively_priced
+                    and credit is not None
+                    and credit.score >= 600
+                    and bot.bot_personality is BotPersonality.AGGRESSIVE
+                    and instrument.current_price <= instrument.base_price
+                    and bot.balance - cost >= required_reserve
+                    and exposure + quote.gross <= exposure_limit
+                )
+            if (
+                instrument.available_shares > 0
+                and held < maximum
+                and bot.balance - cost >= required_reserve
+                and attractively_priced
+            ):
+                candidates.append(
+                    (
+                        historic_dividend * 100
+                        + instrument.base_price * 100 // instrument.current_price,
+                        -instrument.current_price,
+                        instrument,
+                    )
+                )
+        if not candidates:
+            return repayment_action
+        instrument = max(
+            candidates,
+            key=lambda item: (item[0], item[1], item[2].id),
+        )[2]
+        return BotAction(
+            bot.user_id,
+            BuySharesCommand(
+                action="buy_shares",
+                instrument_id=instrument.id,
+                quantity=1,
+            ),
+            "invest_surplus_cash_at_fair_value",
         )
 
     # --------------------------------------------------------------- utilities
@@ -588,18 +893,6 @@ class BotPolicy:
         if discount:
             price -= price * discount // 100
         return price
-
-    def _can_sell_building(
-        self,
-        game: GameState,
-        pack: ContentPack,
-        tile: TileDefinition,
-    ) -> bool:
-        group = self._group_tiles(pack, tile)
-        level = game.building_levels.get(tile.id, 0)
-        if level != max(game.building_levels.get(item.id, 0) for item in group):
-            return False
-        return level != 5 or game.houses_remaining >= 4
 
     def _can_mortgage(
         self,
@@ -625,6 +918,29 @@ class BotPolicy:
             event.sequence > marker
             and event.type == "trade.proposed"
             and event.data.get("proposer_id") == player_text
+            for event in game.events
+        )
+
+    @staticmethod
+    def _financial_action_during_current_turn(
+        game: GameState,
+        player_id: UUID,
+    ) -> bool:
+        marker = 0
+        player_text = str(player_id)
+        for event in game.events:
+            if event.type == "turn.started" and event.data.get("player_id") == player_text:
+                marker = event.sequence
+        return any(
+            event.sequence > marker
+            and event.type
+            in {
+                "bank.loan_issued",
+                "bank.loan_payment",
+                "investment.shares_bought",
+                "investment.shares_sold",
+            }
+            and event.data.get("player_id") == player_text
             for event in game.events
         )
 

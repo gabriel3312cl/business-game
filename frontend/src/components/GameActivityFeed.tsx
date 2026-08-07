@@ -1,4 +1,12 @@
+import AccountBalanceWalletRoundedIcon from '@mui/icons-material/AccountBalanceWalletRounded'
+import CasinoRoundedIcon from '@mui/icons-material/CasinoRounded'
+import HandshakeRoundedIcon from '@mui/icons-material/HandshakeRounded'
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded'
+import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded'
+import InfoRoundedIcon from '@mui/icons-material/InfoRounded'
+import PaymentsRoundedIcon from '@mui/icons-material/PaymentsRounded'
+import StyleRoundedIcon from '@mui/icons-material/StyleRounded'
+import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
 import {
   Box,
   Divider,
@@ -15,6 +23,11 @@ import type {
   PlayerState,
   SpectatorState,
 } from '../types'
+import { playerColors } from './gameColors'
+import {
+  activityPresentation,
+  type ActivityTone,
+} from './gameActivityFeedPresentation'
 
 interface Props {
   events: GameEvent[]
@@ -85,37 +98,76 @@ export function GameActivityFeed({
             width: '100%',
           }}
         >
-          {visibleEvents.map((event) => (
-            <ListItem key={event.sequence} disableGutters alignItems="flex-start">
-              <ListItemText
-                primary={eventMessage(
-                  event,
-                  t,
-                  playerName,
-                  propertyName,
-                  cardMessage,
-                  deckName,
-                )}
-                secondary={formatEventTime(event.occurred_at, i18n.language)}
-                slotProps={{
-                  primary: {
-                    variant: 'body2',
-                    sx: compact
-                      ? {
-                          fontSize: { xs: '0.55rem', sm: '0.7rem', lg: '0.8rem' },
-                          lineHeight: 1.25,
-                          textAlign: 'center',
-                        }
-                      : undefined,
-                  },
-                  secondary: {
-                    variant: 'caption',
-                    sx: compact ? { display: 'none' } : undefined,
-                  },
+          {visibleEvents.map((event) => {
+            const presentation = activityPresentation(event)
+            const message = eventMessage(
+              event,
+              t,
+              playerName,
+              propertyName,
+              cardMessage,
+              deckName,
+              i18n.language,
+            )
+            return (
+              <ListItem
+                key={event.sequence}
+                alignItems="flex-start"
+                sx={{
+                  py: compact ? 0.35 : 0.65,
+                  px: compact ? 0.6 : 0.85,
+                  mb: 0.4,
+                  borderRadius: 1.5,
+                  borderLeft: `3px solid ${presentation.color}`,
+                  bgcolor: `${presentation.color}0d`,
                 }}
-              />
-            </ListItem>
-          ))}
+              >
+                <Box
+                  aria-hidden
+                  sx={{
+                    mt: compact ? 0.15 : 0.25,
+                    mr: compact ? 0.6 : 0.85,
+                    width: compact ? 20 : 24,
+                    height: compact ? 20 : 24,
+                    flex: '0 0 auto',
+                    display: 'grid',
+                    placeItems: 'center',
+                    borderRadius: '50%',
+                    color: presentation.color,
+                    bgcolor: `${presentation.color}1f`,
+                    fontSize: compact ? 13 : 15,
+                  }}
+                >
+                  <ActivityIcon tone={presentation.tone} />
+                </Box>
+                <ListItemText
+                  sx={{ my: 0 }}
+                  primary={decorateEventMessage(
+                    message,
+                    players,
+                    spectators,
+                    presentation.color,
+                  )}
+                  secondary={formatEventTime(event.occurred_at, i18n.language)}
+                  slotProps={{
+                    primary: {
+                      variant: 'body2',
+                      sx: compact
+                        ? {
+                            fontSize: { xs: '0.55rem', sm: '0.7rem', lg: '0.8rem' },
+                            lineHeight: 1.3,
+                          }
+                        : { lineHeight: 1.35 },
+                    },
+                    secondary: {
+                      variant: 'caption',
+                      sx: compact ? { display: 'none' } : { opacity: 0.7 },
+                    },
+                  }}
+                />
+              </ListItem>
+            )
+          })}
         </List>
       )}
     </Box>
@@ -124,6 +176,84 @@ export function GameActivityFeed({
 
 type Translate = ReturnType<typeof useTranslation>['t']
 
+function ActivityIcon({ tone }: { tone: ActivityTone }) {
+  switch (tone) {
+    case 'income':
+      return <AccountBalanceWalletRoundedIcon fontSize="inherit" />
+    case 'expense':
+      return <PaymentsRoundedIcon fontSize="inherit" />
+    case 'movement':
+      return <CasinoRoundedIcon fontSize="inherit" />
+    case 'property':
+      return <HomeWorkRoundedIcon fontSize="inherit" />
+    case 'trade':
+      return <HandshakeRoundedIcon fontSize="inherit" />
+    case 'card':
+      return <StyleRoundedIcon fontSize="inherit" />
+    case 'alert':
+      return <WarningAmberRoundedIcon fontSize="inherit" />
+    default:
+      return <InfoRoundedIcon fontSize="inherit" />
+  }
+}
+
+function decorateEventMessage(
+  message: string,
+  players: PlayerState[],
+  spectators: SpectatorState[],
+  moneyColor: string,
+) {
+  const people = [
+    ...players.map((player, index) => ({
+      name: player.display_name,
+      color: playerColors[index % playerColors.length],
+    })),
+    ...spectators.map((spectator) => ({
+      name: spectator.display_name,
+      color: '#b0b8c8',
+    })),
+  ].filter((person) => person.name.length > 0)
+  const names = people
+    .map((person) => person.name)
+    .sort((left, right) => right.length - left.length)
+    .map(escapeRegExp)
+  const matcher = new RegExp(
+    `(${names.length > 0 ? `${names.join('|')}|` : ''}\\$-?[\\d.,]+)`,
+    'g',
+  )
+
+  return message.split(matcher).filter(Boolean).map((part, index) => {
+    const person = people.find((candidate) => candidate.name === part)
+    if (person) {
+      return (
+        <Box
+          component="span"
+          key={`${part}-${index}`}
+          sx={{ color: person.color, fontWeight: 850 }}
+        >
+          {part}
+        </Box>
+      )
+    }
+    if (/^\$-?[\d.,]+$/.test(part)) {
+      return (
+        <Box
+          component="span"
+          key={`${part}-${index}`}
+          sx={{ color: moneyColor, fontWeight: 850 }}
+        >
+          {part}
+        </Box>
+      )
+    }
+    return part
+  })
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function eventMessage(
   event: GameEvent,
   t: Translate,
@@ -131,6 +261,7 @@ function eventMessage(
   propertyName: (tileId?: string) => string,
   cardMessage: (cardId?: string) => string,
   deckName: (deckId?: string) => string,
+  locale: string,
 ): string {
   const player = playerName(textValue(event, 'player_id'))
   const member =
@@ -142,6 +273,17 @@ function eventMessage(
   const property = propertyName(
     textValue(event, 'property_id') ?? textValue(event, 'tile_id'),
   )
+  const instrumentKind =
+    textValue(event, 'instrument_kind') ??
+    (textValue(event, 'tile_id')?.startsWith('institution:')
+      ? textValue(event, 'tile_id')?.replace('institution:', '')
+      : undefined)
+  const investment =
+    instrumentKind && instrumentKind !== 'asset'
+      ? t(`bankPanel.instrumentNames.${instrumentKind}`, {
+          defaultValue: t('bankPanel.investment'),
+        })
+      : property || t('bankPanel.investment')
 
   switch (event.type) {
     case 'game.created':
@@ -217,11 +359,50 @@ function eventMessage(
         player: playerName(textValue(event, 'debtor_id')),
         amount,
       })
+    case 'debt.collection_demanded':
+      return t('activity.debtCollectionDemanded', {
+        creditor: playerName(textValue(event, 'creditor_id')),
+        debtor: playerName(textValue(event, 'debtor_id')),
+        amount,
+      })
     case 'debt.paid':
       return t('activity.debtPaid', {
         player: playerName(textValue(event, 'debtor_id')),
         amount,
       })
+    case 'debt.forgiven':
+      return t('activity.debtForgiven', {
+        creditor: playerName(textValue(event, 'creditor_id')),
+        debtor: playerName(textValue(event, 'debtor_id')),
+        amount,
+      })
+    case 'debt.plan_proposed':
+      return t('activity.debtPlanProposed', {
+        creditor: playerName(textValue(event, 'creditor_id')),
+        debtor: playerName(textValue(event, 'debtor_id')),
+        total: numberValue(event, 'total_amount'),
+        installments: numberValue(event, 'installments'),
+      })
+    case 'debt.plan_accepted':
+      return t('activity.debtPlanAccepted', {
+        player: playerName(textValue(event, 'debtor_id')),
+      })
+    case 'debt.plan_rejected':
+      return t('activity.debtPlanRejected', {
+        player: playerName(textValue(event, 'debtor_id')),
+      })
+    case 'debt.installment_paid':
+      return t('activity.debtInstallmentPaid', {
+        player: playerName(textValue(event, 'debtor_id')),
+        amount,
+        remaining: numberValue(event, 'remaining_amount'),
+      })
+    case 'debt.plan_completed':
+      return t('activity.debtPlanCompleted', {
+        player: playerName(textValue(event, 'debtor_id')),
+      })
+    case 'debt.plan_cancelled':
+      return t('activity.debtPlanCancelled')
     case 'card.drawn':
       return t('activity.cardDrawn', {
         player,
@@ -288,6 +469,138 @@ function eventMessage(
       return withBotReason(t('activity.tradeRejected'), event, t)
     case 'trade.cancelled':
       return withBotReason(t('activity.tradeCancelled'), event, t)
+    case 'trade.countered':
+      return withBotReason(
+        t('activity.tradeCountered', {
+          player: playerName(textValue(event, 'actor_id')),
+        }),
+        event,
+        t,
+      )
+    case 'relationship.changed': {
+      const delta = numberValue(event, 'delta') ?? 0
+      return t('activity.relationshipChanged', {
+        bot: playerName(textValue(event, 'bot_id')),
+        player: playerName(textValue(event, 'player_id')),
+        score: numberValue(event, 'score') ?? 0,
+        change: delta > 0 ? `+${delta}` : delta,
+      })
+    }
+    case 'bank.loan_issued':
+      return t('bankPanel.activity.loanIssued', {
+        player,
+        amount: `$${numberValue(event, 'principal') ?? 0}`,
+      })
+    case 'bank.loan_payment':
+      return t('bankPanel.activity.loanPaid', {
+        player,
+        amount: `$${amount ?? 0}`,
+      })
+    case 'bank.loan_payment_missed':
+      return t('bankPanel.activity.loanPaymentMissed', { player })
+    case 'bank.loan_defaulted':
+      return t('bankPanel.activity.loanDefaulted', { player })
+    case 'bank.emergency_issued':
+      return t('bankPanel.activity.emergencyIssued', {
+        amount: `$${amount ?? 0}`,
+      })
+    case 'investment.shares_bought':
+      return t('bankPanel.activity.sharesBought', {
+        player,
+        count: numberValue(event, 'quantity') ?? 0,
+        instrument: investment,
+      })
+    case 'investment.shares_sold':
+      return t('bankPanel.activity.sharesSold', {
+        player,
+        count: numberValue(event, 'quantity') ?? 0,
+        instrument: investment,
+      })
+    case 'investment.dividends_settled':
+      return t('bankPanel.activity.dividendsSettled', {
+        amount: `$${amount ?? 0}`,
+        round: numberValue(event, 'market_round') ?? 0,
+      })
+    case 'investment.limit_order_placed':
+      return t('bankPanel.activity.limitOrderPlaced', {
+        player,
+        side: t(`marketPanel.sides.${textValue(event, 'side')}`),
+        count: numberValue(event, 'quantity') ?? 0,
+        instrument: investment,
+        price: `$${numberValue(event, 'limit_price') ?? 0}`,
+      })
+    case 'investment.limit_order_cancelled':
+      return t('bankPanel.activity.limitOrderCancelled', {
+        player,
+        instrument: investment,
+      })
+    case 'investment.order_filled':
+      return t('bankPanel.activity.orderFilled', {
+        buyer: playerName(textValue(event, 'buyer_id')),
+        seller: playerName(textValue(event, 'seller_id')),
+        count: numberValue(event, 'quantity') ?? 0,
+        instrument: investment,
+        price: `$${numberValue(event, 'unit_price') ?? 0}`,
+      })
+    case 'investment.margin_call':
+      return t('bankPanel.activity.marginCall', {
+        player,
+        count: numberValue(event, 'cancelled_orders') ?? 0,
+      })
+    case 'investment.dividend_paid':
+      if (numberValue(event, 'dividend_accrued_units') !== undefined) {
+        const paid = numberValue(event, 'dividends') ?? 0
+        return t(
+          paid > 0
+            ? 'bankPanel.activity.dividendAccruedAndPaid'
+            : 'bankPanel.activity.dividendAccrued',
+          {
+            instrument: investment,
+            accrued: preciseMoney(
+              numberValue(event, 'dividend_accrued_units') ?? 0,
+              locale,
+            ),
+            paid: `$${paid}`,
+          },
+        )
+      }
+      return t('bankPanel.activity.dividendPaid', {
+        instrument: investment,
+        amount: `$${numberValue(event, 'dividends') ?? 0}`,
+      })
+    case 'investment.institution_revenue': {
+      if (numberValue(event, 'dividend_accrued_units') !== undefined) {
+        const paid = numberValue(event, 'dividends') ?? 0
+        return t(
+          paid > 0
+            ? 'bankPanel.activity.institutionRevenueAccruedAndPaid'
+            : 'bankPanel.activity.institutionRevenueAccrued',
+          {
+            instrument: investment,
+            amount: `$${amount ?? 0}`,
+            accrued: preciseMoney(
+              numberValue(event, 'dividend_accrued_units') ?? 0,
+              locale,
+            ),
+            paid: `$${paid}`,
+          },
+        )
+      }
+      return t('bankPanel.activity.institutionRevenue', {
+        instrument: investment,
+        amount: `$${amount ?? 0}`,
+        dividends: `$${numberValue(event, 'dividends') ?? 0}`,
+      })
+    }
+    case 'investment.position_liquidated':
+      return t('bankPanel.activity.positionLiquidated', {
+        player,
+        amount: `$${amount ?? 0}`,
+      })
+    case 'investment.market_expanded':
+      return t('bankPanel.activity.marketExpanded', {
+        count: numberValue(event, 'added_instruments') ?? 0,
+      })
     case 'player.bankrupt':
       return t('activity.playerBankrupt', { player })
     case 'turn.started':
@@ -331,4 +644,10 @@ function formatEventTime(value: string, locale: string): string {
     minute: '2-digit',
     second: '2-digit',
   }).format(date)
+}
+
+function preciseMoney(units: number, locale: string): string {
+  return `$${new Intl.NumberFormat(locale, {
+    maximumFractionDigits: 4,
+  }).format(units / 10_000)}`
 }

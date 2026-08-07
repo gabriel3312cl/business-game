@@ -10,11 +10,15 @@ import httpx
 
 from business_game.application.bots import BotAction
 from business_game.application.negotiation import NegotiationEngine, TradeCandidate
+from business_game.application.relationships import relationship_score
 from business_game.domain.models import (
     AcceptTradeCommand,
     BidCommand,
+    BuildGroupRoundCommand,
     BuyPropertyCommand,
+    BuySharesCommand,
     ContentPack,
+    CounterTradeCommand,
     DeclinePropertyCommand,
     EndTurnCommand,
     GameCommand,
@@ -24,8 +28,12 @@ from business_game.domain.models import (
     PlayerState,
     ProposeTradeCommand,
     RejectTradeCommand,
+    RepayLoanCommand,
+    RequestLoanCommand,
     RollCommand,
     SelectAuctionPropertyCommand,
+    SellGroupRoundCommand,
+    SellSharesCommand,
     TileDefinition,
     TradeStatus,
     TurnPhase,
@@ -285,6 +293,25 @@ def _trade_estimate(
             "tu_ganancia": valuation.proposer_surplus,
             "ganancia_rival": valuation.recipient_surplus,
         }
+    if isinstance(command, CounterTradeCommand):
+        original = next(
+            (item for item in game.trades if item.id == command.trade_id),
+            None,
+        )
+        if original is None:
+            return None
+        valuation = engine.evaluate(
+            player.user_id,
+            original.proposer_id,
+            offered_cash=command.offered_cash,
+            requested_cash=command.requested_cash,
+            offered_property_ids=command.offered_property_ids,
+            requested_property_ids=command.requested_property_ids,
+        )
+        return {
+            "tu_ganancia": valuation.proposer_surplus,
+            "ganancia_rival": valuation.recipient_surplus,
+        }
     if isinstance(command, AcceptTradeCommand):
         trade = next(
             (item for item in game.trades if item.id == command.trade_id),
@@ -337,6 +364,11 @@ def build_ai_bot_context(
             "net_worth": engine.net_worth(player),
             "assets": _asset_summary(game, pack, player),
             "one_property_from": _one_property_from(game, pack, engine, player),
+            "relationship_with_you": (
+                None
+                if player.user_id == actor_id
+                else relationship_score(game, actor_id, player.user_id)
+            ),
         }
         for player in game.players
     ]
@@ -466,6 +498,22 @@ def _describe_command(command: GameCommand, game: GameState, pack: ContentPack) 
         return "Lanzar los dados"
     if isinstance(command, EndTurnCommand):
         return "Finalizar el turno"
+    if isinstance(command, BuildGroupRoundCommand):
+        return f"Construir una ronda en el grupo {command.group_id}"
+    if isinstance(command, SellGroupRoundCommand):
+        return f"Vender una ronda del grupo {command.group_id}"
+    if isinstance(command, RequestLoanCommand):
+        return f"Solicitar un préstamo de ${command.amount}"
+    if isinstance(command, RepayLoanCommand):
+        return (
+            f"Pagar ${command.amount} del préstamo"
+            if command.amount is not None
+            else "Pagar completamente el préstamo"
+        )
+    if isinstance(command, BuySharesCommand):
+        return f"Comprar {command.quantity} participación(es) de {command.instrument_id}"
+    if isinstance(command, SellSharesCommand):
+        return f"Vender {command.quantity} participación(es) de {command.instrument_id}"
     if isinstance(command, ProposeTradeCommand):
         offered_properties = ", ".join(
             _tile_name(pack, property_id) for property_id in command.offered_property_ids
@@ -475,6 +523,17 @@ def _describe_command(command: GameCommand, game: GameState, pack: ContentPack) 
         ) or "ninguna propiedad"
         return (
             f"Proponer trato: entregar ${command.offered_cash} y {offered_properties}; "
+            f"pedir ${command.requested_cash} y {requested_properties}"
+        )
+    if isinstance(command, CounterTradeCommand):
+        offered_properties = ", ".join(
+            _tile_name(pack, property_id) for property_id in command.offered_property_ids
+        ) or "ninguna propiedad"
+        requested_properties = ", ".join(
+            _tile_name(pack, property_id) for property_id in command.requested_property_ids
+        ) or "ninguna propiedad"
+        return (
+            f"Contraofertar: entregar ${command.offered_cash} y {offered_properties}; "
             f"pedir ${command.requested_cash} y {requested_properties}"
         )
     action = command.action.replace("_", " ")

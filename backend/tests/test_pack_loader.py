@@ -38,7 +38,7 @@ def test_loads_classic_and_extended_topologies(packs_dir: Path) -> None:
     }
     assert all(len(deck.cards) == 16 for deck in classic.board.decks)
     assert classic.manifest.default_rules.auction_unpurchased_properties
-    assert len(classic.manifest.configurable_rules) == 3
+    assert len(classic.manifest.configurable_rules) == 5
 
     assert extended.manifest.side_length == 17
     assert extended.manifest.version == "2.0.0"

@@ -9,7 +9,22 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.application.board_service import PackResolver
+from business_game.application.economy import (
+    available_bank_cash,
+    credit_offer,
+    credit_profile,
+    initialize_bank,
+    market_order_quote,
+    minimum_reserve,
+    reconcile_bank,
+    refresh_credit_profiles,
+    refresh_market_index,
+)
 from business_game.application.pack_loader import PackLoader
+from business_game.application.relationships import (
+    clamp_score,
+    relationship_changes_for_events,
+)
 from business_game.config import settings
 from business_game.domain.errors import (
     ConflictError,
@@ -18,25 +33,34 @@ from business_game.domain.errors import (
     UnauthorizedError,
 )
 from business_game.domain.models import (
+    AcceptRentDebtPlanCommand,
     AcceptTradeCommand,
     AddBotRequest,
     AuctionState,
+    BankLoanState,
     BidCommand,
     BotController,
     BotPersonality,
+    BotRelationshipState,
+    BuildGroupRoundCommand,
     BuildPropertyCommand,
     BuyPropertyCommand,
+    BuySharesCommand,
+    CancelMarketOrderCommand,
     CancelTradeCommand,
     CardPaymentState,
     CashCardEffect,
     CashEachCardEffect,
     CompleteGroupsCashCardEffect,
     ContentPack,
+    CounterTradeCommand,
     DebtReason,
     DebtState,
     DeclareBankruptcyCommand,
     DeclinePropertyCommand,
+    DemandRentDebtCommand,
     EndTurnCommand,
+    ForgiveRentDebtCommand,
     GameCommand,
     GameEvent,
     GameSettings,
@@ -44,6 +68,9 @@ from business_game.domain.models import (
     GameStatus,
     GetOutOfJailCardEffect,
     GoToJailCardEffect,
+    InvestmentInstrumentState,
+    MarketOrderSide,
+    MarketOrderState,
     MortgagedPropertiesCashCardEffect,
     MortgagePropertyCommand,
     MoveRelativeCardEffect,
@@ -54,14 +81,24 @@ from business_game.domain.models import (
     PassAuctionCommand,
     PayDebtCommand,
     PayJailFineCommand,
+    PlaceLimitOrderCommand,
     PlayerState,
+    ProposeRentDebtPlanCommand,
     ProposeTradeCommand,
     RefinanceMortgageCardEffect,
+    RejectRentDebtPlanCommand,
     RejectTradeCommand,
+    RentDebtPlanProposal,
+    RentDebtPlanState,
     RepairsCardEffect,
+    RepayLoanCommand,
+    RequestLoanCommand,
     RollCommand,
+    RuleOptionName,
     SelectAuctionPropertyCommand,
     SellBuildingCommand,
+    SellGroupRoundCommand,
+    SellSharesCommand,
     SpectatorState,
     TileDefinition,
     TileKind,
@@ -94,6 +131,13 @@ CardShuffler = Callable[[list[str]], list[str]]
 Clock = Callable[[], datetime]
 AUCTION_BID_WINDOW = timedelta(seconds=5)
 MAX_EFFECTS_PER_COMMAND = 32
+DIVIDEND_SCALE = 10_000
+INDEX_DIVIDEND_ALLOCATION_PERCENT = 10
+GLOBAL_FINANCIAL_RULES = {
+    RuleOptionName.LOANS_ENABLED.value,
+    RuleOptionName.STOCK_MARKET_ENABLED.value,
+    RuleOptionName.CUSTOM_RENT_DEBTS_ENABLED.value,
+}
 DUMMY_PASSWORD_HASH = hash_password("business-game-invalid-account")
 
 
@@ -229,6 +273,22 @@ class GameService:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._remaining_effects = MAX_EFFECTS_PER_COMMAND
 
+    def _ensure_economy(self, game: GameState) -> None:
+        initialize_bank(game, self._pack(game))
+
+    def _sync_bank(self, game: GameState) -> None:
+        issued = reconcile_bank(game)
+        if issued:
+            self._append_event(
+                game,
+                "bank.emergency_issued",
+                {
+                    "amount": issued,
+                    "total_issuance": game.bank.emergency_issuance,
+                },
+            )
+        refresh_credit_profiles(game, self._pack(game))
+
     async def create(
         self,
         pack_id: str,
@@ -262,6 +322,7 @@ class GameService:
             )
             self._append_event(game, "game.created", {"pack_id": pack_id})
             self._append_event(game, "player.joined", {"player_id": str(actor.id)})
+            initialize_bank(game, pack)
             await self._games.create(game)
         return game
 
@@ -301,6 +362,8 @@ class GameService:
                 )
             )
             self._append_event(game, "player.joined", {"player_id": str(actor.id)})
+            self._ensure_economy(game)
+            self._sync_bank(game)
             await self._games.save(game, previous_sequence, sync_members=True)
             return game
 
@@ -359,6 +422,8 @@ class GameService:
                     "bot_controller": data.controller.value,
                 },
             )
+            self._ensure_economy(game)
+            self._sync_bank(game)
             await self._games.save(game, previous_sequence)
             return game
 
@@ -395,6 +460,8 @@ class GameService:
                     "is_bot": True,
                 },
             )
+            self._ensure_economy(game)
+            self._sync_bank(game)
             await self._games.save(game, previous_sequence)
             return game
 
@@ -471,7 +538,7 @@ class GameService:
             if data.rules is not None:
                 allowed_rules = {
                     rule.value for rule in pack.manifest.configurable_rules
-                }
+                } | GLOBAL_FINANCIAL_RULES
                 requested_rules = data.rules.model_dump(
                     exclude_none=True,
                     exclude_unset=True,
@@ -485,7 +552,88 @@ class GameService:
                     setattr(game.settings.rules, rule_name, value)
                 changes["rules"] = requested_rules
             self._append_event(game, "game.settings_updated", changes)
+            self._ensure_economy(game)
+            self._sync_bank(game)
             await self._games.save(game, previous_sequence)
+            return game
+
+    async def activate_financial_features(self, game_id: UUID) -> GameState:
+        """One-time maintenance path for an already-running local game."""
+        async with self._session.begin():
+            game = await self._games.get(game_id, for_update=True)
+            previous_sequence = game.event_sequence
+            was_initialized = game.bank.initialized
+            previous_investment_count = len(game.bank.investments)
+            rules_changed = (
+                not game.settings.rules.loans_enabled
+                or not game.settings.rules.stock_market_enabled
+            )
+            game.settings.rules.loans_enabled = True
+            game.settings.rules.stock_market_enabled = True
+            if game.pack_snapshot is not None:
+                game.pack_snapshot.manifest.investment_dividend_percent = 30
+                (
+                    game.pack_snapshot.manifest.investment_transaction_fee_percent
+                ) = 1
+                game.pack_snapshot.manifest.investment_max_ownership_percent = 30
+                game.pack_snapshot.manifest.investment_spread_percent = 1
+            self._ensure_economy(game)
+            if rules_changed:
+                self._append_event(
+                    game,
+                    "game.settings_updated",
+                    {
+                        "rules": {
+                            "loans_enabled": True,
+                            "stock_market_enabled": True,
+                        },
+                        "source": "authorized_maintenance",
+                    },
+                )
+            added_investments = len(game.bank.investments) - previous_investment_count
+            if added_investments:
+                self._append_event(
+                    game,
+                    "investment.market_expanded",
+                    {
+                        "added_instruments": added_investments,
+                        "instrument_count": len(game.bank.investments),
+                        "source": "authorized_maintenance",
+                    },
+                )
+            if not was_initialized:
+                self._append_event(
+                    game,
+                    "bank.initialized",
+                    {
+                        "monetary_base": game.bank.monetary_base,
+                        "cash": game.bank.cash,
+                        "minimum_reserve_percent": (
+                            game.bank.minimum_reserve_percent
+                        ),
+                        "investment_count": len(game.bank.investments),
+                    },
+                )
+            self._sync_bank(game)
+            await self._games.save(game, previous_sequence)
+            return game
+
+    async def activate_custom_rent_debts(self, game_id: UUID) -> GameState:
+        """Enable custom rent debt terms in an already-running local game."""
+        async with self._session.begin():
+            game = await self._games.get(game_id, for_update=True)
+            previous_sequence = game.event_sequence
+            if not game.settings.rules.custom_rent_debts_enabled:
+                game.settings.rules.custom_rent_debts_enabled = True
+                self._append_event(
+                    game,
+                    "game.settings_updated",
+                    {
+                        "rules": {"custom_rent_debts_enabled": True},
+                        "source": "authorized_maintenance",
+                    },
+                )
+                await self._games.save(game, previous_sequence)
             return game
 
     async def leave(self, game_id: UUID, actor_id: UUID) -> GameState:
@@ -549,6 +697,8 @@ class GameService:
                             "host.transferred",
                             {"host_id": str(game.host_user_id)},
                         )
+                self._ensure_economy(game)
+                self._sync_bank(game)
                 await self._games.save(game, previous_sequence, sync_members=True)
                 return game
             if game.status in {GameStatus.FINISHED, GameStatus.CANCELLED}:
@@ -596,6 +746,8 @@ class GameService:
                 },
             )
             self._declare_bankruptcy(game, actor_id, forced=True)
+            self._ensure_economy(game)
+            self._sync_bank(game)
             await self._games.save(game, previous_sequence, sync_members=True)
             return game
 
@@ -620,6 +772,8 @@ class GameService:
                 )
                 game.deck_cursors[deck.id] = 0
             self._append_event(game, "game.started")
+            self._ensure_economy(game)
+            self._sync_bank(game)
             await self._games.save(game, previous_sequence)
             return game
 
@@ -649,6 +803,7 @@ class GameService:
                 raise ConflictError("the game changed before the command ran")
             if game.status is not GameStatus.PLAYING:
                 raise ConflictError("the game is not active")
+            self._ensure_economy(game)
 
             if isinstance(
                 command,
@@ -656,7 +811,15 @@ class GameService:
                     MortgagePropertyCommand,
                     UnmortgagePropertyCommand,
                     BuildPropertyCommand,
+                    BuildGroupRoundCommand,
                     SellBuildingCommand,
+                    SellGroupRoundCommand,
+                    RequestLoanCommand,
+                    RepayLoanCommand,
+                    BuySharesCommand,
+                    SellSharesCommand,
+                    PlaceLimitOrderCommand,
+                    CancelMarketOrderCommand,
                 ),
             ):
                 current_player = game.current_player
@@ -678,12 +841,34 @@ class GameService:
                 else:
                     raise ConflictError("an auction property must be selected")
             elif game.active_debt is not None:
-                if actor_id != game.active_debt.debtor_id:
+                if isinstance(command, DemandRentDebtCommand):
+                    self._demand_rent_debt(game, actor_id)
+                elif isinstance(command, ForgiveRentDebtCommand):
+                    self._forgive_rent_debt(game, actor_id)
+                elif isinstance(command, ProposeRentDebtPlanCommand):
+                    self._propose_rent_debt_plan(game, actor_id, command)
+                elif isinstance(command, AcceptRentDebtPlanCommand):
+                    self._accept_rent_debt_plan(game, actor_id)
+                elif isinstance(command, RejectRentDebtPlanCommand):
+                    self._reject_rent_debt_plan(game, actor_id)
+                elif self._rent_debt_waits_for_creditor(game):
+                    raise ConflictError(
+                        "the rent creditor must choose how to resolve the debt"
+                    )
+                elif actor_id != game.active_debt.debtor_id:
                     raise ConflictError("the debtor must resolve the outstanding debt")
-                if isinstance(command, MortgagePropertyCommand):
+                elif isinstance(command, MortgagePropertyCommand):
                     self._mortgage_property(game, actor_id, command.property_id)
                 elif isinstance(command, SellBuildingCommand):
                     self._sell_building(game, actor_id, command.property_id)
+                elif isinstance(command, SellGroupRoundCommand):
+                    self._sell_group_round(game, actor_id, command.group_id)
+                elif isinstance(command, SellSharesCommand):
+                    self._sell_shares(game, actor_id, command)
+                elif isinstance(command, CancelMarketOrderCommand):
+                    self._cancel_market_order(game, actor_id, command.order_id)
+                elif isinstance(command, RequestLoanCommand):
+                    self._request_loan(game, actor_id, command.amount)
                 elif isinstance(command, PayDebtCommand):
                     self._pay_debt(game, actor_id)
                 elif isinstance(command, DeclareBankruptcyCommand):
@@ -696,12 +881,41 @@ class GameService:
                 self._unmortgage_property(game, actor_id, command.property_id)
             elif isinstance(command, BuildPropertyCommand):
                 self._build_property(game, actor_id, command.property_id)
+            elif isinstance(command, BuildGroupRoundCommand):
+                self._build_group_round(game, actor_id, command.group_id)
             elif isinstance(command, SellBuildingCommand):
                 self._sell_building(game, actor_id, command.property_id)
-            elif isinstance(command, (PayDebtCommand, DeclareBankruptcyCommand)):
+            elif isinstance(command, SellGroupRoundCommand):
+                self._sell_group_round(game, actor_id, command.group_id)
+            elif isinstance(command, RequestLoanCommand):
+                self._request_loan(game, actor_id, command.amount)
+            elif isinstance(command, RepayLoanCommand):
+                self._repay_loan(game, actor_id, command.amount)
+            elif isinstance(command, BuySharesCommand):
+                self._buy_shares(game, actor_id, command)
+            elif isinstance(command, SellSharesCommand):
+                self._sell_shares(game, actor_id, command)
+            elif isinstance(command, PlaceLimitOrderCommand):
+                self._place_limit_order(game, actor_id, command)
+            elif isinstance(command, CancelMarketOrderCommand):
+                self._cancel_market_order(game, actor_id, command.order_id)
+            elif isinstance(
+                command,
+                (
+                    PayDebtCommand,
+                    DemandRentDebtCommand,
+                    ForgiveRentDebtCommand,
+                    ProposeRentDebtPlanCommand,
+                    AcceptRentDebtPlanCommand,
+                    RejectRentDebtPlanCommand,
+                    DeclareBankruptcyCommand,
+                ),
+            ):
                 raise ConflictError("there is no outstanding debt")
             elif isinstance(command, ProposeTradeCommand):
                 self._propose_trade(game, actor_id, command)
+            elif isinstance(command, CounterTradeCommand):
+                self._counter_trade(game, actor_id, command)
             elif isinstance(command, AcceptTradeCommand):
                 self._accept_trade(game, actor_id, command)
             elif isinstance(command, RejectTradeCommand):
@@ -721,6 +935,9 @@ class GameService:
                 automation_reason,
                 automation_note,
             )
+            self._apply_relationship_effects(game, previous_sequence)
+            self._ensure_economy(game)
+            self._sync_bank(game)
             await self._games.save(game, previous_sequence)
             if command_id is not None:
                 await self._games.record_command(game_id, actor_id, command_id)
@@ -764,6 +981,8 @@ class GameService:
                 return None
             previous_sequence = game.event_sequence
             self._complete_auction(game)
+            self._ensure_economy(game)
+            self._sync_bank(game)
             await self._games.save(game, previous_sequence)
             return game
 
@@ -1547,6 +1766,7 @@ class GameService:
                 "landed_on_start": player.position == start_position,
             },
         )
+        self._collect_loan_installments(game, player, crossings)
 
     def _process_card_payments(self, game: GameState) -> None:
         while game.pending_card_payments and game.active_debt is None:
@@ -1662,7 +1882,37 @@ class GameService:
             building_value += house_cost * min(level, 4)
             if level == 5:
                 building_value += tile.hotel_cost or house_cost
-        return player.balance + property_value + building_value
+        investment_value = sum(
+            instrument.current_price
+            * instrument.holdings.get(player.user_id, 0)
+            for instrument in game.bank.investments
+        )
+        investment_value += sum(
+            self._investment(game, order.instrument_id).current_price
+            * order.remaining_quantity
+            for order in game.bank.market_orders
+            if order.player_id == player.user_id
+            and order.side is MarketOrderSide.SELL
+        )
+        reserved_cash = sum(
+            order.reserved_cash
+            for order in game.bank.market_orders
+            if order.player_id == player.user_id
+            and order.side is MarketOrderSide.BUY
+        )
+        loan_balance = sum(
+            loan.remaining_balance
+            for loan in game.bank.loans
+            if loan.player_id == player.user_id
+        )
+        return (
+            player.balance
+            + property_value
+            + building_value
+            + investment_value
+            + reserved_cash
+            - loan_balance
+        )
 
     def _complete_group_count(self, game: GameState, owner_id: UUID) -> int:
         pack = self._pack(game)
@@ -1751,7 +2001,15 @@ class GameService:
         if player.balance >= amount:
             player.balance -= amount
             if creditor_id is not None:
-                self._player(game, creditor_id).balance += amount
+                if reason is DebtReason.RENT:
+                    self._distribute_investment_rent(
+                        game,
+                        creditor_id,
+                        amount,
+                        tile_id,
+                    )
+                else:
+                    self._player(game, creditor_id).balance += amount
             else:
                 self._deposit_bank_pot(game, amount, reason)
             self._append_event(
@@ -1785,22 +2043,433 @@ class GameService:
             },
         )
 
+    def _accrue_investment_dividends(
+        self,
+        game: GameState,
+        instrument: InvestmentInstrumentState,
+        amount: int,
+        *,
+        dividend_percent: int | None = None,
+        allocation_percent: int = 100,
+    ) -> tuple[dict[str, int], dict[str, int], dict[str, int], int, int]:
+        accruals: dict[str, int] = {}
+        payouts: dict[str, int] = {}
+        loan_payments: dict[str, int] = {}
+        accrued_units = 0
+        applied_dividend_percent = (
+            instrument.dividend_percent
+            if dividend_percent is None
+            else dividend_percent
+        )
+        for holder_id, shares in instrument.holdings.items():
+            holder_units = (
+                amount
+                * applied_dividend_percent
+                * allocation_percent
+                * shares
+                * DIVIDEND_SCALE
+                // (10_000 * instrument.total_shares)
+            )
+            if holder_units <= 0:
+                continue
+            accruals[str(holder_id)] = holder_units
+            accrued_units += holder_units
+
+        funding_units = game.bank.dividend_unfunded_units + accrued_units
+        funded = funding_units // DIVIDEND_SCALE
+        game.bank.dividend_unfunded_units = funding_units % DIVIDEND_SCALE
+        game.bank.dividend_cash_reserve += funded
+
+        for holder_id_text, holder_units in accruals.items():
+            holder_id = UUID(holder_id_text)
+            holder = self._player(game, holder_id)
+            holder.pending_dividend_units += holder_units
+            instrument.pending_dividend_units[holder_id] = (
+                instrument.pending_dividend_units.get(holder_id, 0) + holder_units
+            )
+
+        instrument.dividends_accrued_units += accrued_units
+        return accruals, payouts, loan_payments, accrued_units, funded
+
+    def _accrue_market_revenue(
+        self,
+        game: GameState,
+        instrument: InvestmentInstrumentState,
+        amount: int,
+    ) -> tuple[dict[str, int], int, int, int]:
+        (
+            accruals,
+            _,
+            _,
+            accrued_units,
+            funded,
+        ) = self._accrue_investment_dividends(
+            game,
+            instrument,
+            amount,
+            allocation_percent=100 - INDEX_DIVIDEND_ALLOCATION_PERCENT,
+        )
+        index_instrument = next(
+            (
+                item
+                for item in game.bank.investments
+                if item.instrument_kind == "index"
+            ),
+            None,
+        )
+        index_accrued_units = 0
+        if index_instrument is not None and instrument.instrument_kind != "index":
+            (
+                _,
+                _,
+                _,
+                index_accrued_units,
+                index_funded,
+            ) = self._accrue_investment_dividends(
+                game,
+                index_instrument,
+                amount,
+                dividend_percent=instrument.dividend_percent,
+                allocation_percent=INDEX_DIVIDEND_ALLOCATION_PERCENT,
+            )
+            index_instrument.gross_revenue += amount
+            index_instrument.period_revenue += amount
+            funded += index_funded
+        return accruals, accrued_units, index_accrued_units, funded
+
+    def _settle_market_dividends(self, game: GameState) -> None:
+        if not game.settings.rules.stock_market_enabled:
+            return
+        payouts: dict[str, int] = {}
+        loan_payments: dict[str, int] = {}
+        instrument_payouts: dict[str, dict[str, int]] = {}
+        for instrument in game.bank.investments:
+            instrument_paid = 0
+            for holder_id, units in list(
+                instrument.pending_dividend_units.items()
+            ):
+                payout = units // DIVIDEND_SCALE
+                if payout <= 0:
+                    continue
+                if payout > game.bank.dividend_cash_reserve:
+                    raise RuntimeError("dividend cash reserve is inconsistent")
+                instrument.pending_dividend_units[holder_id] = (
+                    units % DIVIDEND_SCALE
+                )
+                holder = self._player(game, holder_id)
+                holder.pending_dividend_units -= payout * DIVIDEND_SCALE
+                game.bank.dividend_cash_reserve -= payout
+                loan_payment = self._credit_investment_payout(
+                    game,
+                    holder_id,
+                    payout,
+                )
+                holder_id_text = str(holder_id)
+                payouts[holder_id_text] = (
+                    payouts.get(holder_id_text, 0) + payout
+                )
+                instrument_payouts.setdefault(instrument.id, {})[
+                    holder_id_text
+                ] = payout
+                if loan_payment:
+                    loan_payments[holder_id_text] = (
+                        loan_payments.get(holder_id_text, 0) + loan_payment
+                    )
+                instrument_paid += payout
+            instrument.dividends_paid += instrument_paid
+            instrument.period_revenue = 0
+            instrument.last_settlement_sequence = game.event_sequence + 1
+        game.bank.market_round += 1
+        self._append_event(
+            game,
+            "investment.dividends_settled",
+            {
+                "market_round": game.bank.market_round,
+                "payouts": payouts,
+                "instrument_payouts": instrument_payouts,
+                "loan_payments": loan_payments,
+                "amount": sum(payouts.values()),
+                "pending_dividend_units": sum(
+                    player.pending_dividend_units for player in game.players
+                ),
+            },
+        )
+        self._enforce_margin_controls(game)
+
+    def _enforce_margin_controls(self, game: GameState) -> None:
+        pack = self._pack(game)
+        for loan in list(game.bank.loans):
+            player = self._player(game, loan.player_id)
+            if player.bankrupt:
+                continue
+            required_reserve = (
+                loan.installment_amount
+                * pack.manifest.loan_investment_installment_reserve
+                + pack.manifest.pass_start_salary
+                * pack.manifest.loan_investment_reserve_salary_percent
+                // 100
+            )
+            exposure = sum(
+                instrument.current_price
+                * instrument.holdings.get(player.user_id, 0)
+                for instrument in game.bank.investments
+            )
+            exposure += sum(
+                self._investment(game, order.instrument_id).current_price
+                * order.remaining_quantity
+                for order in game.bank.market_orders
+                if order.player_id == player.user_id
+                and order.side is MarketOrderSide.SELL
+            )
+            exposure += sum(
+                order.limit_price * order.remaining_quantity
+                for order in game.bank.market_orders
+                if order.player_id == player.user_id
+                and order.side is MarketOrderSide.BUY
+            )
+            exposure_limit = max(
+                0,
+                self._player_net_worth(game, player)
+                * pack.manifest.loan_investment_max_net_worth_percent
+                // 100,
+            )
+            if player.balance >= required_reserve and exposure <= exposure_limit:
+                continue
+            cancelled_order_ids = [
+                order.id
+                for order in game.bank.market_orders
+                if order.player_id == player.user_id
+                and order.side is MarketOrderSide.BUY
+            ]
+            for order_id in cancelled_order_ids:
+                self._cancel_market_order(game, player.user_id, order_id)
+            self._append_event(
+                game,
+                "investment.margin_call",
+                {
+                    "player_id": str(player.user_id),
+                    "cash_reserve": player.balance,
+                    "required_reserve": required_reserve,
+                    "exposure": exposure,
+                    "exposure_limit": exposure_limit,
+                    "cancelled_orders": len(cancelled_order_ids),
+                },
+            )
+
+    def _distribute_investment_rent(
+        self,
+        game: GameState,
+        owner_id: UUID,
+        amount: int,
+        tile_id: str,
+    ) -> None:
+        instrument = next(
+            (
+                item
+                for item in game.bank.investments
+                if item.tile_id == tile_id
+            ),
+            None,
+        )
+        held_shares = sum(instrument.holdings.values()) if instrument else 0
+        if (
+            not game.settings.rules.stock_market_enabled
+            or instrument is None
+            or held_shares == 0
+        ):
+            self._player(game, owner_id).balance += amount
+            return
+        revenue_fee = amount * instrument.revenue_fee_percent // 100
+        (
+            accruals,
+            accrued_units,
+            index_accrued_units,
+            funded,
+        ) = self._accrue_market_revenue(game, instrument, amount)
+        payouts: dict[str, int] = {}
+        loan_payments: dict[str, int] = {}
+        distributed = 0
+        owner_amount = amount - revenue_fee - funded
+        self._player(game, owner_id).balance += owner_amount
+        instrument.gross_revenue += amount
+        instrument.period_revenue += amount
+        previous_price = instrument.current_price
+        performance_step = max(
+            1,
+            amount // max(1, instrument.total_shares * 20),
+        )
+        performance_step = min(
+            performance_step,
+            max(1, instrument.current_price * 5 // 100),
+        )
+        instrument.current_price += performance_step
+        instrument.session_high = max(
+            instrument.session_high,
+            instrument.current_price,
+        )
+        instrument.session_low = min(
+            instrument.session_low or previous_price,
+            previous_price,
+        )
+        refresh_market_index(game)
+        self._append_event(
+            game,
+            "investment.dividend_paid",
+            {
+                "instrument_id": instrument.id,
+                "tile_id": tile_id,
+                "rent": amount,
+                "owner_id": str(owner_id),
+                "owner_amount": owner_amount,
+                "bank_fee": revenue_fee,
+                "dividends": distributed,
+                "dividend_accrued_units": accrued_units,
+                "index_dividend_accrued_units": index_accrued_units,
+                "dividend_funded": funded,
+                "dividend_accruals": accruals,
+                "pending_dividend_units": sum(
+                    player.pending_dividend_units for player in game.players
+                ),
+                "payouts": payouts,
+                "loan_payments": loan_payments,
+                "previous_price": previous_price,
+                "new_price": instrument.current_price,
+            },
+        )
+
+    def _distribute_institution_revenue(
+        self,
+        game: GameState,
+        instrument_kind: str,
+        amount: int,
+        revenue_type: str,
+    ) -> int:
+        if amount <= 0 or not game.settings.rules.stock_market_enabled:
+            return amount
+        instrument = next(
+            (
+                item
+                for item in game.bank.investments
+                if item.instrument_kind == instrument_kind
+            ),
+            None,
+        )
+        if instrument is None:
+            return amount
+        (
+            accruals,
+            accrued_units,
+            index_accrued_units,
+            funded,
+        ) = self._accrue_market_revenue(game, instrument, amount)
+        payouts: dict[str, int] = {}
+        loan_payments: dict[str, int] = {}
+        distributed = 0
+        instrument.gross_revenue += amount
+        instrument.period_revenue += amount
+        previous_price = instrument.current_price
+        performance_step = max(
+            1,
+            amount // max(1, instrument.total_shares * 20),
+        )
+        performance_step = min(
+            performance_step,
+            max(1, instrument.current_price * 5 // 100),
+        )
+        instrument.current_price += performance_step
+        instrument.session_high = max(
+            instrument.session_high,
+            instrument.current_price,
+        )
+        instrument.session_low = min(
+            instrument.session_low or previous_price,
+            previous_price,
+        )
+        refresh_market_index(game)
+        self._append_event(
+            game,
+            "investment.institution_revenue",
+            {
+                "instrument_id": instrument.id,
+                "tile_id": instrument.tile_id,
+                "instrument_kind": instrument_kind,
+                "revenue_type": revenue_type,
+                "amount": amount,
+                "dividends": distributed,
+                "dividend_accrued_units": accrued_units,
+                "index_dividend_accrued_units": index_accrued_units,
+                "dividend_funded": funded,
+                "dividend_accruals": accruals,
+                "pending_dividend_units": sum(
+                    player.pending_dividend_units for player in game.players
+                ),
+                "payouts": payouts,
+                "loan_payments": loan_payments,
+                "previous_price": previous_price,
+                "new_price": instrument.current_price,
+            },
+        )
+        return amount - funded
+
+    def _credit_investment_payout(
+        self,
+        game: GameState,
+        holder_id: UUID,
+        payout: int,
+    ) -> int:
+        holder = self._player(game, holder_id)
+        holder.balance += payout
+        loan = next(
+            (
+                item
+                for item in game.bank.loans
+                if item.player_id == holder_id and item.remaining_balance > 0
+            ),
+            None,
+        )
+        if loan is None:
+            return 0
+        loan_payment = min(payout, loan.remaining_balance)
+        self._apply_loan_payment(
+            game,
+            holder,
+            loan,
+            loan_payment,
+            automatic=False,
+        )
+        return loan_payment
+
     def _deposit_bank_pot(
         self,
         game: GameState,
         amount: int,
         reason: DebtReason,
     ) -> None:
+        instrument_kind = {
+            DebtReason.JAIL_FINE: "jail",
+            DebtReason.TAX: "tax",
+            DebtReason.CARD: "bank",
+        }.get(reason)
+        net_amount = (
+            self._distribute_institution_revenue(
+                game,
+                instrument_kind,
+                amount,
+                reason.value,
+            )
+            if instrument_kind is not None
+            else amount
+        )
         if (
             game.settings.rules.free_parking_jackpot
             and reason in {DebtReason.TAX, DebtReason.CARD, DebtReason.JAIL_FINE}
         ):
-            game.bank_pot += amount
+            game.bank_pot += net_amount
             self._append_event(
                 game,
                 "bank_pot.increased",
                 {
-                    "amount": amount,
+                    "amount": net_amount,
                     "balance": game.bank_pot,
                     "reason": reason.value,
                 },
@@ -1979,6 +2648,1224 @@ class GameService:
             },
         )
 
+    def _build_group_round(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        group_id: str,
+    ) -> None:
+        player = self._active_player(game, actor_id)
+        group_tiles = self._owned_property_group(game, actor_id, group_id)
+        if any(item.id in game.mortgaged_property_ids for item in group_tiles):
+            raise ConflictError("mortgaged groups cannot be developed")
+        levels = {item.id: game.building_levels.get(item.id, 0) for item in group_tiles}
+        minimum_level = min(levels.values())
+        maximum_level = max(levels.values())
+        if maximum_level - minimum_level > 1:
+            raise ConflictError("buildings must be distributed evenly")
+        if minimum_level >= 5:
+            raise ConflictError("the property group already has hotels")
+        target_tiles = [item for item in group_tiles if levels[item.id] == minimum_level]
+        costs = [
+            (
+                item.hotel_cost
+                if minimum_level == 4 and item.hotel_cost is not None
+                else item.build_cost or 0
+            )
+            for item in target_tiles
+        ]
+        if player.balance < sum(costs):
+            raise ConflictError("insufficient balance for the property group")
+        if minimum_level < 4 and game.houses_remaining < len(target_tiles):
+            raise ConflictError("there are not enough houses available")
+        if minimum_level == 4 and game.hotels_remaining < len(target_tiles):
+            raise ConflictError("there are not enough hotels available")
+        for tile in target_tiles:
+            self._build_property(game, actor_id, tile.id)
+
+    def _sell_group_round(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        group_id: str,
+    ) -> None:
+        self._active_player(game, actor_id)
+        group_tiles = self._owned_property_group(game, actor_id, group_id)
+        levels = {item.id: game.building_levels.get(item.id, 0) for item in group_tiles}
+        minimum_level = min(levels.values())
+        maximum_level = max(levels.values())
+        if maximum_level - minimum_level > 1:
+            raise ConflictError("buildings must be sold evenly")
+        if maximum_level <= 0:
+            raise ConflictError("the property group has no buildings")
+        target_tiles = [item for item in group_tiles if levels[item.id] == maximum_level]
+        hotels_to_sell = sum(levels[item.id] == 5 for item in target_tiles)
+        houses_required = hotels_to_sell * 4
+        if game.houses_remaining < houses_required:
+            raise ConflictError("four houses per hotel are required to sell this round")
+        for tile in target_tiles:
+            self._sell_building(game, actor_id, tile.id)
+
+    def _request_loan(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        amount: int,
+    ) -> None:
+        player = self._active_player(game, actor_id)
+        if not game.settings.rules.loans_enabled:
+            raise ConflictError("bank loans are disabled for this game")
+        if any(loan.player_id == actor_id for loan in game.bank.loans):
+            raise ConflictError("the player already has an active bank loan")
+        pack = self._pack(game)
+        offer = credit_offer(game, pack, player)
+        if offer.maximum_amount <= 0 or amount > offer.maximum_amount:
+            raise ConflictError(
+                f"the maximum available loan is {offer.maximum_amount}"
+            )
+        if available_bank_cash(game) - amount < minimum_reserve(game):
+            raise ConflictError("the bank reserve is too low for this loan")
+        interest = (
+            amount * offer.interest_percent + 99
+        ) // 100
+        total_due = amount + interest
+        maximum_installment = max(
+            1,
+            pack.manifest.pass_start_salary
+            * pack.manifest.loan_salary_payment_percent
+            // 100,
+        )
+        installments = min(
+            offer.maximum_term_laps,
+            max(
+                pack.manifest.loan_term_laps,
+                (total_due + maximum_installment - 1) // maximum_installment,
+            ),
+        )
+        installment = (
+            total_due + installments - 1
+        ) // installments
+        player.balance += amount
+        profile = credit_profile(game, actor_id)
+        profile.total_borrowed += amount
+        loan = BankLoanState(
+            player_id=actor_id,
+            principal=amount,
+            interest_amount=interest,
+            interest_percent=offer.interest_percent,
+            remaining_balance=total_due,
+            installment_amount=installment,
+            installments_remaining=installments,
+            issued_at_sequence=game.event_sequence + 1,
+        )
+        game.bank.loans.append(loan)
+        self._append_event(
+            game,
+            "bank.loan_issued",
+            {
+                "loan_id": str(loan.id),
+                "player_id": str(actor_id),
+                "principal": amount,
+                "interest": interest,
+                "interest_percent": offer.interest_percent,
+                "total_due": total_due,
+                "installment": installment,
+                "installments": installments,
+                "credit_score": profile.score,
+            },
+        )
+
+    def _repay_loan(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        requested_amount: int | None,
+    ) -> None:
+        player = self._active_player(game, actor_id)
+        loan = next(
+            (item for item in game.bank.loans if item.player_id == actor_id),
+            None,
+        )
+        if loan is None:
+            raise ConflictError("the player does not have an active bank loan")
+        amount = min(requested_amount or loan.remaining_balance, loan.remaining_balance)
+        if player.balance < amount:
+            raise ConflictError("insufficient balance")
+        self._apply_loan_payment(game, player, loan, amount, automatic=False)
+
+    def _collect_loan_installments(
+        self,
+        game: GameState,
+        player: PlayerState,
+        crossings: int,
+    ) -> None:
+        for _ in range(crossings):
+            loan = next(
+                (
+                    item
+                    for item in game.bank.loans
+                    if item.player_id == player.user_id
+                ),
+                None,
+            )
+            if loan is None:
+                return
+            amount = min(loan.installment_amount, loan.remaining_balance)
+            if player.balance < amount:
+                available = player.balance
+                if available:
+                    self._apply_loan_payment(
+                        game,
+                        player,
+                        loan,
+                        available,
+                        automatic=False,
+                    )
+                profile = credit_profile(game, player.user_id)
+                profile.late_payments += 1
+                profile.score = max(300, profile.score - 35)
+                self._append_event(
+                    game,
+                    "bank.loan_payment_missed",
+                    {
+                        "loan_id": str(loan.id),
+                        "player_id": str(player.user_id),
+                        "expected_amount": amount,
+                        "paid_amount": available,
+                        "shortfall": amount - available,
+                        "credit_score": profile.score,
+                        "score_change": -35,
+                    },
+                )
+                continue
+            self._apply_loan_payment(game, player, loan, amount, automatic=True)
+
+    def _apply_loan_payment(
+        self,
+        game: GameState,
+        player: PlayerState,
+        loan: BankLoanState,
+        amount: int,
+        *,
+        automatic: bool,
+    ) -> None:
+        player.balance -= amount
+        loan.remaining_balance -= amount
+        if automatic:
+            loan.installments_remaining = max(0, loan.installments_remaining - 1)
+            loan.scheduled_payments_made += 1
+        elif loan.remaining_balance:
+            loan.installments_remaining = max(
+                1,
+                (loan.remaining_balance + loan.installment_amount - 1)
+                // loan.installment_amount,
+            )
+        paid_off = loan.remaining_balance == 0
+        remaining_interest = max(0, loan.interest_amount - loan.interest_paid)
+        if paid_off:
+            interest_component = remaining_interest
+        else:
+            original_total = loan.principal + loan.interest_amount
+            interest_component = min(
+                remaining_interest,
+                (amount * loan.interest_amount + original_total - 1)
+                // original_total,
+            )
+        loan.interest_paid += interest_component
+        profile = credit_profile(game, player.user_id)
+        score_change = 0
+        if automatic:
+            profile.on_time_payments += 1
+            score_change += 5
+        if paid_off and loan.scheduled_payments_made > 0:
+            profile.successful_loans += 1
+            score_change += 20
+        profile.score = min(850, profile.score + score_change)
+        self._append_event(
+            game,
+            "bank.loan_payment",
+            {
+                "loan_id": str(loan.id),
+                "player_id": str(player.user_id),
+                "amount": amount,
+                "remaining_balance": loan.remaining_balance,
+                "automatic": automatic,
+                "paid_off": paid_off,
+                "credit_score": profile.score,
+                "score_change": score_change,
+                "interest_component": interest_component,
+            },
+        )
+        if interest_component:
+            self._distribute_institution_revenue(
+                game,
+                "bank",
+                interest_component,
+                "loan_interest",
+            )
+        if paid_off and loan in game.bank.loans:
+            game.bank.loans.remove(loan)
+
+    def _validate_leveraged_purchase(
+        self,
+        game: GameState,
+        player: PlayerState,
+        gross: int,
+        total: int,
+    ) -> None:
+        loan = next(
+            (
+                item
+                for item in game.bank.loans
+                if item.player_id == player.user_id
+            ),
+            None,
+        )
+        if loan is None:
+            return
+        pack = self._pack(game)
+        profile = credit_profile(game, player.user_id)
+        if profile.score < 600:
+            raise ConflictError(
+                "the credit score is too low for leveraged investing"
+            )
+        required_reserve = (
+            loan.installment_amount
+            * pack.manifest.loan_investment_installment_reserve
+            + pack.manifest.pass_start_salary
+            * pack.manifest.loan_investment_reserve_salary_percent
+            // 100
+        )
+        if player.balance - total < required_reserve:
+            raise ConflictError(
+                f"leveraged investing requires a cash reserve of {required_reserve}"
+            )
+        current_exposure = sum(
+            item.current_price * item.holdings.get(player.user_id, 0)
+            for item in game.bank.investments
+        )
+        current_exposure += sum(
+            self._investment(game, order.instrument_id).current_price
+            * order.remaining_quantity
+            for order in game.bank.market_orders
+            if order.player_id == player.user_id
+            and order.side is MarketOrderSide.SELL
+        )
+        current_exposure += sum(
+            order.limit_price * order.remaining_quantity
+            for order in game.bank.market_orders
+            if order.player_id == player.user_id
+            and order.side is MarketOrderSide.BUY
+        )
+        exposure_limit = max(
+            0,
+            self._player_net_worth(game, player)
+            * pack.manifest.loan_investment_max_net_worth_percent
+            // 100,
+        )
+        if current_exposure + gross > exposure_limit:
+            raise ConflictError(
+                f"leveraged investment exposure cannot exceed {exposure_limit}"
+            )
+
+    @staticmethod
+    def _limit_buy_reserve(
+        instrument: InvestmentInstrumentState,
+        price: int,
+        quantity: int,
+    ) -> int:
+        per_share_fee = (
+            price * instrument.transaction_fee_percent + 99
+        ) // 100
+        return quantity * (price + per_share_fee)
+
+    def _place_limit_order(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        command: PlaceLimitOrderCommand,
+    ) -> None:
+        player = self._active_player(game, actor_id)
+        if not game.settings.rules.stock_market_enabled:
+            raise ConflictError("the investment market is disabled for this game")
+        instrument = self._investment(game, command.instrument_id)
+        if any(
+            order.player_id == actor_id
+            and order.instrument_id == instrument.id
+            and order.side is not command.side
+            and (
+                command.limit_price >= order.limit_price
+                if command.side is MarketOrderSide.BUY
+                else command.limit_price <= order.limit_price
+            )
+            for order in game.bank.market_orders
+        ):
+            raise ConflictError("an order cannot trade against the same player")
+        if command.side is MarketOrderSide.BUY:
+            maximum_holding = max(
+                1,
+                instrument.total_shares
+                * instrument.max_ownership_percent
+                // 100,
+            )
+            pending_buys = sum(
+                order.remaining_quantity
+                for order in game.bank.market_orders
+                if order.player_id == actor_id
+                and order.instrument_id == instrument.id
+                and order.side is MarketOrderSide.BUY
+            )
+            reserved_sells = sum(
+                order.remaining_quantity
+                for order in game.bank.market_orders
+                if order.player_id == actor_id
+                and order.instrument_id == instrument.id
+                and order.side is MarketOrderSide.SELL
+            )
+            if (
+                instrument.holdings.get(actor_id, 0)
+                + reserved_sells
+                + pending_buys
+                + command.quantity
+                > maximum_holding
+            ):
+                raise ConflictError(
+                    "the investment ownership limit would be exceeded"
+                )
+            reserved_cash = self._limit_buy_reserve(
+                instrument,
+                command.limit_price,
+                command.quantity,
+            )
+            if player.balance < reserved_cash:
+                raise ConflictError("insufficient balance for the limit order")
+            self._validate_leveraged_purchase(
+                game,
+                player,
+                command.limit_price * command.quantity,
+                reserved_cash,
+            )
+            player.balance -= reserved_cash
+        else:
+            current_holding = instrument.holdings.get(actor_id, 0)
+            if current_holding < command.quantity:
+                raise ConflictError("the player does not own enough shares")
+            remaining = current_holding - command.quantity
+            if remaining:
+                instrument.holdings[actor_id] = remaining
+            else:
+                instrument.holdings.pop(actor_id, None)
+            reserved_cash = 0
+        order = MarketOrderState(
+            instrument_id=instrument.id,
+            player_id=actor_id,
+            side=command.side,
+            limit_price=command.limit_price,
+            original_quantity=command.quantity,
+            remaining_quantity=command.quantity,
+            reserved_cash=reserved_cash,
+            created_at_sequence=game.event_sequence + 1,
+        )
+        game.bank.market_orders.append(order)
+        self._append_event(
+            game,
+            "investment.limit_order_placed",
+            {
+                "order_id": str(order.id),
+                "instrument_id": instrument.id,
+                "player_id": str(actor_id),
+                "side": order.side.value,
+                "quantity": order.original_quantity,
+                "limit_price": order.limit_price,
+            },
+        )
+        self._match_limit_orders(game, instrument)
+
+    def _cancel_market_order(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        order_id: UUID,
+    ) -> None:
+        order = next(
+            (item for item in game.bank.market_orders if item.id == order_id),
+            None,
+        )
+        if order is None:
+            raise ConflictError("the market order does not exist")
+        if order.player_id != actor_id:
+            raise ForbiddenError("only the order owner can cancel it")
+        instrument = self._investment(game, order.instrument_id)
+        player = self._player(game, actor_id)
+        if order.side is MarketOrderSide.BUY:
+            player.balance += order.reserved_cash
+        else:
+            instrument.holdings[actor_id] = (
+                instrument.holdings.get(actor_id, 0)
+                + order.remaining_quantity
+            )
+        game.bank.market_orders.remove(order)
+        self._append_event(
+            game,
+            "investment.limit_order_cancelled",
+            {
+                "order_id": str(order.id),
+                "instrument_id": instrument.id,
+                "player_id": str(actor_id),
+                "side": order.side.value,
+                "quantity": order.remaining_quantity,
+            },
+        )
+
+    def _rebalance_buy_order_reserve(
+        self,
+        instrument: InvestmentInstrumentState,
+        order: MarketOrderState,
+        buyer: PlayerState,
+    ) -> None:
+        required = self._limit_buy_reserve(
+            instrument,
+            order.limit_price,
+            order.remaining_quantity,
+        )
+        if order.reserved_cash < required:
+            raise RuntimeError("market buy order reserve is inconsistent")
+        refund = order.reserved_cash - required
+        if refund:
+            buyer.balance += refund
+            order.reserved_cash = required
+
+    def _match_limit_orders(
+        self,
+        game: GameState,
+        instrument: InvestmentInstrumentState,
+    ) -> None:
+        total_fees = 0
+        while True:
+            buys = sorted(
+                (
+                    order
+                    for order in game.bank.market_orders
+                    if order.instrument_id == instrument.id
+                    and order.side is MarketOrderSide.BUY
+                ),
+                key=lambda order: (
+                    -order.limit_price,
+                    order.created_at_sequence,
+                    str(order.id),
+                ),
+            )
+            sells = sorted(
+                (
+                    order
+                    for order in game.bank.market_orders
+                    if order.instrument_id == instrument.id
+                    and order.side is MarketOrderSide.SELL
+                ),
+                key=lambda order: (
+                    order.limit_price,
+                    order.created_at_sequence,
+                    str(order.id),
+                ),
+            )
+            if not buys or not sells or buys[0].limit_price < sells[0].limit_price:
+                break
+            buy_order = buys[0]
+            sell_order = sells[0]
+            if buy_order.player_id == sell_order.player_id:
+                raise RuntimeError("self-crossing market orders are inconsistent")
+            maker = min(
+                (buy_order, sell_order),
+                key=lambda order: (order.created_at_sequence, str(order.id)),
+            )
+            price = maker.limit_price
+            quantity = min(
+                buy_order.remaining_quantity,
+                sell_order.remaining_quantity,
+            )
+            gross = price * quantity
+            buyer_fee = (
+                gross * instrument.transaction_fee_percent + 99
+            ) // 100
+            seller_fee = (
+                gross * instrument.transaction_fee_percent // 100
+            )
+            buyer_cost = gross + buyer_fee
+            if buyer_cost > buy_order.reserved_cash:
+                raise RuntimeError("market buy order reserve is inconsistent")
+            buyer = self._player(game, buy_order.player_id)
+            seller = self._player(game, sell_order.player_id)
+            buy_order.reserved_cash -= buyer_cost
+            seller.balance += gross - seller_fee
+            instrument.holdings[buyer.user_id] = (
+                instrument.holdings.get(buyer.user_id, 0) + quantity
+            )
+            buy_order.remaining_quantity -= quantity
+            sell_order.remaining_quantity -= quantity
+            if buy_order.remaining_quantity:
+                self._rebalance_buy_order_reserve(
+                    instrument,
+                    buy_order,
+                    buyer,
+                )
+            else:
+                buyer.balance += buy_order.reserved_cash
+                game.bank.market_orders.remove(buy_order)
+            if sell_order.remaining_quantity == 0:
+                game.bank.market_orders.remove(sell_order)
+            self._record_order_book_fill(
+                game,
+                instrument,
+                buyer.user_id,
+                seller.user_id,
+                quantity,
+                price,
+                buy_order.id,
+                sell_order.id,
+                buyer_fee,
+                seller_fee,
+            )
+            total_fees += buyer_fee + seller_fee
+        if total_fees:
+            self._distribute_institution_revenue(
+                game,
+                "bank",
+                total_fees,
+                "market_fee",
+            )
+
+    def _record_order_book_fill(
+        self,
+        game: GameState,
+        instrument: InvestmentInstrumentState,
+        buyer_id: UUID,
+        seller_id: UUID,
+        quantity: int,
+        price: int,
+        buy_order_id: UUID | None,
+        sell_order_id: UUID | None,
+        buyer_fee: int,
+        seller_fee: int,
+    ) -> None:
+        instrument.current_price = (
+            instrument.current_price
+            if instrument.instrument_kind == "index"
+            else price
+        )
+        instrument.buy_volume += quantity
+        instrument.sell_volume += quantity
+        instrument.trade_count += 1
+        instrument.last_trade_price = price
+        instrument.session_high = max(instrument.session_high, price)
+        instrument.session_low = min(instrument.session_low or price, price)
+        refresh_market_index(game)
+        self._append_event(
+            game,
+            "investment.order_filled",
+            {
+                "instrument_id": instrument.id,
+                "buyer_id": str(buyer_id),
+                "seller_id": str(seller_id),
+                "quantity": quantity,
+                "unit_price": price,
+                "gross": price * quantity,
+                "buyer_fee": buyer_fee,
+                "seller_fee": seller_fee,
+                "buy_order_id": str(buy_order_id) if buy_order_id else None,
+                "sell_order_id": str(sell_order_id) if sell_order_id else None,
+                "new_price": instrument.current_price,
+            },
+        )
+
+    def _buy_shares(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        command: BuySharesCommand,
+    ) -> None:
+        player = self._active_player(game, actor_id)
+        if not game.settings.rules.stock_market_enabled:
+            raise ConflictError("the investment market is disabled for this game")
+        instrument = self._investment(game, command.instrument_id)
+        current_holding = instrument.holdings.get(actor_id, 0)
+        pending_buys = sum(
+            order.remaining_quantity
+            for order in game.bank.market_orders
+            if order.player_id == actor_id
+            and order.instrument_id == instrument.id
+            and order.side is MarketOrderSide.BUY
+        )
+        reserved_sells = sum(
+            order.remaining_quantity
+            for order in game.bank.market_orders
+            if order.player_id == actor_id
+            and order.instrument_id == instrument.id
+            and order.side is MarketOrderSide.SELL
+        )
+        maximum_holding = max(
+            1,
+            instrument.total_shares * instrument.max_ownership_percent // 100,
+        )
+        if (
+            current_holding
+            + reserved_sells
+            + pending_buys
+            + command.quantity
+            > maximum_holding
+        ):
+            raise ConflictError("the investment ownership limit would be exceeded")
+        sell_orders = sorted(
+            (
+                order
+                for order in game.bank.market_orders
+                if order.instrument_id == instrument.id
+                and order.side is MarketOrderSide.SELL
+                and order.player_id != actor_id
+            ),
+            key=lambda order: (
+                order.limit_price,
+                order.created_at_sequence,
+                str(order.id),
+            ),
+        )
+        sell_depth = sum(order.remaining_quantity for order in sell_orders)
+        if instrument.available_shares + sell_depth < command.quantity:
+            raise ConflictError("there are not enough shares available")
+        remaining = command.quantity
+        fills: list[tuple[MarketOrderState, int, int, int, int]] = []
+        gross = 0
+        fee = 0
+        for order in sell_orders:
+            if remaining == 0:
+                break
+            quantity = min(remaining, order.remaining_quantity)
+            fill_gross = order.limit_price * quantity
+            buyer_fee = (
+                fill_gross * instrument.transaction_fee_percent + 99
+            ) // 100
+            seller_fee = (
+                fill_gross * instrument.transaction_fee_percent // 100
+            )
+            fills.append((order, quantity, fill_gross, buyer_fee, seller_fee))
+            gross += fill_gross
+            fee += buyer_fee
+            remaining -= quantity
+        bank_quote = (
+            market_order_quote(
+                instrument,
+                remaining,
+                buying=True,
+                opposite_order_depth=sell_depth,
+            )
+            if remaining
+            else None
+        )
+        if bank_quote is not None:
+            bank_fee = (
+                bank_quote.gross * instrument.transaction_fee_percent + 99
+            ) // 100
+            gross += bank_quote.gross
+            fee += bank_fee
+        total = gross + fee
+        if player.balance < total:
+            raise ConflictError("insufficient balance")
+        self._validate_leveraged_purchase(game, player, gross, total)
+        player.balance -= total
+        previous_price = instrument.current_price
+        total_fees = 0
+        acquired = 0
+        for order, quantity, fill_gross, buyer_fee, seller_fee in fills:
+            seller = self._player(game, order.player_id)
+            seller.balance += fill_gross - seller_fee
+            order.remaining_quantity -= quantity
+            acquired += quantity
+            total_fees += buyer_fee + seller_fee
+            instrument.holdings[actor_id] = (
+                instrument.holdings.get(actor_id, 0) + quantity
+            )
+            if order.remaining_quantity == 0:
+                game.bank.market_orders.remove(order)
+            self._record_order_book_fill(
+                game,
+                instrument,
+                actor_id,
+                seller.user_id,
+                quantity,
+                order.limit_price,
+                None,
+                order.id,
+                buyer_fee,
+                seller_fee,
+            )
+        if bank_quote is not None:
+            instrument.available_shares -= remaining
+            instrument.holdings[actor_id] = (
+                instrument.holdings.get(actor_id, 0) + remaining
+            )
+            instrument.current_price = bank_quote.new_price
+            instrument.buy_volume += remaining
+            instrument.trade_count += 1
+            instrument.last_trade_price = bank_quote.average_price
+            instrument.session_high = max(
+                instrument.session_high,
+                bank_quote.average_price,
+                bank_quote.new_price,
+            )
+            instrument.session_low = min(
+                instrument.session_low or bank_quote.average_price,
+                bank_quote.average_price,
+                bank_quote.new_price,
+            )
+            acquired += remaining
+            total_fees += bank_fee
+        if acquired != command.quantity:
+            raise RuntimeError("market buy did not settle the requested quantity")
+        refresh_market_index(game)
+        self._append_event(
+            game,
+            "investment.shares_bought",
+            {
+                "instrument_id": instrument.id,
+                "instrument_kind": instrument.instrument_kind,
+                "tile_id": instrument.tile_id,
+                "player_id": str(actor_id),
+                "quantity": command.quantity,
+                "unit_price": gross // command.quantity,
+                "mid_price": previous_price,
+                "gross": gross,
+                "fee": fee,
+                "new_price": instrument.current_price,
+                "book_quantity": command.quantity - remaining,
+                "bank_quantity": remaining,
+            },
+        )
+        if total_fees:
+            self._distribute_institution_revenue(
+                game,
+                "bank",
+                total_fees,
+                "market_fee",
+            )
+
+    def _sell_shares(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        command: SellSharesCommand,
+    ) -> None:
+        player = self._active_player(game, actor_id)
+        if not game.settings.rules.stock_market_enabled:
+            raise ConflictError("the investment market is disabled for this game")
+        instrument = self._investment(game, command.instrument_id)
+        current_holding = instrument.holdings.get(actor_id, 0)
+        if current_holding < command.quantity:
+            raise ConflictError("the player does not own enough shares")
+        buy_orders = sorted(
+            (
+                order
+                for order in game.bank.market_orders
+                if order.instrument_id == instrument.id
+                and order.side is MarketOrderSide.BUY
+                and order.player_id != actor_id
+            ),
+            key=lambda order: (
+                -order.limit_price,
+                order.created_at_sequence,
+                str(order.id),
+            ),
+        )
+        buy_depth = sum(order.remaining_quantity for order in buy_orders)
+        remaining_to_sell = command.quantity
+        fills: list[tuple[MarketOrderState, int, int, int, int]] = []
+        gross = 0
+        fee = 0
+        for order in buy_orders:
+            if remaining_to_sell == 0:
+                break
+            quantity = min(remaining_to_sell, order.remaining_quantity)
+            fill_gross = order.limit_price * quantity
+            buyer_fee = (
+                fill_gross * instrument.transaction_fee_percent + 99
+            ) // 100
+            seller_fee = (
+                fill_gross * instrument.transaction_fee_percent // 100
+            )
+            fills.append((order, quantity, fill_gross, buyer_fee, seller_fee))
+            gross += fill_gross
+            fee += seller_fee
+            remaining_to_sell -= quantity
+        bank_quote = (
+            market_order_quote(
+                instrument,
+                remaining_to_sell,
+                buying=False,
+                opposite_order_depth=buy_depth,
+            )
+            if remaining_to_sell
+            else None
+        )
+        if bank_quote is not None:
+            bank_fee = (
+                bank_quote.gross * instrument.transaction_fee_percent // 100
+            )
+            bank_proceeds = bank_quote.gross - bank_fee
+            if available_bank_cash(game) - bank_proceeds < minimum_reserve(game):
+                raise ConflictError("the bank reserve is too low to repurchase shares")
+            gross += bank_quote.gross
+            fee += bank_fee
+        owned_remaining = current_holding - command.quantity
+        if owned_remaining:
+            instrument.holdings[actor_id] = owned_remaining
+        else:
+            instrument.holdings.pop(actor_id, None)
+        previous_price = instrument.current_price
+        proceeds = 0
+        total_fees = 0
+        for order, quantity, fill_gross, buyer_fee, seller_fee in fills:
+            buyer = self._player(game, order.player_id)
+            buyer_cost = fill_gross + buyer_fee
+            if buyer_cost > order.reserved_cash:
+                raise RuntimeError("market buy order reserve is inconsistent")
+            order.reserved_cash -= buyer_cost
+            order.remaining_quantity -= quantity
+            instrument.holdings[buyer.user_id] = (
+                instrument.holdings.get(buyer.user_id, 0) + quantity
+            )
+            proceeds += fill_gross - seller_fee
+            total_fees += buyer_fee + seller_fee
+            if order.remaining_quantity:
+                self._rebalance_buy_order_reserve(instrument, order, buyer)
+            else:
+                buyer.balance += order.reserved_cash
+                game.bank.market_orders.remove(order)
+            self._record_order_book_fill(
+                game,
+                instrument,
+                buyer.user_id,
+                actor_id,
+                quantity,
+                order.limit_price,
+                order.id,
+                None,
+                buyer_fee,
+                seller_fee,
+            )
+        if bank_quote is not None:
+            instrument.available_shares += remaining_to_sell
+            instrument.current_price = bank_quote.new_price
+            instrument.sell_volume += remaining_to_sell
+            instrument.trade_count += 1
+            instrument.last_trade_price = bank_quote.average_price
+            instrument.session_high = max(
+                instrument.session_high,
+                bank_quote.average_price,
+                bank_quote.new_price,
+            )
+            instrument.session_low = min(
+                instrument.session_low or bank_quote.average_price,
+                bank_quote.average_price,
+                bank_quote.new_price,
+            )
+            proceeds += bank_proceeds
+            total_fees += bank_fee
+        player.balance += proceeds
+        refresh_market_index(game)
+        self._append_event(
+            game,
+            "investment.shares_sold",
+            {
+                "instrument_id": instrument.id,
+                "instrument_kind": instrument.instrument_kind,
+                "tile_id": instrument.tile_id,
+                "player_id": str(actor_id),
+                "quantity": command.quantity,
+                "unit_price": gross // command.quantity,
+                "mid_price": previous_price,
+                "gross": gross,
+                "fee": fee,
+                "proceeds": proceeds,
+                "new_price": instrument.current_price,
+                "book_quantity": command.quantity - remaining_to_sell,
+                "bank_quantity": remaining_to_sell,
+            },
+        )
+        if total_fees:
+            self._distribute_institution_revenue(
+                game,
+                "bank",
+                total_fees,
+                "market_fee",
+            )
+
+    @staticmethod
+    def _investment(
+        game: GameState,
+        instrument_id: str,
+    ) -> InvestmentInstrumentState:
+        instrument = next(
+            (item for item in game.bank.investments if item.id == instrument_id),
+            None,
+        )
+        if instrument is None:
+            raise ConflictError("the investment instrument does not exist")
+        return instrument
+
+    @staticmethod
+    def _rent_plan(game: GameState, plan_id: UUID) -> RentDebtPlanState:
+        plan = next((item for item in game.rent_debt_plans if item.id == plan_id), None)
+        if plan is None:
+            raise ConflictError("the rent debt plan does not exist")
+        return plan
+
+    @staticmethod
+    def _rent_installment_amount(plan: RentDebtPlanState) -> int:
+        return (
+            plan.remaining_amount + plan.installments_remaining - 1
+        ) // plan.installments_remaining
+
+    def _require_custom_rent_debt(self, game: GameState) -> DebtState:
+        debt = game.active_debt
+        if not game.settings.rules.custom_rent_debts_enabled:
+            raise ConflictError("custom rent debts are disabled for this game")
+        if debt is None or debt.creditor_id is None or debt.reason not in {
+            DebtReason.RENT,
+            DebtReason.RENT_INSTALLMENT,
+        }:
+            raise ConflictError("the outstanding debt is not a player rent debt")
+        return debt
+
+    @staticmethod
+    def _rent_debt_waits_for_creditor(game: GameState) -> bool:
+        debt = game.active_debt
+        return bool(
+            game.settings.rules.custom_rent_debts_enabled
+            and debt is not None
+            and debt.creditor_id is not None
+            and debt.reason is DebtReason.RENT
+            and not debt.collection_demanded
+        )
+
+    def _demand_rent_debt(self, game: GameState, actor_id: UUID) -> None:
+        debt = self._require_custom_rent_debt(game)
+        if debt.reason is not DebtReason.RENT or debt.installment_plan_id is not None:
+            raise ConflictError("only an original rent debt can be demanded")
+        if debt.creditor_id != actor_id:
+            raise ForbiddenError("only the rent creditor can demand payment")
+        if debt.collection_demanded:
+            raise ConflictError("the rent debt has already been demanded")
+        debt.collection_demanded = True
+        debt.plan_proposal = None
+        self._append_event(
+            game,
+            "debt.collection_demanded",
+            {
+                "debtor_id": str(debt.debtor_id),
+                "creditor_id": str(actor_id),
+                "amount": debt.amount,
+                "tile_id": debt.tile_id,
+            },
+        )
+
+    def _forgive_rent_debt(self, game: GameState, actor_id: UUID) -> None:
+        debt = self._require_custom_rent_debt(game)
+        if debt.creditor_id != actor_id:
+            raise ForbiddenError("only the rent creditor can forgive the debt")
+        if debt.reason is DebtReason.RENT and debt.collection_demanded:
+            raise ConflictError("payment has already been demanded")
+        forgiven_amount = debt.amount
+        plan_id = debt.installment_plan_id
+        if plan_id is not None:
+            plan = self._rent_plan(game, plan_id)
+            forgiven_amount = plan.remaining_amount
+            game.rent_debt_plans.remove(plan)
+        game.active_debt = None
+        self._append_event(
+            game,
+            "debt.forgiven",
+            {
+                "debtor_id": str(debt.debtor_id),
+                "creditor_id": str(actor_id),
+                "amount": forgiven_amount,
+                "tile_id": debt.tile_id,
+                "installment_plan_id": str(plan_id) if plan_id else None,
+            },
+        )
+        self._process_card_payments(game)
+
+    def _propose_rent_debt_plan(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        command: ProposeRentDebtPlanCommand,
+    ) -> None:
+        debt = self._require_custom_rent_debt(game)
+        if debt.reason is not DebtReason.RENT or debt.installment_plan_id is not None:
+            raise ConflictError("an installment debt cannot be financed again")
+        if debt.creditor_id != actor_id:
+            raise ForbiddenError("only the rent creditor can propose payment terms")
+        if debt.collection_demanded:
+            raise ConflictError("payment has already been demanded")
+        debt.plan_proposal = RentDebtPlanProposal(
+            installments=command.installments,
+            interest_percent=command.interest_percent,
+            template=command.template,
+        )
+        total_amount = (
+            debt.amount * (100 + command.interest_percent) + 99
+        ) // 100
+        self._append_event(
+            game,
+            "debt.plan_proposed",
+            {
+                "debtor_id": str(debt.debtor_id),
+                "creditor_id": str(actor_id),
+                "original_amount": debt.amount,
+                "total_amount": total_amount,
+                "installments": command.installments,
+                "interest_percent": command.interest_percent,
+                "template": command.template.value,
+                "tile_id": debt.tile_id,
+            },
+        )
+
+    def _accept_rent_debt_plan(self, game: GameState, actor_id: UUID) -> None:
+        debt = self._require_custom_rent_debt(game)
+        if debt.debtor_id != actor_id:
+            raise ForbiddenError("only the debtor can accept the payment plan")
+        if debt.reason is not DebtReason.RENT or debt.installment_plan_id is not None:
+            raise ConflictError("an installment debt cannot be financed again")
+        proposal = debt.plan_proposal
+        if proposal is None:
+            raise ConflictError("there is no payment plan to accept")
+        assert debt.creditor_id is not None
+        total_amount = (
+            debt.amount * (100 + proposal.interest_percent) + 99
+        ) // 100
+        plan = RentDebtPlanState(
+            debtor_id=debt.debtor_id,
+            creditor_id=debt.creditor_id,
+            tile_id=debt.tile_id,
+            original_amount=debt.amount,
+            interest_percent=proposal.interest_percent,
+            total_amount=total_amount,
+            remaining_amount=total_amount,
+            installments_total=proposal.installments,
+            installments_remaining=proposal.installments,
+            template=proposal.template,
+            created_at_sequence=game.event_sequence + 1,
+        )
+        game.rent_debt_plans.append(plan)
+        game.active_debt = None
+        self._append_event(
+            game,
+            "debt.plan_accepted",
+            {
+                "plan_id": str(plan.id),
+                "debtor_id": str(plan.debtor_id),
+                "creditor_id": str(plan.creditor_id),
+                "original_amount": plan.original_amount,
+                "total_amount": plan.total_amount,
+                "installments": plan.installments_total,
+                "interest_percent": plan.interest_percent,
+                "template": plan.template.value,
+                "tile_id": plan.tile_id,
+            },
+        )
+        self._process_card_payments(game)
+
+    def _reject_rent_debt_plan(self, game: GameState, actor_id: UUID) -> None:
+        debt = self._require_custom_rent_debt(game)
+        if debt.debtor_id != actor_id:
+            raise ForbiddenError("only the debtor can reject the payment plan")
+        if debt.plan_proposal is None:
+            raise ConflictError("there is no payment plan to reject")
+        debt.plan_proposal = None
+        self._append_event(
+            game,
+            "debt.plan_rejected",
+            {
+                "debtor_id": str(debt.debtor_id),
+                "creditor_id": str(debt.creditor_id),
+                "tile_id": debt.tile_id,
+            },
+        )
+
+    def _record_rent_installment_payment(
+        self,
+        game: GameState,
+        plan: RentDebtPlanState,
+        amount: int,
+    ) -> None:
+        plan.remaining_amount -= amount
+        plan.installments_remaining -= 1
+        self._append_event(
+            game,
+            "debt.installment_paid",
+            {
+                "plan_id": str(plan.id),
+                "debtor_id": str(plan.debtor_id),
+                "creditor_id": str(plan.creditor_id),
+                "amount": amount,
+                "remaining_amount": plan.remaining_amount,
+                "installments_remaining": plan.installments_remaining,
+                "tile_id": plan.tile_id,
+            },
+        )
+        if plan.remaining_amount == 0:
+            game.rent_debt_plans.remove(plan)
+            self._append_event(
+                game,
+                "debt.plan_completed",
+                {
+                    "plan_id": str(plan.id),
+                    "debtor_id": str(plan.debtor_id),
+                    "creditor_id": str(plan.creditor_id),
+                    "total_amount": plan.total_amount,
+                    "tile_id": plan.tile_id,
+                },
+            )
+
+    def _collect_rent_installments(
+        self,
+        game: GameState,
+        player: PlayerState,
+    ) -> None:
+        for plan in list(game.rent_debt_plans):
+            if plan.debtor_id != player.user_id:
+                continue
+            amount = self._rent_installment_amount(plan)
+            if player.balance < amount:
+                game.active_debt = DebtState(
+                    debtor_id=player.user_id,
+                    creditor_id=plan.creditor_id,
+                    amount=amount,
+                    reason=DebtReason.RENT_INSTALLMENT,
+                    tile_id=plan.tile_id,
+                    installment_plan_id=plan.id,
+                    collection_demanded=True,
+                )
+                self._append_event(
+                    game,
+                    "debt.created",
+                    {
+                        "debtor_id": str(player.user_id),
+                        "creditor_id": str(plan.creditor_id),
+                        "amount": amount,
+                        "reason": DebtReason.RENT_INSTALLMENT.value,
+                        "tile_id": plan.tile_id,
+                        "installment_plan_id": str(plan.id),
+                    },
+                )
+                return
+            player.balance -= amount
+            self._distribute_investment_rent(
+                game,
+                plan.creditor_id,
+                amount,
+                plan.tile_id,
+            )
+            self._record_rent_installment_payment(game, plan, amount)
+
     def _pay_debt(self, game: GameState, actor_id: UUID) -> None:
         debt = game.active_debt
         if debt is None or debt.debtor_id != actor_id:
@@ -1988,7 +3875,15 @@ class GameService:
             raise ConflictError("insufficient balance")
         player.balance -= debt.amount
         if debt.creditor_id is not None:
-            self._player(game, debt.creditor_id).balance += debt.amount
+            if debt.reason in {DebtReason.RENT, DebtReason.RENT_INSTALLMENT}:
+                self._distribute_investment_rent(
+                    game,
+                    debt.creditor_id,
+                    debt.amount,
+                    debt.tile_id,
+                )
+            else:
+                self._player(game, debt.creditor_id).balance += debt.amount
         else:
             self._deposit_bank_pot(game, debt.amount, debt.reason)
         self._append_event(
@@ -1998,9 +3893,13 @@ class GameService:
                 "debtor_id": str(actor_id),
                 "creditor_id": str(debt.creditor_id) if debt.creditor_id else None,
                 "amount": debt.amount,
+                "tile_id": debt.tile_id,
             },
         )
         game.active_debt = None
+        if debt.installment_plan_id is not None:
+            plan = self._rent_plan(game, debt.installment_plan_id)
+            self._record_rent_installment_payment(game, plan, debt.amount)
         self._process_card_payments(game)
 
     def _declare_bankruptcy(
@@ -2036,6 +3935,65 @@ class GameService:
             else:
                 game.houses_remaining += level
         player.balance += liquidation
+        player_order_ids = [
+            order.id
+            for order in game.bank.market_orders
+            if order.player_id == actor_id
+        ]
+        for order_id in player_order_ids:
+            self._cancel_market_order(game, actor_id, order_id)
+        for instrument in game.bank.investments:
+            instrument.pending_dividend_units.pop(actor_id, None)
+        player.pending_dividend_units = 0
+        total_pending_dividend_units = sum(
+            sum(instrument.pending_dividend_units.values())
+            for instrument in game.bank.investments
+        )
+        game.bank.dividend_cash_reserve = (
+            total_pending_dividend_units // DIVIDEND_SCALE
+        )
+        game.bank.dividend_unfunded_units = (
+            total_pending_dividend_units % DIVIDEND_SCALE
+        )
+        investment_liquidation = 0
+        for instrument in game.bank.investments:
+            shares = instrument.holdings.pop(actor_id, 0)
+            if shares <= 0:
+                continue
+            instrument.available_shares += shares
+            gross = instrument.current_price * shares
+            fee = gross * instrument.transaction_fee_percent // 100
+            investment_liquidation += gross - fee
+        player.balance += investment_liquidation
+        if investment_liquidation:
+            self._append_event(
+                game,
+                "investment.position_liquidated",
+                {
+                    "player_id": str(actor_id),
+                    "amount": investment_liquidation,
+                },
+            )
+        loan = next(
+            (item for item in game.bank.loans if item.player_id == actor_id),
+            None,
+        )
+        if loan is not None:
+            game.bank.loans.remove(loan)
+            profile = credit_profile(game, actor_id)
+            profile.defaults += 1
+            profile.score = max(300, profile.score - 150)
+            self._append_event(
+                game,
+                "bank.loan_defaulted",
+                {
+                    "loan_id": str(loan.id),
+                    "player_id": str(actor_id),
+                    "remaining_balance": loan.remaining_balance,
+                    "credit_score": profile.score,
+                    "score_change": -150,
+                },
+            )
         transferred_amount = player.balance
         if debt.creditor_id is None:
             board_order = {
@@ -2072,6 +4030,23 @@ class GameService:
                 trade.status = TradeStatus.CANCELLED
                 trade.resolved_at = datetime.now(UTC)
                 cancelled_trade_ids.append(str(trade.id))
+        cancelled_plan_ids = []
+        for plan in list(game.rent_debt_plans):
+            if actor_id not in {plan.debtor_id, plan.creditor_id}:
+                continue
+            game.rent_debt_plans.remove(plan)
+            cancelled_plan_ids.append(str(plan.id))
+            self._append_event(
+                game,
+                "debt.plan_cancelled",
+                {
+                    "plan_id": str(plan.id),
+                    "debtor_id": str(plan.debtor_id),
+                    "creditor_id": str(plan.creditor_id),
+                    "remaining_amount": plan.remaining_amount,
+                    "reason": "bankruptcy",
+                },
+            )
         game.active_debt = None
         self._append_event(
             game,
@@ -2082,6 +4057,7 @@ class GameService:
                 "transferred_amount": transferred_amount,
                 "property_ids": owned_property_ids,
                 "cancelled_trade_ids": cancelled_trade_ids,
+                "cancelled_plan_ids": cancelled_plan_ids,
             },
         )
         active_players = [candidate for candidate in game.players if not candidate.bankrupt]
@@ -2350,6 +4326,78 @@ class GameService:
             },
         )
 
+    def _counter_trade(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        command: CounterTradeCommand,
+    ) -> None:
+        if game.active_auction is not None:
+            raise ConflictError("trades are unavailable during an auction")
+        original = next(
+            (trade for trade in game.trades if trade.id == command.trade_id),
+            None,
+        )
+        if original is None:
+            raise ConflictError("the trade does not exist")
+        if original.recipient_id != actor_id:
+            raise ForbiddenError("only the recipient can counter this trade")
+        if original.status not in {TradeStatus.PENDING, TradeStatus.REJECTED}:
+            raise ConflictError("the trade can no longer be countered")
+        if any(trade.parent_trade_id == original.id for trade in game.trades):
+            raise ConflictError("the trade already has a counter-offer")
+        pending_without_original = sum(
+            trade.status is TradeStatus.PENDING and trade.id != original.id
+            for trade in game.trades
+        )
+        if pending_without_original >= 20:
+            raise ConflictError("the game has too many pending trades")
+        self._validate_trade_assets(
+            game,
+            proposer_id=actor_id,
+            recipient_id=original.proposer_id,
+            offered_cash=command.offered_cash,
+            requested_cash=command.requested_cash,
+            offered_property_ids=command.offered_property_ids,
+            requested_property_ids=command.requested_property_ids,
+        )
+        if len(game.trades) >= 100:
+            removable = next(
+                (
+                    trade
+                    for trade in game.trades
+                    if trade.status is not TradeStatus.PENDING
+                    and trade.id != original.id
+                ),
+                None,
+            )
+            if removable is None:
+                raise ConflictError("the trade history is full")
+            game.trades.remove(removable)
+        original.status = TradeStatus.REJECTED
+        original.resolved_at = datetime.now(UTC)
+        counter = TradeOffer(
+            proposer_id=actor_id,
+            recipient_id=original.proposer_id,
+            offered_cash=command.offered_cash,
+            requested_cash=command.requested_cash,
+            offered_property_ids=command.offered_property_ids,
+            requested_property_ids=command.requested_property_ids,
+            parent_trade_id=original.id,
+        )
+        game.trades.append(counter)
+        self._append_event(
+            game,
+            "trade.countered",
+            {
+                "trade_id": str(original.id),
+                "counter_trade_id": str(counter.id),
+                "actor_id": str(actor_id),
+                "proposer_id": str(actor_id),
+                "recipient_id": str(original.proposer_id),
+            },
+        )
+
     def _accept_trade(
         self,
         game: GameState,
@@ -2464,6 +4512,53 @@ class GameService:
             {"trade_id": str(trade.id), "actor_id": str(actor_id)},
         )
 
+    def _apply_relationship_effects(
+        self,
+        game: GameState,
+        previous_sequence: int,
+    ) -> None:
+        source_events = list(game.events[previous_sequence:])
+        if not source_events:
+            return
+        for change in relationship_changes_for_events(
+            game,
+            self._pack(game),
+            source_events,
+        ):
+            relationship = next(
+                (
+                    item
+                    for item in game.bot_relationships
+                    if item.bot_id == change.bot_id
+                    and item.player_id == change.player_id
+                ),
+                None,
+            )
+            if relationship is None:
+                relationship = BotRelationshipState(
+                    bot_id=change.bot_id,
+                    player_id=change.player_id,
+                )
+                game.bot_relationships.append(relationship)
+            previous_score = relationship.score
+            relationship.score = clamp_score(previous_score + change.delta)
+            applied_delta = relationship.score - previous_score
+            relationship.interaction_count += 1
+            relationship.last_reason = change.reason
+            relationship.last_event_sequence = game.event_sequence + 1
+            self._append_event(
+                game,
+                "relationship.changed",
+                {
+                    "bot_id": str(change.bot_id),
+                    "player_id": str(change.player_id),
+                    "delta": applied_delta,
+                    "score": relationship.score,
+                    "interaction_count": relationship.interaction_count,
+                    "reason": change.reason,
+                },
+            )
+
     def _tile(self, game: GameState, tile_id: str) -> TileDefinition:
         pack = self._pack(game)
         tile = next((item for item in pack.board.tiles if item.id == tile_id), None)
@@ -2513,6 +4608,23 @@ class GameService:
             if item.kind is TileKind.PROPERTY and item.group == tile.group
         ]
 
+    def _owned_property_group(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        group_id: str,
+    ) -> list[TileDefinition]:
+        group_tiles = [
+            item
+            for item in self._pack(game).board.tiles
+            if item.kind is TileKind.PROPERTY and item.group == group_id
+        ]
+        if not group_tiles:
+            raise ConflictError("the property group was not found")
+        if not all(game.owners.get(item.id) == actor_id for item in group_tiles):
+            raise ConflictError("the complete property group is required")
+        return group_tiles
+
     def _active_player(self, game: GameState, player_id: UUID) -> PlayerState:
         player = self._player(game, player_id)
         if player.bankrupt:
@@ -2520,11 +4632,14 @@ class GameService:
         return player
 
     def _advance_to_next_active_player(self, game: GameState) -> None:
+        previous_index = game.current_player_index
         for _ in game.players:
             game.current_player_index = (game.current_player_index + 1) % len(
                 game.players
             )
             if not game.players[game.current_player_index].bankrupt:
+                if game.current_player_index <= previous_index:
+                    self._settle_market_dividends(game)
                 game.phase = TurnPhase.WAITING_FOR_ROLL
                 game.consecutive_doubles = 0
                 game.extra_roll_pending = False
@@ -2533,6 +4648,7 @@ class GameService:
                     "turn.started",
                     {"player_id": str(game.current_player.user_id)},
                 )
+                self._collect_rent_installments(game, game.current_player)
                 return
         raise ConflictError("the game has no active players")
 

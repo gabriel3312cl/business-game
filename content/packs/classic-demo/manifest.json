@@ -23,14 +23,33 @@
   "max_consecutive_doubles": 3,
   "house_supply": 32,
   "hotel_supply": 12,
+  "bank_money_supply": 20580,
+  "bank_minimum_reserve_percent": 20,
+  "loan_interest_percent": 15,
+  "loan_term_laps": 5,
+  "loan_max_term_laps": 10,
+  "loan_salary_payment_percent": 35,
+  "investment_share_count": 20,
+  "investment_dividend_percent": 30,
+  "investment_transaction_fee_percent": 1,
+  "investment_revenue_fee_percent": 5,
+  "investment_max_ownership_percent": 30,
+  "investment_spread_percent": 1,
+  "loan_investment_max_net_worth_percent": 20,
+  "loan_investment_reserve_salary_percent": 50,
+  "loan_investment_installment_reserve": 2,
   "default_rules": {
     "auction_unpurchased_properties": true,
     "free_parking_jackpot": false,
-    "double_salary_on_start": false
+    "double_salary_on_start": false,
+    "loans_enabled": false,
+    "stock_market_enabled": false
   },
   "configurable_rules": [
     "auction_unpurchased_properties",
     "free_parking_jackpot",
-    "double_salary_on_start"
+    "double_salary_on_start",
+    "loans_enabled",
+    "stock_market_enabled"
   ]
 }

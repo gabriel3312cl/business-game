@@ -1,4 +1,5 @@
 import type {
+  AutomationPreferenceSettings,
   AudioPreferenceSettings,
   BotController,
   BotPersonality,
@@ -196,6 +197,17 @@ export const api = {
       {
         method: 'PATCH',
         body: JSON.stringify({ token_appearance: tokenAppearance }),
+      },
+      true,
+    ),
+  updateAutomationSettings: (
+    automationSettings: AutomationPreferenceSettings,
+  ) =>
+    request<UserPreferences>(
+      '/users/me/preferences',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ automation_settings: automationSettings }),
       },
       true,
     ),

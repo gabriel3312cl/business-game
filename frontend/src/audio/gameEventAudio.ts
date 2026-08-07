@@ -133,6 +133,8 @@ export function soundCuesForEvent(
       return [{ sound: 'trade-accepted' }]
     case 'trade.rejected':
       return [{ sound: 'trade-rejected' }]
+    case 'trade.countered':
+      return [{ sound: 'trade-proposed' }]
     case 'trade.cancelled':
       return [{ sound: 'trade-cancelled' }]
     case 'player.bankrupt':

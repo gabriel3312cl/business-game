@@ -10,7 +10,18 @@ import {
   Typography,
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
-import type { ContentPack, GameState, OptionalRules } from '../types'
+import type {
+  ContentPack,
+  GameState,
+  OptionalRules,
+  RuleOptionName,
+} from '../types'
+
+const FINANCIAL_RULES: RuleOptionName[] = [
+  'loans_enabled',
+  'stock_market_enabled',
+  'custom_rent_debts_enabled',
+]
 
 interface Props {
   game: GameState
@@ -33,6 +44,12 @@ export function LobbySettingsPanel({
 }: Props) {
   const { t } = useTranslation()
   const maximum = game.settings.max_players ?? pack.manifest.max_players
+  const configurableRules = [
+    ...new Set<RuleOptionName>([
+      ...pack.manifest.configurable_rules,
+      ...FINANCIAL_RULES,
+    ]),
+  ]
 
   return (
     <Box>
@@ -92,10 +109,10 @@ export function LobbySettingsPanel({
           label={t('allowSpectators')}
         />
       </Stack>
-      {pack.manifest.configurable_rules.length > 0 && (
+      {configurableRules.length > 0 && (
         <Stack spacing={0.5} sx={{ mt: 2 }}>
           <Typography variant="subtitle2">{t('optionalRules')}</Typography>
-          {pack.manifest.configurable_rules.map((ruleName) => (
+          {configurableRules.map((ruleName) => (
             <FormControlLabel
               key={ruleName}
               labelPlacement="start"

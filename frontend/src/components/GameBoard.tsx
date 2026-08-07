@@ -1,11 +1,12 @@
 import CasinoRoundedIcon from '@mui/icons-material/CasinoRounded'
 import { Box, Button, Chip, Stack, Typography } from '@mui/material'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { santiagoTokenAssets } from '../assets/monopolySantiago'
 import type {
   ContentPack,
   GameCommand,
+  GameEvent,
   GameState,
   TokenAppearanceSettings,
 } from '../types'
@@ -16,6 +17,7 @@ import {
   type BoardToken,
 } from './BoardTile'
 import { BoardTileDialog } from './BoardTileDialog'
+import { affectedTileIds } from './boardActionPulse'
 import { perimeterPosition } from './boardGeometry'
 import type { BoardHeatmap } from './boardHeatmap'
 import { playerColors } from './gameColors'
@@ -43,6 +45,12 @@ interface GameBoardProps {
   busy?: boolean
   onCommand?: (command: GameCommand) => Promise<boolean>
   heatmap?: BoardHeatmap | null
+  actionEvents?: GameEvent[]
+}
+
+interface TilePulseState {
+  gameId: string | null
+  sequences: Map<string, number>
 }
 
 export function GameBoard({
@@ -62,6 +70,7 @@ export function GameBoard({
   busy = false,
   onCommand,
   heatmap = null,
+  actionEvents = [],
 }: GameBoardProps) {
   const { t, i18n } = useTranslation()
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null)
@@ -117,6 +126,70 @@ export function GameBoard({
   const fittedHeight = `min(${Math.min(zoom, 1) * 100}%, ${maximumSize * zoom}px)`
   const selectedTile =
     pack.board.tiles.find((tile) => tile.id === selectedTileId) ?? null
+  const tileIds = useMemo(
+    () => new Set(pack.board.tiles.map((tile) => tile.id)),
+    [pack.board.tiles],
+  )
+  const startTileId = useMemo(
+    () => pack.board.tiles.find((tile) => tile.kind === 'start')?.id,
+    [pack.board.tiles],
+  )
+  const tradePropertyIds = useMemo(
+    () =>
+      new Map(
+        (game?.trades ?? []).map((trade) => [
+          trade.id,
+          [...trade.offered_property_ids, ...trade.requested_property_ids],
+        ]),
+      ),
+    [game?.trades],
+  )
+  const actionCursor = useRef({
+    gameId: game?.id ?? null,
+    sequence: latestEventSequence(actionEvents),
+  })
+  const [tilePulses, setTilePulses] = useState<TilePulseState>(() => ({
+    gameId: game?.id ?? null,
+    sequences: new Map(),
+  }))
+
+  useEffect(() => {
+    const gameId = game?.id ?? null
+    const latestSequence = latestEventSequence(actionEvents)
+    if (actionCursor.current.gameId !== gameId) {
+      actionCursor.current = { gameId, sequence: latestSequence }
+      setTilePulses({ gameId, sequences: new Map() })
+      return
+    }
+
+    const newEvents = actionEvents.filter(
+      (event) => event.sequence > actionCursor.current.sequence,
+    )
+    actionCursor.current.sequence = Math.max(
+      actionCursor.current.sequence,
+      latestSequence,
+    )
+    if (newEvents.length === 0 || gameId === null) return
+
+    const updates = new Map<string, number>()
+    for (const event of newEvents) {
+      for (const tileId of affectedTileIds(event, {
+        tileIds,
+        startTileId,
+        tradePropertyIds,
+      })) {
+        updates.set(tileId, event.sequence)
+      }
+    }
+    if (updates.size === 0) return
+
+    setTilePulses((current) => {
+      const sequences =
+        current.gameId === gameId ? new Map(current.sequences) : new Map()
+      for (const [tileId, sequence] of updates) sequences.set(tileId, sequence)
+      return { gameId, sequences }
+    })
+  }, [actionEvents, game?.id, startTileId, tileIds, tradePropertyIds])
 
   return (
     <Box
@@ -144,6 +217,11 @@ export function GameBoard({
         const name = pack.messages[tile.name_key] ?? tile.id
         const owner = ownersById.get(game?.owners[tile.id] ?? '')
         const buildingLevel = game?.building_levels[tile.id] ?? 0
+        const mortgaged = game?.mortgaged_property_ids.includes(tile.id) ?? false
+        const actionPulseSequence =
+          tilePulses.gameId === game?.id
+            ? tilePulses.sequences.get(tile.id)
+            : undefined
         const buildingLabel =
           tile.kind !== 'property' || buildingLevel <= 0
             ? undefined
@@ -156,7 +234,7 @@ export function GameBoard({
           : undefined
         return (
           <BoardTile
-            key={tile.id}
+            key={`${tile.id}:${actionPulseSequence ?? 'idle'}`}
             tile={tile}
             name={name}
             gridColumn={position.column}
@@ -166,6 +244,9 @@ export function GameBoard({
             compact={compact}
             buildingLevel={buildingLevel}
             buildingLabel={buildingLabel}
+            mortgaged={mortgaged}
+            mortgageLabel={t('mortgaged')}
+            actionPulse={actionPulseSequence !== undefined}
             tokens={tokensByPosition.get(index)}
             owner={owner}
             heatmap={tileHeatmap}
@@ -189,6 +270,11 @@ export function GameBoard({
                 {buildingLabel && (
                   <Typography variant="caption" color="success.light" fontWeight={800}>
                     {buildingLabel}
+                  </Typography>
+                )}
+                {mortgaged && (
+                  <Typography variant="caption" color="warning.light" fontWeight={850}>
+                    {t('mortgaged')}
                   </Typography>
                 )}
                 <Typography variant="caption" color="secondary.light">
@@ -352,6 +438,13 @@ export function GameBoard({
         onCommand={onCommand}
       />
     </Box>
+  )
+}
+
+function latestEventSequence(events: GameEvent[]): number {
+  return events.reduce(
+    (latest, event) => Math.max(latest, event.sequence),
+    0,
   )
 }
 

@@ -11,6 +11,7 @@ from business_game.application.negotiation import (
     TradeVerdict,
 )
 from business_game.application.pack_loader import PackLoader
+from business_game.application.relationships import relationship_changes_for_events
 from business_game.application.services import GameService, UserService
 from business_game.domain.errors import DomainError
 from business_game.domain.models import (
@@ -18,8 +19,10 @@ from business_game.domain.models import (
     AddBotRequest,
     AuctionState,
     BotPersonality,
+    BotRelationshipState,
     BuyPropertyCommand,
     ContentPack,
+    CounterTradeCommand,
     DebtReason,
     DebtState,
     DeclinePropertyCommand,
@@ -115,12 +118,46 @@ def test_trade_analysis_uses_each_participants_perspective(pack: ContentPack) ->
 
     assert recipient_analysis.perspective == "recipient"
     assert recipient_analysis.verdict == "accept"
+    assert recipient_analysis.convenience_level == "very_favorable"
     assert recipient_analysis.estimated_surplus == 200
     assert recipient_analysis.cash_after == recipient.balance + 200
+    assert recipient_analysis.recipient_analysis.player_id == recipient.user_id
+    assert recipient_analysis.proposer_analysis.player_id == proposer.user_id
     assert proposer_analysis.perspective == "proposer"
     assert proposer_analysis.verdict == "reject"
+    assert proposer_analysis.convenience_level == "very_unfavorable"
     assert proposer_analysis.estimated_surplus == -200
     assert proposer_analysis.cash_after == proposer.balance - 200
+
+
+def test_trade_analysis_compares_landing_payments_and_rent_for_both_sides(
+    pack: ContentPack,
+) -> None:
+    proposer = make_bot(BotPersonality.BALANCED, name="Proposer")
+    recipient = make_bot(BotPersonality.BALANCED, name="Recipient")
+    proposer.position = 32
+    recipient.position = 32
+    game = make_game(
+        pack,
+        [proposer, recipient],
+        owners={"property_39": proposer.user_id},
+    )
+    trade = TradeOffer(
+        proposer_id=proposer.user_id,
+        recipient_id=recipient.user_id,
+        offered_property_ids=["property_39"],
+    )
+
+    analysis = NegotiationEngine(game, pack).analyze_trade(recipient, trade)
+    proposer_side = analysis.proposer_analysis
+    recipient_side = analysis.recipient_analysis
+
+    assert proposer_side.expected_rent_income_after < proposer_side.expected_rent_income_before
+    assert proposer_side.expected_payments_after > proposer_side.expected_payments_before
+    assert recipient_side.expected_rent_income_after > recipient_side.expected_rent_income_before
+    assert recipient_side.expected_payments_after < recipient_side.expected_payments_before
+    assert proposer_side.risk_adjusted_surplus < proposer_side.estimated_surplus
+    assert recipient_side.risk_adjusted_surplus > recipient_side.estimated_surplus
 
 
 async def test_bot_offers_the_swap_that_completes_both_monopolies(
@@ -261,7 +298,7 @@ async def test_the_counter_offer_reaches_the_table_after_the_refusal(
 
     assert counter is not None
     assert counter.actor_id == bot.user_id
-    assert isinstance(counter.command, ProposeTradeCommand)
+    assert isinstance(counter.command, CounterTradeCommand)
     assert counter.command.requested_cash > trade.offered_cash
 
 
@@ -328,6 +365,62 @@ async def test_personality_changes_the_answer_to_the_same_offer(
 
     assert verdicts[BotPersonality.CONSERVATIVE] is TradeVerdict.REJECT
     assert verdicts[BotPersonality.AGGRESSIVE] is TradeVerdict.ACCEPT
+
+
+def test_relationship_changes_the_price_a_bot_demands(pack: ContentPack) -> None:
+    bot = make_bot(BotPersonality.BALANCED)
+    rival = PlayerState(user_id=uuid4(), display_name="Human")
+    game = make_game(pack, [bot, rival])
+    neutral = NegotiationEngine(game, pack).threshold_percent(
+        bot,
+        rival,
+        jitter=False,
+    )
+    game.bot_relationships = [
+        BotRelationshipState(bot_id=bot.user_id, player_id=rival.user_id, score=80)
+    ]
+    friendly = NegotiationEngine(game, pack).threshold_percent(
+        bot,
+        rival,
+        jitter=False,
+    )
+    game.bot_relationships[0].score = -80
+    hostile = NegotiationEngine(game, pack).threshold_percent(
+        bot,
+        rival,
+        jitter=False,
+    )
+
+    assert friendly < neutral < hostile
+
+
+def test_taking_a_bots_group_key_damages_the_relationship(
+    pack: ContentPack,
+) -> None:
+    bot = make_bot(BotPersonality.BALANCED)
+    human = PlayerState(user_id=uuid4(), display_name="Human")
+    game = make_game(
+        pack,
+        [bot, human],
+        owners={
+            ORANGE[0]: bot.user_id,
+            ORANGE[1]: bot.user_id,
+            ORANGE[2]: human.user_id,
+        },
+    )
+    event = GameEvent(
+        sequence=1,
+        type="property.purchased",
+        data={"player_id": str(human.user_id), "tile_id": ORANGE[2]},
+    )
+
+    changes = relationship_changes_for_events(game, pack, [event])
+
+    assert len(changes) == 1
+    assert changes[0].bot_id == bot.user_id
+    assert changes[0].player_id == human.user_id
+    assert changes[0].delta == -10
+    assert changes[0].reason == "blocked_group"
 
 
 async def test_bot_does_not_repeat_a_deal_that_was_refused(pack: ContentPack) -> None:

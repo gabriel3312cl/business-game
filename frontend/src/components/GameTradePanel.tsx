@@ -42,6 +42,7 @@ import type {
   TileDefinition,
   TradeAnalysis,
   TradeOffer,
+  TradeSideAnalysis,
   User,
 } from '../types'
 import { perimeterPosition } from './boardGeometry'
@@ -72,6 +73,7 @@ export function GameTradePanel({
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const [open, setOpen] = useState(false)
   const [detailTradeId, setDetailTradeId] = useState<string | null>(null)
+  const [counteringTradeId, setCounteringTradeId] = useState<string | null>(null)
   const [systemAnalysis, setSystemAnalysis] = useState<TradeAnalysis | null>(null)
   const [systemAnalysisLoading, setSystemAnalysisLoading] = useState(false)
   const [systemAnalysisError, setSystemAnalysisError] = useState(false)
@@ -107,13 +109,6 @@ export function GameTradePanel({
       (trade.proposer_id === user.id || trade.recipient_id === user.id),
   )
   const detailTrade = pendingTrades.find((trade) => trade.id === detailTradeId)
-  const propertyName = (propertyId: string) => {
-    const tile = pack.board.tiles.find(
-      (candidate) => candidate.id === propertyId,
-    )
-    return tile ? pack.messages[tile.name_key] : propertyId
-  }
-
   useEffect(() => {
     setSystemAnalysis(null)
     setSystemAnalysisError(false)
@@ -140,42 +135,53 @@ export function GameTradePanel({
 
   const generateAiAnalysis = async () => {
     if (!detailTrade || !systemAnalysis || aiAnalysisLoading) return
-    const isRecipient = detailTrade.recipient_id === user.id
-    const incomingCash = isRecipient
-      ? detailTrade.offered_cash
-      : detailTrade.requested_cash
-    const outgoingCash = isRecipient
-      ? detailTrade.requested_cash
-      : detailTrade.offered_cash
-    const incomingProperties = (
-      isRecipient
-        ? detailTrade.offered_property_ids
-        : detailTrade.requested_property_ids
-    ).map(propertyName)
-    const outgoingProperties = (
-      isRecipient
-        ? detailTrade.requested_property_ids
-        : detailTrade.offered_property_ids
-    ).map(propertyName)
+    const proposerAnalysis = systemAnalysis.proposer_analysis
+    const recipientAnalysis = systemAnalysis.recipient_analysis
     setAiAnalysisLoading(true)
     setAiAnalysisError(false)
     try {
       setAiAnalysis(
         await advisorApi.ask(game.id, {
           question: t('tradeAiQuestion', {
-            incomingCash,
-            outgoingCash,
-            netCash: incomingCash - outgoingCash,
-            incomingProperties:
-              incomingProperties.join(', ') || t('tradeNoProperties'),
-            outgoingProperties:
-              outgoingProperties.join(', ') || t('tradeNoProperties'),
-            estimatedGain: systemAnalysis.estimated_gain,
-            estimatedCost: systemAnalysis.estimated_cost,
-            estimatedSurplus: systemAnalysis.estimated_surplus,
-            cashAfter: systemAnalysis.cash_after,
-            liquidityFloor: systemAnalysis.liquidity_floor,
-            systemVerdict: systemAnalysis.verdict,
+            myRole: t(`tradeRoles.${systemAnalysis.perspective}`),
+            offeredCash: detailTrade.offered_cash,
+            requestedCash: detailTrade.requested_cash,
+            offeredPropertyCount: detailTrade.offered_property_ids.length,
+            requestedPropertyCount: detailTrade.requested_property_ids.length,
+            proposerLevel: t(
+              `tradeConvenienceLevel.${proposerAnalysis.convenience_level}`,
+            ),
+            proposerVerdict: t(`tradeSystemVerdict.${proposerAnalysis.verdict}`),
+            proposerSurplus: proposerAnalysis.estimated_surplus,
+            proposerRiskSurplus: proposerAnalysis.risk_adjusted_surplus,
+            proposerCashAfter: proposerAnalysis.cash_after,
+            proposerPaymentProbabilityBefore:
+              proposerAnalysis.payment_probability_before,
+            proposerPaymentProbabilityAfter:
+              proposerAnalysis.payment_probability_after,
+            proposerExpectedPaymentsBefore:
+              proposerAnalysis.expected_payments_before,
+            proposerExpectedPaymentsAfter:
+              proposerAnalysis.expected_payments_after,
+            proposerIncomeBefore: proposerAnalysis.expected_rent_income_before,
+            proposerIncomeAfter: proposerAnalysis.expected_rent_income_after,
+            recipientLevel: t(
+              `tradeConvenienceLevel.${recipientAnalysis.convenience_level}`,
+            ),
+            recipientVerdict: t(`tradeSystemVerdict.${recipientAnalysis.verdict}`),
+            recipientSurplus: recipientAnalysis.estimated_surplus,
+            recipientRiskSurplus: recipientAnalysis.risk_adjusted_surplus,
+            recipientCashAfter: recipientAnalysis.cash_after,
+            recipientPaymentProbabilityBefore:
+              recipientAnalysis.payment_probability_before,
+            recipientPaymentProbabilityAfter:
+              recipientAnalysis.payment_probability_after,
+            recipientExpectedPaymentsBefore:
+              recipientAnalysis.expected_payments_before,
+            recipientExpectedPaymentsAfter:
+              recipientAnalysis.expected_payments_after,
+            recipientIncomeBefore: recipientAnalysis.expected_rent_income_before,
+            recipientIncomeAfter: recipientAnalysis.expected_rent_income_after,
           }),
         }),
       )
@@ -186,6 +192,7 @@ export function GameTradePanel({
     }
   }
   const reset = () => {
+    setCounteringTradeId(null)
     setRecipientId('')
     setOfferedCash(0)
     setRequestedCash(0)
@@ -195,6 +202,16 @@ export function GameTradePanel({
   const close = () => {
     setOpen(false)
     reset()
+  }
+  const startCounterOffer = (trade: TradeOffer) => {
+    setCounteringTradeId(trade.id)
+    setRecipientId(trade.proposer_id)
+    setOfferedCash(trade.requested_cash)
+    setRequestedCash(trade.offered_cash)
+    setOfferedPropertyIds([...trade.requested_property_ids])
+    setRequestedPropertyIds([...trade.offered_property_ids])
+    setDetailTradeId(null)
+    setOpen(true)
   }
   const canSend =
     recipientId &&
@@ -354,6 +371,9 @@ export function GameTradePanel({
                   analysis={systemAnalysis}
                   loading={systemAnalysisLoading}
                   failed={systemAnalysisError}
+                  game={game}
+                  trade={detailTrade}
+                  userId={user.id}
                 />
                 <Paper
                   variant="outlined"
@@ -438,6 +458,13 @@ export function GameTradePanel({
                     {t('accept')}
                   </Button>
                   <Button
+                    color="secondary"
+                    disabled={busy}
+                    onClick={() => startCounterOffer(detailTrade)}
+                  >
+                    {t('counterOffer')}
+                  </Button>
+                  <Button
                     color="error"
                     disabled={busy}
                     onClick={async () => {
@@ -480,7 +507,7 @@ export function GameTradePanel({
         aria-labelledby="trade-title"
       >
         <DialogTitle id="trade-title" textAlign="center" color="secondary.light">
-          {recipientId && (
+          {recipientId && !counteringTradeId && (
             <IconButton
               aria-label={t('back')}
               onClick={() => setRecipientId('')}
@@ -489,7 +516,7 @@ export function GameTradePanel({
               <ArrowBackRoundedIcon />
             </IconButton>
           )}
-          {t('createTrade')}
+          {t(counteringTradeId ? 'counterOffer' : 'createTrade')}
           <IconButton
             aria-label={t('close')}
             onClick={close}
@@ -585,19 +612,30 @@ export function GameTradePanel({
               startIcon={<SendRoundedIcon />}
               disabled={busy || !canSend}
               onClick={async () => {
-                const sent = await onCommand({
-                  action: 'propose_trade',
-                  recipient_id: recipientId,
+                const terms = {
                   offered_cash: offeredCash,
                   requested_cash: requestedCash,
                   offered_property_ids: offeredPropertyIds,
                   requested_property_ids: requestedPropertyIds,
-                })
+                }
+                const sent = await onCommand(
+                  counteringTradeId
+                    ? {
+                        action: 'counter_trade',
+                        trade_id: counteringTradeId,
+                        ...terms,
+                      }
+                    : {
+                        action: 'propose_trade',
+                        recipient_id: recipientId,
+                        ...terms,
+                      },
+                )
                 if (sent) close()
               }}
               sx={{ minHeight: 48, px: 3 }}
             >
-              {t('sendOffer')}
+              {t(counteringTradeId ? 'sendCounterOffer' : 'sendOffer')}
             </Button>
           </DialogActions>
         )}
@@ -780,12 +818,18 @@ interface SystemTradeAnalysisProps {
   analysis: TradeAnalysis | null
   loading: boolean
   failed: boolean
+  game: GameState
+  trade: TradeOffer
+  userId: string
 }
 
 function SystemTradeAnalysis({
   analysis,
   loading,
   failed,
+  game,
+  trade,
+  userId,
 }: SystemTradeAnalysisProps) {
   const { t } = useTranslation()
   if (loading || (!analysis && !failed)) {
@@ -801,50 +845,148 @@ function SystemTradeAnalysis({
   if (failed || !analysis) {
     return <Alert severity="warning">{t('tradeSystemUnavailable')}</Alert>
   }
-  const severity =
-    analysis.verdict === 'accept'
-      ? 'success'
-      : analysis.verdict === 'counter'
-        ? 'warning'
-        : 'error'
   return (
-    <Alert severity={severity} variant="outlined">
+    <Paper variant="outlined" sx={{ p: 2, borderColor: 'rgba(255,255,255,.16)' }}>
       <Typography fontWeight={850}>{t('tradeSystemAnalysis')}</Typography>
-      <Typography variant="body2" fontWeight={750} mt={0.5}>
-        {t(`tradeSystemVerdict.${analysis.verdict}`)}
+      <Typography variant="body2" color="text.secondary" mt={0.25}>
+        {t('tradeSystemComparisonHelp')}
       </Typography>
-      <Typography variant="body2" color="text.secondary" mt={0.5}>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' },
+          gap: 1.5,
+          mt: 1.5,
+        }}
+      >
+        <TradeSideAnalysisCard
+          side={analysis.proposer_analysis}
+          name={playerName(game, trade.proposer_id)}
+          isUser={trade.proposer_id === userId}
+        />
+        <TradeSideAnalysisCard
+          side={analysis.recipient_analysis}
+          name={playerName(game, trade.recipient_id)}
+          isUser={trade.recipient_id === userId}
+        />
+      </Box>
+      <Typography variant="caption" color="text.secondary" display="block" mt={1}>
+        {t('tradeSystemDisclaimer')}
+      </Typography>
+    </Paper>
+  )
+}
+
+function TradeSideAnalysisCard({
+  side,
+  name,
+  isUser,
+}: {
+  side: TradeSideAnalysis
+  name: string
+  isUser: boolean
+}) {
+  const { t } = useTranslation()
+  const severity = convenienceSeverity(side.convenience_level)
+  return (
+    <Alert severity={severity} variant="outlined" sx={{ alignItems: 'stretch' }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+        <Box>
+          <Typography fontWeight={850}>
+            {name} {isUser ? `(${t('tradeYou')})` : ''}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {t(`tradeRoles.${side.role}`)}
+          </Typography>
+        </Box>
+        <Chip
+          size="small"
+          color={severity === 'info' ? 'default' : severity}
+          label={t(`tradeConvenienceLevel.${side.convenience_level}`)}
+          sx={{ fontWeight: 850 }}
+        />
+      </Stack>
+      <Typography variant="body2" fontWeight={750} mt={1}>
+        {t(`tradeSystemVerdict.${side.verdict}`)}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" mt={0.25}>
         {t('tradeSystemReason', {
-          reason: t(`activity.botReason.${analysis.reason_code}`),
+          reason: t(`activity.botReason.${side.reason_code}`),
         })}
       </Typography>
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: 'repeat(4, 1fr)' },
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
           gap: 1,
-          mt: 1.5,
+          mt: 1.25,
         }}
       >
-        <AnalysisValue label={t('tradeEstimatedGain')} value={`$${analysis.estimated_gain}`} />
-        <AnalysisValue label={t('tradeEstimatedCost')} value={`$${analysis.estimated_cost}`} />
+        <AnalysisValue label={t('tradeEstimatedGain')} value={`$${side.estimated_gain}`} />
+        <AnalysisValue label={t('tradeEstimatedCost')} value={`$${side.estimated_cost}`} />
         <AnalysisValue
           label={t('tradeEstimatedBalance')}
-          value={`${analysis.estimated_surplus >= 0 ? '+' : '-'}$${Math.abs(
-            analysis.estimated_surplus,
-          )}`}
+          value={signedMoney(side.estimated_surplus)}
         />
         <AnalysisValue
-          label={t('tradeCashAfter')}
-          value={`$${analysis.cash_after}`}
-          warning={analysis.cash_after < analysis.liquidity_floor}
+          label={t('tradeRiskAdjustedBalance')}
+          value={signedMoney(side.risk_adjusted_surplus)}
+        />
+        <AnalysisValue
+          label={t('tradeCashAfterWithReserve', { reserve: side.liquidity_floor })}
+          value={`$${side.cash_after}`}
+          warning={side.cash_after < side.liquidity_floor}
+        />
+        <AnalysisValue
+          label={t('tradeHighestPayment')}
+          value={`$${side.highest_payment_after}`}
         />
       </Box>
-      <Typography variant="caption" color="text.secondary" display="block" mt={1}>
-        {t('tradeSystemDisclaimer', { reserve: analysis.liquidity_floor })}
+      <Divider sx={{ my: 1.25 }} />
+      <Typography variant="caption" fontWeight={850} color="text.secondary">
+        {t('tradeProjectionTitle')}
       </Typography>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: {
+            xs: '1fr',
+            sm: 'repeat(3, minmax(0, 1fr))',
+          },
+          gap: 1,
+          mt: 0.75,
+        }}
+      >
+        <AnalysisValue
+          label={t('tradePaymentProbability')}
+          value={`${side.payment_probability_before}% → ${side.payment_probability_after}%`}
+          warning={side.payment_probability_after > side.payment_probability_before}
+        />
+        <AnalysisValue
+          label={t('tradeExpectedPayments')}
+          value={`$${side.expected_payments_before} → $${side.expected_payments_after}`}
+          warning={side.expected_payments_after > side.expected_payments_before}
+        />
+        <AnalysisValue
+          label={t('tradeExpectedIncome')}
+          value={`$${side.expected_rent_income_before} → $${side.expected_rent_income_after}`}
+        />
+      </Box>
     </Alert>
   )
+}
+
+function convenienceSeverity(
+  level: TradeSideAnalysis['convenience_level'],
+): 'success' | 'info' | 'warning' | 'error' {
+  if (level === 'very_favorable' || level === 'favorable') return 'success'
+  if (level === 'balanced') return 'info'
+  if (level === 'unfavorable') return 'warning'
+  return 'error'
+}
+
+function signedMoney(value: number): string {
+  return `${value >= 0 ? '+' : '-'}$${Math.abs(value)}`
 }
 
 interface AnalysisValueProps {

@@ -17,6 +17,7 @@ from business_game.application.pack_loader import PackLoader
 from business_game.domain.models import (
     BotController,
     BotPersonality,
+    BuildGroupRoundCommand,
     BuyPropertyCommand,
     ContentPack,
     DeclinePropertyCommand,
@@ -176,6 +177,43 @@ def test_ai_bot_can_choose_between_real_deals(packs_dir: Path) -> None:
     assert all(proposal.estimate is not None for proposal in proposals)
     assert any("balance_estimate" in option for option in context["options"])
     assert len(json.dumps(context, ensure_ascii=False)) < 9_000
+
+
+def test_ai_bot_can_keep_a_server_generated_group_round(packs_dir: Path) -> None:
+    pack = PackLoader(packs_dir).load("classic-demo")
+    bot = PlayerState(
+        user_id=uuid4(),
+        display_name="Bot",
+        is_bot=True,
+        bot_personality=BotPersonality.AGGRESSIVE,
+        bot_controller=BotController.AI,
+    )
+    rival = PlayerState(user_id=uuid4(), display_name="Rival")
+    group_id = "light_blue"
+    group = [tile for tile in pack.board.tiles if tile.group == group_id]
+    game = GameState(
+        host_user_id=rival.user_id,
+        pack_id=pack.manifest.id,
+        pack_version=pack.manifest.version,
+        status=GameStatus.PLAYING,
+        players=[bot, rival],
+        phase=TurnPhase.WAITING_FOR_END,
+        owners={tile.id: bot.user_id for tile in group},
+    )
+    fallback = BotAction(
+        actor_id=bot.user_id,
+        command=BuildGroupRoundCommand(
+            action="build_group_round",
+            group_id=group_id,
+        ),
+        reason="develop_complete_group_round",
+    )
+
+    choices = build_ai_bot_choices(game, pack, fallback)
+
+    assert any(
+        isinstance(choice.command, BuildGroupRoundCommand) for choice in choices
+    )
 
 
 def test_ai_bot_off_turn_is_not_offered_illegal_moves(packs_dir: Path) -> None:

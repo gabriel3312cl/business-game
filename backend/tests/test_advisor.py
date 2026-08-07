@@ -13,10 +13,13 @@ from business_game.application.advisor import (
     AdvisorUnavailableError,
     build_advisor_context,
 )
+from business_game.application.economy import ensure_investments
 from business_game.application.pack_loader import PackLoader
 from business_game.application.services import GameService, UserService
 from business_game.domain.advisor_models import AdvisorRequest, AdvisorResponse
 from business_game.domain.models import (
+    BankCreditProfileState,
+    BankLoanState,
     ContentPack,
     GameEvent,
     GameState,
@@ -41,6 +44,7 @@ def advisor_game(packs_dir: Path) -> tuple[GameState, ContentPack, UUID, UUID, s
                 user_id=actor_id,
                 display_name="Nombre privado",
                 balance=900,
+                pending_dividend_units=1_234,
                 jail_card_ids=["private-card"],
             ),
             PlayerState(
@@ -52,6 +56,46 @@ def advisor_game(packs_dir: Path) -> tuple[GameState, ContentPack, UUID, UUID, s
         ],
         owners={property_tile.id: actor_id},
         events=[GameEvent(sequence=7, type="turn.started")],
+    )
+    game.settings.rules.stock_market_enabled = True
+    game.bank.initialized = True
+    game.bank.cash = 10_000
+    ensure_investments(game, pack)
+    instrument = game.bank.investments[0]
+    instrument.available_shares -= 2
+    instrument.holdings[actor_id] = 2
+    instrument.current_price = instrument.base_price + 5
+    instrument.session_high = instrument.current_price
+    instrument.dividends_accrued_units = 12_500
+    instrument.dividends_paid = 1
+    game.events.insert(
+        0,
+        GameEvent(
+            sequence=6,
+            type="investment.shares_bought",
+            data={
+                "instrument_id": instrument.id,
+                "player_id": str(actor_id),
+                "quantity": 2,
+                "gross": 50,
+                "fee": 1,
+            },
+        ),
+    )
+    game.bank.credit_profiles[actor_id] = BankCreditProfileState(
+        score=640,
+        current_limit=500,
+    )
+    game.bank.loans.append(
+        BankLoanState(
+            player_id=actor_id,
+            principal=100,
+            interest_amount=15,
+            remaining_balance=115,
+            installment_amount=23,
+            installments_remaining=5,
+            issued_at_sequence=5,
+        )
     )
     return game, pack, actor_id, opponent_id, property_tile.id
 
@@ -71,6 +115,21 @@ def test_advisor_context_filters_identifiers_and_private_cards(packs_dir: Path) 
     assert players[0]["jail_card_count"] == 1
     assert "jail_card_count" not in players[1]
     assert next(item for item in properties if item["id"] == property_id)["owner"] == "Tú"
+    portfolio = context["your_investment_portfolio"]
+    finances = context["your_finances"]
+    market = context["market_summary"]
+    assert isinstance(portfolio, list)
+    assert isinstance(finances, dict)
+    assert isinstance(market, dict)
+    assert portfolio[0]["shares"] == 2
+    assert portfolio[0]["estimated_cost_basis"] == 51.0
+    assert portfolio[0]["market_value"] == 60
+    assert finances["pending_dividends"] == 0.1234
+    assert finances["credit_score"] == 640
+    assert finances["active_loan"]["remaining_balance"] == 115
+    assert market["enabled"] is True
+    assert market["index_base_100"] is not None
+    assert all("holdings" not in item for item in market["instruments"])
     assert str(actor_id) not in serialized
     assert str(opponent_id) not in serialized
     assert "Nombre privado" not in serialized
@@ -132,6 +191,9 @@ async def test_advisor_calls_deepseek_with_filtered_state(packs_dir: Path) -> No
         prompt = payload["messages"][1]["content"]
         assert "Nombre privado" not in prompt
         assert "private-card" not in prompt
+        assert '"your_investment_portfolio"' in prompt
+        assert '"estimated_cost_basis":51.0' in prompt
+        assert '"remaining_balance":115' in prompt
         return httpx.Response(
             200,
             json={"choices": [{"message": {"content": " Conserva liquidez. "}}]},

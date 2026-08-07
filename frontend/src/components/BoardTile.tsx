@@ -15,6 +15,9 @@ interface BoardTileProps {
   compact: boolean
   buildingLevel?: number
   buildingLabel?: string
+  mortgaged?: boolean
+  mortgageLabel?: string
+  actionPulse?: boolean
   tokens?: BoardToken[]
   owner?: BoardOwner
   heatmap?: BoardTileHeatmap
@@ -59,6 +62,9 @@ export function BoardTile({
   compact,
   buildingLevel = 0,
   buildingLabel,
+  mortgaged = false,
+  mortgageLabel,
+  actionPulse = false,
   tokens = [],
   owner,
   heatmap,
@@ -72,6 +78,7 @@ export function BoardTile({
   const priceLabel = tile.price != null ? `, $${tile.price}` : ''
   const ownerLabel = owner ? `, ${owner.ariaLabel}` : ''
   const buildingsLabel = buildingLabel ? `, ${buildingLabel}` : ''
+  const mortgagedLabel = mortgaged && mortgageLabel ? `, ${mortgageLabel}` : ''
   const heatmapLabel = heatmap ? `, ${heatmap.ariaLabel}` : ''
 
   return (
@@ -84,7 +91,7 @@ export function BoardTile({
     <Box
       component="button"
       type="button"
-      aria-label={`${name}${priceLabel}${ownerLabel}${buildingsLabel}${heatmapLabel}`}
+      aria-label={`${name}${priceLabel}${ownerLabel}${buildingsLabel}${mortgagedLabel}${heatmapLabel}`}
       onClick={onClick}
       sx={{
         gridColumn,
@@ -99,16 +106,32 @@ export function BoardTile({
           sm: compact ? '4px' : '7px',
           md: compact ? '5px' : '9px',
         },
-        background:
-          'linear-gradient(155deg, rgba(55,49,83,.98), rgba(27,23,42,.98) 72%)',
-        boxShadow:
-          'inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)',
+        background: mortgaged
+          ? 'repeating-linear-gradient(135deg, rgba(255,174,51,.10) 0 7px, rgba(11,9,18,.12) 7px 14px), linear-gradient(155deg, rgba(55,49,83,.98), rgba(27,23,42,.98) 72%)'
+          : 'linear-gradient(155deg, rgba(55,49,83,.98), rgba(27,23,42,.98) 72%)',
+        boxShadow: mortgaged
+          ? 'inset 0 0 0 2px rgba(255,174,51,.82), inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)'
+          : 'inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)',
         position: 'relative',
         isolation: 'isolate',
         p: 0,
         color: 'inherit',
         font: 'inherit',
         cursor: 'pointer',
+        animation: actionPulse
+          ? 'board-tile-action-pulse 620ms cubic-bezier(.2,.78,.24,1)'
+          : undefined,
+        transformOrigin: 'center',
+        zIndex: actionPulse ? 6 : undefined,
+        '@keyframes board-tile-action-pulse': {
+          '0%, 100%': { transform: 'translateY(0) scale(1)', filter: 'none' },
+          '28%': {
+            transform: 'translateY(-9%) scale(1.07)',
+            filter: 'brightness(1.38) saturate(1.18)',
+          },
+          '55%': { transform: 'translateY(2%) scale(.985)' },
+          '76%': { transform: 'translateY(-2%) scale(1.015)' },
+        },
         '&:focus-visible': {
           outline: '2px solid #b8ff3d',
           outlineOffset: -2,
@@ -117,6 +140,9 @@ export function BoardTile({
         '&:hover': {
           filter: 'brightness(1.12)',
           zIndex: 4,
+        },
+        '@media (prefers-reduced-motion: reduce)': {
+          animation: 'none',
         },
       }}
     >
@@ -250,6 +276,23 @@ export function BoardTile({
               assetPath={tile.asset_path}
             />
           )}
+          {tile.kind === 'property' &&
+            !propertyColorBand &&
+            buildingLevel > 0 && (
+              <Box
+                component="span"
+                sx={{
+                  position: 'absolute',
+                  bottom: { xs: -4, sm: -5, md: -6 },
+                  left: '50%',
+                  zIndex: 2,
+                  transform: 'translateX(-50%)',
+                  pointerEvents: 'none',
+                }}
+              >
+                <BuildingPieces level={buildingLevel} label={buildingLabel} />
+              </Box>
+            )}
         </Box>
 
         <Typography
@@ -274,7 +317,35 @@ export function BoardTile({
           {name}
         </Typography>
 
-        {tile.price != null ? (
+        {mortgaged && mortgageLabel ? (
+          <Typography
+            component="span"
+            sx={{
+              flex: '0 0 auto',
+              maxWidth: '100%',
+              borderRadius: 1,
+              bgcolor: '#ffae33',
+              color: '#241400',
+              px: { xs: 0.3, sm: 0.6 },
+              py: { xs: 0, sm: 0.1 },
+              fontSize: {
+                xs: compact ? 4.5 : 5.5,
+                sm: compact ? 6.5 : 7.5,
+                md: compact ? 7.5 : 9.5,
+              },
+              lineHeight: 1.15,
+              fontWeight: 950,
+              letterSpacing: '0.025em',
+              textTransform: 'uppercase',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              boxShadow: '0 0 8px rgba(255,174,51,.5)',
+            }}
+          >
+            {mortgageLabel}
+          </Typography>
+        ) : tile.price != null ? (
           <Typography
             component="span"
             sx={{
@@ -384,14 +455,25 @@ function BuildingPieces({ level, label }: { level: number; label?: string }) {
         role={label ? 'img' : undefined}
         aria-label={label}
         sx={{
-          width: { xs: 10, sm: 15, md: 19 },
-          height: { xs: 4, sm: 6, md: 8 },
-          borderRadius: '2px 2px 1px 1px',
-          bgcolor: '#ff5368',
-          border: '1px solid rgba(70,0,12,.7)',
-          boxShadow: '0 1px 4px rgba(0,0,0,.7), 0 0 6px rgba(255,83,104,.75)',
+          width: { xs: 12, sm: 18, md: 23 },
+          height: { xs: 8, sm: 11, md: 14 },
+          display: 'grid',
+          placeItems: 'center',
+          bgcolor: '#ff4058',
+          color: '#fff',
+          clipPath: 'polygon(50% 0, 100% 30%, 100% 100%, 0 100%, 0 30%)',
+          filter:
+            'drop-shadow(0 1px 2px rgba(0,0,0,.9)) drop-shadow(0 0 4px rgba(255,64,88,.85))',
+          fontSize: { xs: 5, sm: 7, md: 9 },
+          lineHeight: 1,
+          fontWeight: 950,
+          textShadow: '0 1px 1px rgba(70,0,12,.9)',
         }}
-      />
+      >
+        <Box component="span" aria-hidden>
+          H
+        </Box>
+      </Box>
     )
   }
 

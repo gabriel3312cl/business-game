@@ -44,6 +44,9 @@ void i18n.use(initReactI18next).init({
         login: 'Entrar',
         register: 'Crear cuenta',
         logout: 'Salir',
+        autoRejectTrades: 'Rechazar intercambios automáticamente',
+        autoRollDice: 'Lanzar los dados automáticamente',
+        autoEndTurns: 'Finalizar turnos automáticamente',
         displayName: 'Nombre visible',
         email: 'Correo',
         password: 'Contraseña',
@@ -198,6 +201,277 @@ void i18n.use(initReactI18next).init({
         operationRejected: 'Operación rechazada.',
         commandRejected: 'Comando rechazado.',
         bank: 'Banco',
+        market: 'Bolsa',
+        bankPanel: {
+          title: 'Banco de la partida',
+          subtitle: 'Liquidez, reservas y crédito',
+          initializing: 'El banco se inicializará con la próxima actualización.',
+          tabs: {
+            summary: 'Resumen',
+            loans: 'Préstamos',
+            investments: 'Inversiones',
+            activity: 'Movimientos',
+          },
+          monetaryBase: 'Base monetaria',
+          bankCash: 'Caja del banco',
+          circulation: 'En circulación',
+          bankPot: 'Fondos segregados',
+          activeCredit: 'Créditos vigentes',
+          emergencyIssuance: 'Emisión extraordinaria',
+          dividendReserve: 'Reserva para dividendos',
+          reserve: 'Reserva bancaria',
+          reserveHelp: 'Mínimo {{percent}}%: {{amount}}',
+          loansEnabled: 'Préstamos activos',
+          loansDisabled: 'Préstamos desactivados',
+          marketEnabled: 'Bolsa activa',
+          marketDisabled: 'Bolsa desactivada',
+          loanFeatureDisabled:
+            'Los préstamos fueron desactivados al configurar esta sala.',
+          marketFeatureDisabled:
+            'La bolsa fue desactivada al configurar esta sala.',
+          activeLoan: 'Préstamo vigente',
+          installmentsLeft: '{{count}} cuotas pendientes',
+          loanBalance: 'Saldo por pagar: {{amount}}',
+          nextInstallment: 'Próxima cuota al pasar por Salida: {{amount}}',
+          payInstallment: 'Pagar una cuota',
+          payFullLoan: 'Pagar todo',
+          requestLoan: 'Solicitar préstamo',
+          creditProfile: 'Perfil crediticio',
+          creditScore: 'Puntaje {{score}}',
+          creditHistory:
+            '{{completed}} créditos pagados · {{onTime}} cuotas al día · {{late}} atrasos · {{defaults}} impagos',
+          creditRewardHelp:
+            'Pagar las cuotas al día mejora el cupo y reduce la tasa. Los atrasos e impagos empeoran ambas condiciones.',
+          loanAmount: 'Monto solicitado',
+          loanLimit:
+            'Máximo {{amount}}, interés total {{interest}}%, plazo {{laps}} vueltas.',
+          requestLoanAction: 'Solicitar crédito',
+          actionsOnTurn: 'Las operaciones se realizan durante tu turno.',
+          actionsBlocked:
+            'Primero debe terminar la subasta o selección pendiente.',
+          creditCanResolveDebt:
+            'Puedes usar este crédito para pagar la deuda obligatoria de tu turno.',
+          noInvestments: 'Este tablero no tiene transportes o servicios invertibles.',
+          shareAvailability: '{{available}} de {{total}} participaciones disponibles',
+          ownedShares: '{{count}} participaciones tuyas',
+          grossRevenue: 'Rentas: {{amount}}',
+          dividendsPaid: 'Dividendos: {{amount}}',
+          bidAsk: 'Venta {{bid}} · Compra {{ask}}',
+          marketVolume: 'Volumen C {{buys}} / V {{sells}}',
+          marketRange: 'Rango {{low}}–{{high}}',
+          buyOneShare: 'Comprar 1',
+          sellOneShare: 'Vender 1',
+          loanBlocksInvesting:
+            'Debes pagar el préstamo antes de comprar inversiones.',
+          loanInvestmentAllowed:
+            'Crédito habilitado: conserva {{reserve}} y no superes {{limit}} de exposición.',
+          loanInvestmentBlocked:
+            'Con crédito necesitas puntaje 600, reserva {{reserve}} y exposición máxima {{limit}}.',
+          noActivity: 'Aún no hay movimientos financieros.',
+          investment: 'Inversión',
+          instrumentNames: {
+            bank: 'Banco central de la partida',
+            jail: 'Concesión penitenciaria',
+            tax: 'Servicio tributario',
+          },
+          instrumentTypes: {
+            asset: 'Activo del tablero',
+            bank: 'Institución bancaria',
+            jail: 'Servicio público',
+            tax: 'Institución tributaria',
+            index: 'Fondo índice',
+          },
+          activity: {
+            loanIssued: '{{player}} recibió un préstamo de {{amount}}.',
+            loanPaid: '{{player}} pagó {{amount}} de su préstamo.',
+            loanPaymentMissed:
+              '{{player}} no alcanzó a cubrir su cuota. Su puntaje crediticio bajó.',
+            loanDefaulted: 'El préstamo de {{player}} quedó impago.',
+            emergencyIssued: 'El banco emitió {{amount}} de emergencia.',
+            sharesBought:
+              '{{player}} compró {{count}} participación(es) de {{instrument}}.',
+            sharesSold:
+              '{{player}} vendió {{count}} participación(es) de {{instrument}}.',
+            dividendPaid:
+              '{{instrument}} distribuyó {{amount}} en dividendos.',
+            dividendAccrued:
+              '{{instrument}} devengó {{accrued}} en dividendos, acumulados para el próximo pago.',
+            dividendAccruedAndPaid:
+              '{{instrument}} devengó {{accrued}} en dividendos y abonó {{paid}}.',
+            institutionRevenue:
+              '{{instrument}} recaudó {{amount}} y distribuyó {{dividends}}.',
+            institutionRevenueAccrued:
+              '{{instrument}} recaudó {{amount}} y devengó {{accrued}} en dividendos acumulados.',
+            institutionRevenueAccruedAndPaid:
+              '{{instrument}} recaudó {{amount}}, devengó {{accrued}} y abonó {{paid}} en dividendos.',
+            marketExpanded:
+              'Se incorporaron {{count}} nuevas instituciones al mercado.',
+            positionLiquidated:
+              'Se liquidó la inversión de {{player}} por {{amount}}.',
+            dividendsSettled:
+              'La bolsa liquidó {{amount}} en dividendos de la vuelta {{round}}.',
+            limitOrderPlaced:
+              '{{player}} ingresó una orden {{side}} por {{count}} de {{instrument}} a {{price}}.',
+            limitOrderCancelled:
+              '{{player}} canceló su orden de {{instrument}}.',
+            orderFilled:
+              '{{buyer}} compró {{count}} de {{instrument}} a {{price}} a {{seller}}.',
+            marginCall:
+              'Llamado de margen para {{player}}: se cancelaron {{count}} órdenes de compra.',
+          },
+        },
+        marketPanel: {
+          title: 'Bolsa de la partida',
+          subtitle: 'Cotizaciones, actividad y posiciones en tiempo real',
+          tabs: {
+            label: 'Secciones de la bolsa',
+            market: 'Mercado',
+            performance: 'Mi rendimiento',
+          },
+          performance: {
+            empty: 'Aún no tienes inversiones para analizar.',
+            startTitle: 'Cómo comenzar',
+            startAdvice:
+              'Evalúa precio, dividendos, liquidez y concentración. El fondo BGX permite comenzar con exposición diversificada.',
+            currentValue: 'Valor actual',
+            totalProfit: 'Ganancia total',
+            totalReturn: 'Rendimiento acumulado',
+            dividends: 'Dividendos cobrados',
+            pending: 'Dividendos pendientes',
+            risk: 'Riesgo de cartera',
+            riskLevels: {
+              low: 'Bajo',
+              medium: 'Medio',
+              high: 'Alto',
+            },
+            evolution: 'Evolución de ganancias y pérdidas',
+            evolutionChart: 'Evolución histórica del rendimiento de la cartera',
+            evolutionHelp:
+              'Incluye cambios de precio, operaciones realizadas y dividendos liquidados registrados en la partida.',
+            breakdown: 'Detalle de la cartera',
+            costBasis: 'Costo vigente',
+            unrealized: 'Ganancia no realizada',
+            realized: 'Ganancia realizada',
+            concentration: 'Mayor concentración',
+            positionShares: '{{count}} participación(es) · costo promedio {{average}}',
+            unrealizedShort: 'No realizada: {{amount}}',
+            realizedShort: 'Realizada: {{amount}}',
+            dividendsShort: 'Dividendos: {{amount}}',
+            estimatedBasis:
+              'El costo incluye una estimación porque parte del historial no contiene el precio de adquisición.',
+            adviceTitle: 'Consejos según tu cartera',
+            advice: {
+              concentration:
+                'Una sola inversión concentra al menos 60% de tu cartera. Diversificar reduce el impacto de una caída puntual.',
+              leverage:
+                'Tienes un préstamo activo. Conserva la reserva de las cuotas y evita aumentar exposición solo por una subida reciente.',
+              losses:
+                'La rentabilidad total es negativa. Revisa ingresos reales y liquidez antes de promediar a la baja.',
+              pendingDividends:
+                'Tienes dividendos devengados que se liquidarán al cierre de la vuelta; todavía no son efectivo disponible.',
+              diversify:
+                'Tu cartera depende de un solo instrumento. BGX puede repartir el riesgo entre los activos de la partida.',
+              balanced:
+                'La cartera no presenta alertas principales de concentración, deuda o pérdidas acumuladas.',
+            },
+            aiTitle: 'Consejos y análisis con IA',
+            aiHelp:
+              'El asesor analiza una copia filtrada de la partida y no puede ejecutar operaciones.',
+            aiButton: 'Analizar con IA',
+            aiThinking: 'Analizando…',
+            aiError: 'No fue posible obtener el análisis de IA. Intenta nuevamente.',
+            aiPrompt:
+              'Analiza en detalle mi cartera bursátil actual. Separa rentabilidad realizada, no realizada y dividendos; evalúa concentración, liquidez, préstamo, órdenes abiertas y riesgo. Dame tres acciones concretas, pero no ejecutes ninguna.',
+          },
+          initializing: 'La bolsa se inicializará con la próxima actualización.',
+          disabled: 'La bolsa fue desactivada al configurar esta sala.',
+          empty: 'Este tablero no tiene instrumentos disponibles.',
+          live: 'En vivo · #{{sequence}}',
+          index: 'Índice general BGX',
+          indexFundName: 'Fondo índice BGX',
+          indexChart: 'Evolución del índice general de la bolsa',
+          indexHelp:
+            'Índice de base 100, ponderado por igual entre todos los instrumentos de la partida.',
+          owned: '{{count}} tuyas',
+          volume: 'Volumen {{count}}',
+          openDetail: 'Ver detalle',
+          close: 'Cerrar',
+          currentPrice: 'Precio actual',
+          instrumentChart: 'Evolución de {{instrument}}',
+          position: 'Tu posición',
+          ownedLabel: 'Participaciones',
+          availableToSell: 'Disponibles para vender',
+          positionValue: 'Valor de mercado',
+          availableLabel: 'Disponibles',
+          maximumHolding: 'Máximo permitido',
+          balance: 'Saldo disponible',
+          bid: 'Mejor precio de venta',
+          ask: 'Mejor precio de compra',
+          sessionRange: 'Mínimo / máximo',
+          totalVolume: 'Volumen negociado',
+          revenue: 'Ingresos acumulados',
+          dividends: 'Dividendos distribuidos',
+          dividendsAccrued: 'Dividendos devengados',
+          pendingDividends: 'Dividendos pendientes',
+          order: 'Ingresar orden',
+          orderType: 'Tipo de orden',
+          marketOrder: 'A mercado',
+          limitOrder: 'Con precio límite',
+          limitPrice: 'Precio límite',
+          quantity: 'Cantidad',
+          buyEstimate: 'Estimación de compra',
+          sellEstimate: 'Estimación de venta',
+          averagePrice: 'Precio promedio',
+          fee: 'Comisión',
+          total: 'Total a pagar',
+          proceeds: 'Ingreso neto',
+          estimatedPrice: 'Precio posterior estimado',
+          spread: 'Spread dinámico',
+          impact: 'Impacto estimado',
+          buy: 'Comprar {{count}}',
+          sell: 'Vender {{count}}',
+          available: 'disponible',
+          operationLimits: 'Compra: {{buy}} · Venta: {{sell}}',
+          recentActivity: 'Operaciones recientes',
+          noActivity: 'Este instrumento aún no registra operaciones.',
+          orderBook: 'Libro de órdenes',
+          emptyOrderBook: 'No hay órdenes limitadas abiertas.',
+          bookEntry: '{{count}} participación(es) a {{price}}',
+          cancelOrder: 'Cancelar',
+          sides: {
+            buy: 'Compra',
+            sell: 'Venta',
+          },
+          reasons: {
+            turn: 'espera tu turno',
+            pending: 'resuelve primero la deuda, subasta o selección pendiente',
+            quantity: 'ingresa una cantidad entera mayor que cero',
+            availability: 'no hay suficientes participaciones disponibles',
+            ownership: 'el máximo por jugador es {{count}}',
+            balance: 'saldo insuficiente',
+            credit: 'no cumple las condiciones para invertir con crédito',
+            holdings: 'no tienes suficientes participaciones',
+            reserve: 'la reserva del banco no permite recomprar esa cantidad',
+            limitPrice: 'ingresa un precio límite entero mayor que cero',
+          },
+          activity: {
+            bought:
+              '{{player}} compró {{count}} participación(es) a un promedio de {{price}}.',
+            sold:
+              '{{player}} vendió {{count}} participación(es) a un promedio de {{price}}.',
+            dividend: 'Se distribuyeron {{amount}} en dividendos.',
+            dividendAccrued:
+              'Se devengaron {{amount}} en dividendos; se abonaron {{paid}}.',
+            revenue: 'El instrumento registró ingresos por {{amount}}.',
+            revenueAccrued:
+              'Registró {{amount}} de ingreso, devengó {{accrued}} y abonó {{paid}}.',
+            limitPlaced:
+              '{{player}} ingresó una orden {{side}} por {{count}} a {{price}}.',
+            limitCancelled: '{{player}} canceló una orden limitada.',
+            filled:
+              'Se negociaron {{count}} participación(es) a {{price}} entre jugadores.',
+          },
+        },
         room: 'Sala',
         copyRoomId: 'Copiar ID de la sala',
         gamePanels: 'Paneles de la partida',
@@ -266,6 +540,10 @@ void i18n.use(initReactI18next).init({
             'Acumular impuestos y multas en Descanso',
           double_salary_on_start:
             'Pagar salario doble al caer exactamente en Salida',
+          loans_enabled: 'Habilitar préstamos bancarios',
+          stock_market_enabled: 'Habilitar bolsa e inversiones',
+          custom_rent_debts_enabled:
+            'Permitir perdón y cuotas personalizadas para rentas',
         },
         bankPot: 'Pozo del banco: ${{amount}}',
         rollDice: 'Lanzar dados',
@@ -301,6 +579,8 @@ void i18n.use(initReactI18next).init({
         trades: 'Intercambios',
         propertiesAndTrades: 'Propiedades e intercambios',
         createTrade: 'Crear intercambio',
+        counterOffer: 'Contraofertar',
+        sendCounterOffer: 'Enviar contraoferta',
         noPendingTrades: 'No hay intercambios pendientes.',
         viewDetails: 'Ver detalles',
         tradeDetails: 'Detalles del intercambio',
@@ -314,26 +594,47 @@ void i18n.use(initReactI18next).init({
         tradeSystemAnalysis: 'Análisis del sistema',
         tradeSystemAnalyzing: 'Calculando el valor estratégico del trato…',
         tradeSystemUnavailable: 'No fue posible calcular este trato.',
+        tradeSystemComparisonHelp:
+          'Compara al ofertante y al receptor, incluyendo valor, liquidez y exposición de la próxima tirada.',
         tradeSystemVerdict: {
-          accept: 'Según la valoración actual, el trato te conviene.',
-          counter: 'Está cerca de convenir, pero sería mejor contraofertar.',
-          reject: 'Según la valoración actual, el trato no te conviene.',
+          accept: 'Conviene según la valoración actual.',
+          counter: 'Está cerca, pero conviene contraofertar.',
+          reject: 'No conviene según la valoración actual.',
         },
+        tradeConvenienceLevel: {
+          very_favorable: 'Muy conveniente',
+          favorable: 'Conveniente',
+          balanced: 'Equilibrado',
+          unfavorable: 'Desfavorable',
+          very_unfavorable: 'Muy desfavorable',
+        },
+        tradeRoles: {
+          proposer: 'Ofertante',
+          recipient: 'Receptor',
+        },
+        tradeYou: 'Tú',
         tradeSystemReason: 'Motivo principal: {{reason}}.',
         tradeEstimatedGain: 'Valor que recibes',
         tradeEstimatedCost: 'Valor que entregas',
         tradeEstimatedBalance: 'Balance estimado',
+        tradeRiskAdjustedBalance: 'Balance con riesgo de caídas',
         tradeCashAfter: 'Caja después',
+        tradeCashAfterWithReserve: 'Caja después · reserva ${{reserve}}',
+        tradeProjectionTitle: 'Próxima tirada: antes → después',
+        tradePaymentProbability: 'Probabilidad de pagar',
+        tradeExpectedPayments: 'Pagos esperados',
+        tradeExpectedIncome: 'Rentas esperadas',
+        tradeHighestPayment: 'Mayor pago posible',
         tradeSystemDisclaimer:
-          'Estimación basada en dinero, grupos, construcciones e hipotecas. Considera una reserva sugerida de ${{reserve}} y no garantiza el resultado.',
+          'La proyección usa los 36 resultados de dados: una tirada propia para pagos y una por cada rival para rentas. Incluye rentas e impuestos determinísticos; excluye cartas, subastas y efectos encadenados, y no garantiza el resultado.',
         tradeAiAnalysis: 'Análisis IA',
         tradeAiAnalysisHelp:
-          'Se genera solo cuando lo solicitas y no puede aceptar ni rechazar por ti.',
+          'Se genera solo cuando lo solicitas, compara ambos lados y no puede aceptar ni rechazar por ti.',
         tradeGenerateAi: 'Analizar con IA',
         tradeRegenerateAi: 'Analizar de nuevo',
         tradeAiUnavailable: 'El análisis IA no está disponible en este momento.',
         tradeAiQuestion:
-          'Analiza este intercambio pendiente desde mi perspectiva. Estos flujos son exactos, no inviertas quién paga ni quién recibe: RECIBO ${{incomingCash}} y estas propiedades: {{incomingProperties}}; ENTREGO ${{outgoingCash}} y estas propiedades: {{outgoingProperties}}. Mi cambio neto de caja es ${{netCash}}; un valor positivo significa que mi caja aumenta y la de la otra parte disminuye. La valoración determinista recomienda {{systemVerdict}} y estima valor recibido ${{estimatedGain}}, valor entregado ${{estimatedCost}}, balance {{estimatedSurplus}}, caja final ${{cashAfter}} y reserva sugerida ${{liquidityFloor}}. ¿Me conviene? Puedes matizar la recomendación por factores estratégicos, pero no contradigas estos flujos. Responde brevemente con recomendación, razones y riesgo principal.',
+          'Analiza el trato para ambos. Yo soy {{myRole}}. Flujo exacto: OFERTANTE da ${{offeredCash}} y {{offeredPropertyCount}} propiedades; recibe ${{requestedCash}} y {{requestedPropertyCount}}. Usa las propiedades del trato pendiente en el contexto. O: {{proposerLevel}}, {{proposerVerdict}}, balance {{proposerSurplus}}, ajustado {{proposerRiskSurplus}}, caja ${{proposerCashAfter}}, prob. pago {{proposerPaymentProbabilityBefore}}→{{proposerPaymentProbabilityAfter}}%, pagos ${{proposerExpectedPaymentsBefore}}→${{proposerExpectedPaymentsAfter}}, rentas ${{proposerIncomeBefore}}→${{proposerIncomeAfter}}. R: {{recipientLevel}}, {{recipientVerdict}}, balance {{recipientSurplus}}, ajustado {{recipientRiskSurplus}}, caja ${{recipientCashAfter}}, prob. pago {{recipientPaymentProbabilityBefore}}→{{recipientPaymentProbabilityAfter}}%, pagos ${{recipientExpectedPaymentsBefore}}→${{recipientExpectedPaymentsAfter}}, rentas ${{recipientIncomeBefore}}→${{recipientIncomeAfter}}. Di si conviene a cada uno, quién gana más y el principal riesgo de caídas, pagos y liquidez. No contradigas datos ni decidas por mí. Sé breve.',
         selectTradePlayer: 'Selecciona con quién quieres intercambiar',
         cash: 'Dinero',
         properties: 'Propiedades',
@@ -348,6 +649,53 @@ void i18n.use(initReactI18next).init({
         sendOffer: 'Enviar oferta',
         accept: 'Aceptar',
         reject: 'Rechazar',
+        relationships: {
+          levels: {
+            enemy: 'Enemigo',
+            hostile: 'Hostil',
+            neutral: 'Neutral',
+            ally: 'Aliado',
+            superFriend: 'Super amigo',
+          },
+          details: 'Afinidad: {{score}} · {{count}} interacciones',
+          ariaLabel: '{{bot}} considera tu relación: {{level}}',
+          tooltipWhy: 'Por qué: {{reason}}',
+          tooltipAction: 'Haz clic para ver el historial y cómo mejorar.',
+          noInteractions: 'aún no hay interacciones',
+          modalTitle: 'Relación con {{bot}}',
+          modalSummary: '{{bot}} te considera {{level}}',
+          historyTitle: 'Qué produjo este resultado',
+          historyHelp:
+            'Cada interacción muestra cuánto cambió la afinidad y el puntaje que quedó después.',
+          emptyHistory:
+            'Todavía no hay interacciones que hayan modificado esta relación.',
+          partialHistory:
+            'La conexión actual solo contiene las interacciones más recientes.',
+          resultingScore: 'Resultado: {{score}} · {{level}}',
+          adviceTitle: 'Cómo mejorar la relación',
+          reasons: {
+            trade_accepted: 'Cerraste un intercambio con este bot',
+            trade_rejected: 'Rechazaste un intercambio con este bot',
+            trade_cancelled: 'Cancelaste un intercambio con este bot',
+            counter_offer: 'Respondiste con una contraoferta',
+            blocked_group: 'Compraste una propiedad que completaba su grupo',
+            lost_auction: 'Le ganaste una subasta en la que participó',
+            paid_rent: 'El bot tuvo que pagarte una renta',
+            unknown: 'Interacción social registrada',
+          },
+          advice: {
+            acceptedTrade:
+              'Concreta intercambios que el bot acepte: cada trato aceptado puede sumar hasta 14 puntos.',
+            counterOffer:
+              'Si una oferta no te sirve, responde con una contraoferta: puede sumar 2 puntos; rechazar puede restar 6 y cancelar 3.',
+            blockedGroup:
+              'Evita comprar la propiedad que completaría su grupo si priorizas la relación: hacerlo puede restar 10 puntos.',
+            lostAuction:
+              'Evita disputarle subastas si priorizas la relación: ganarle después de que ofertó puede restar 5 puntos.',
+            paidRent:
+              'Cobrarle renta forma parte del juego, pero cada pago del bot hacia ti puede restar 3 puntos de afinidad.',
+          },
+        },
         tradeSummary:
           '{{proposer}} ofrece ${{offered}} y solicita ${{requested}} a {{recipient}}.',
         tradePropertySummary:
@@ -434,10 +782,39 @@ void i18n.use(initReactI18next).init({
         buyHouse: 'Comprar casa ${{amount}}',
         buyHotel: 'Comprar hotel ${{amount}}',
         sellBuilding: 'Vender construcción',
+        buildGroupRound: 'Construir ronda ${{amount}}',
+        sellGroupRound: 'Vender ronda +${{amount}}',
         payDebt: 'Pagar deuda',
         declareBankruptcy: 'Declarar bancarrota',
         debtSummary:
           '{{debtor}} debe ${{amount}} a {{creditor}}. Puede vender construcciones o hipotecar antes de resolver.',
+        rentDebt: {
+          demandNow: 'Cobrar ahora',
+          forgiveDebt: 'Perdonar deuda',
+          forgivePlan: 'Perdonar saldo del plan',
+          template: 'Plantilla',
+          installments: 'Cuotas',
+          interest: 'Interés %',
+          proposePlan: 'Proponer plan',
+          updatePlan: 'Modificar propuesta',
+          acceptPlan: 'Aceptar cuotas',
+          rejectPlan: 'Rechazar cuotas',
+          awaitingCreditor:
+            'Esperando que el acreedor elija cobrar, perdonar o proponer cuotas.',
+          collectionDemanded:
+            'Cobro solicitado. El deudor debe resolver la deuda.',
+          preview: 'Total ${{total}} en {{installments}} cuotas.',
+          proposalSummary:
+            'Propuesta: ${{total}} en {{installments}} cuotas, con {{interest}}% de interés.',
+          activePlan:
+            'Plan activo: saldo ${{remaining}}, {{installments}} cuotas pendientes.',
+          templates: {
+            friendly: 'Amistosa',
+            standard: 'Estándar',
+            flexible: 'Flexible',
+            custom: 'Personalizada',
+          },
+        },
         advisor: {
           title: 'Asesor de estrategia',
           open: 'Abrir asesor de estrategia',
@@ -508,7 +885,19 @@ void i18n.use(initReactI18next).init({
           auctionNoWinner: '{{property}} quedó sin comprador.',
           paymentCompleted: '{{player}} pagó ${{amount}}.',
           debtCreated: '{{player}} debe resolver una deuda de ${{amount}}.',
+          debtCollectionDemanded:
+            '{{creditor}} exigió a {{debtor}} el pago de ${{amount}}.',
           debtPaid: '{{player}} pagó una deuda de ${{amount}}.',
+          debtForgiven:
+            '{{creditor}} perdonó ${{amount}} de la deuda de {{debtor}}.',
+          debtPlanProposed:
+            '{{creditor}} propuso a {{debtor}} pagar ${{total}} en {{installments}} cuotas.',
+          debtPlanAccepted: '{{player}} aceptó el plan de cuotas.',
+          debtPlanRejected: '{{player}} rechazó el plan de cuotas.',
+          debtInstallmentPaid:
+            '{{player}} pagó una cuota de ${{amount}}. Saldo: ${{remaining}}.',
+          debtPlanCompleted: '{{player}} completó el plan de cuotas.',
+          debtPlanCancelled: 'El plan de cuotas fue cancelado.',
           cardDrawn: '{{player}} obtuvo: {{card}}',
           cardCash: 'La carta ajustó el saldo de {{player}} en ${{amount}}.',
           cardCashEach:
@@ -531,13 +920,18 @@ void i18n.use(initReactI18next).init({
           tradeAccepted: 'El intercambio fue aceptado.',
           tradeRejected: 'El intercambio fue rechazado.',
           tradeCancelled: 'El intercambio fue cancelado.',
+          tradeCountered: '{{player}} envió una contraoferta.',
+          relationshipChanged:
+            '{{bot}} cambió su relación con {{player}} a {{score}} ({{change}}).',
           botReason: {
             accept_completes_group: 'le completa un grupo',
             accept_needed_cash: 'necesitaba la caja',
             accept_good_value: 'el valor le conviene',
             accept_fair_deal: 'le pareció un trato parejo',
+            accept_rent_outlook: 'mejora las rentas y pagos esperados',
             reject_below_value: 'recibe menos de lo que entrega',
             reject_liquidity_risk: 'lo dejaría sin caja para las rentas',
+            reject_landing_exposure: 'empeora el riesgo de caídas y pagos',
             reject_completes_rival_group:
               'no entrega la propiedad que completa el grupo rival',
             reject_nothing_in_return: 'no recibe nada a cambio',
@@ -554,6 +948,9 @@ void i18n.use(initReactI18next).init({
             ai_reject_trade: 'decisión de la IA',
             ai_propose_trade: 'decisión de la IA',
             chat_propose_trade: 'ofreció el trato conversando en el chat',
+            develop_complete_group_round: 'desarrolla una ronda del grupo',
+            liquidate_group_round_for_debt:
+              'vende una ronda del grupo para cubrir la deuda',
           },
           playerBankrupt: '{{player}} quedó en bancarrota.',
           turnStarted: 'Comenzó el turno de {{player}}.',
@@ -720,6 +1117,9 @@ void i18n.use(initReactI18next).init({
         login: 'Sign in',
         register: 'Create account',
         logout: 'Sign out',
+        autoRejectTrades: 'Automatically reject trades',
+        autoRollDice: 'Automatically roll the dice',
+        autoEndTurns: 'Automatically end turns',
         displayName: 'Display name',
         email: 'Email',
         password: 'Password',
@@ -874,6 +1274,268 @@ void i18n.use(initReactI18next).init({
         operationRejected: 'Operation rejected.',
         commandRejected: 'Command rejected.',
         bank: 'Bank',
+        market: 'Market',
+        bankPanel: {
+          title: 'Game bank',
+          subtitle: 'Liquidity, reserves, and credit',
+          initializing: 'The bank will initialize on the next game update.',
+          tabs: {
+            summary: 'Summary',
+            loans: 'Loans',
+            investments: 'Investments',
+            activity: 'Activity',
+          },
+          monetaryBase: 'Monetary base',
+          bankCash: 'Bank cash',
+          circulation: 'In circulation',
+          bankPot: 'Segregated funds',
+          activeCredit: 'Outstanding credit',
+          emergencyIssuance: 'Emergency issuance',
+          dividendReserve: 'Dividend reserve',
+          reserve: 'Bank reserve',
+          reserveHelp: '{{percent}}% minimum: {{amount}}',
+          loansEnabled: 'Loans enabled',
+          loansDisabled: 'Loans disabled',
+          marketEnabled: 'Market enabled',
+          marketDisabled: 'Market disabled',
+          loanFeatureDisabled: 'Loans were disabled in this room configuration.',
+          marketFeatureDisabled:
+            'The investment market was disabled in this room configuration.',
+          activeLoan: 'Active loan',
+          installmentsLeft: '{{count}} installments left',
+          loanBalance: 'Outstanding balance: {{amount}}',
+          nextInstallment: 'Next payment when passing Start: {{amount}}',
+          payInstallment: 'Pay one installment',
+          payFullLoan: 'Pay in full',
+          requestLoan: 'Request a loan',
+          creditProfile: 'Credit profile',
+          creditScore: 'Score {{score}}',
+          creditHistory:
+            '{{completed}} repaid loans · {{onTime}} on-time payments · {{late}} late payments · {{defaults}} defaults',
+          creditRewardHelp:
+            'On-time payments increase the limit and reduce the rate. Late payments and defaults worsen both terms.',
+          loanAmount: 'Requested amount',
+          loanLimit:
+            'Maximum {{amount}}, {{interest}}% total interest, {{laps}} laps.',
+          requestLoanAction: 'Request credit',
+          actionsOnTurn: 'Financial operations are available during your turn.',
+          actionsBlocked:
+            'The pending auction or property selection must finish first.',
+          creditCanResolveDebt:
+            'You can use this loan to pay the mandatory debt from your turn.',
+          noInvestments: 'This board has no investable transport or utility tiles.',
+          shareAvailability: '{{available}} of {{total}} shares available',
+          ownedShares: '{{count}} shares owned',
+          grossRevenue: 'Revenue: {{amount}}',
+          dividendsPaid: 'Dividends: {{amount}}',
+          bidAsk: 'Bid {{bid}} · Ask {{ask}}',
+          marketVolume: 'Volume B {{buys}} / S {{sells}}',
+          marketRange: 'Range {{low}}–{{high}}',
+          buyOneShare: 'Buy 1',
+          sellOneShare: 'Sell 1',
+          loanBlocksInvesting: 'Repay the bank loan before buying investments.',
+          loanInvestmentAllowed:
+            'Credit enabled: keep {{reserve}} and stay below {{limit}} exposure.',
+          loanInvestmentBlocked:
+            'Credit investing requires score 600, {{reserve}} reserve, and {{limit}} maximum exposure.',
+          noActivity: 'There is no financial activity yet.',
+          investment: 'Investment',
+          instrumentNames: {
+            bank: 'Game central bank',
+            jail: 'Correctional concession',
+            tax: 'Tax authority',
+          },
+          instrumentTypes: {
+            asset: 'Board asset',
+            bank: 'Banking institution',
+            jail: 'Public service',
+            tax: 'Tax institution',
+            index: 'Index fund',
+          },
+          activity: {
+            loanIssued: '{{player}} received a {{amount}} bank loan.',
+            loanPaid: '{{player}} paid {{amount}} toward the loan.',
+            loanPaymentMissed:
+              '{{player}} could not cover the installment. Their credit score decreased.',
+            loanDefaulted: "{{player}}'s loan defaulted.",
+            emergencyIssued: 'The bank issued {{amount}} in emergency money.',
+            sharesBought: '{{player}} bought {{count}} share(s) of {{instrument}}.',
+            sharesSold: '{{player}} sold {{count}} share(s) of {{instrument}}.',
+            dividendPaid: '{{instrument}} distributed {{amount}} in dividends.',
+            dividendAccrued:
+              '{{instrument}} accrued {{accrued}} in dividends for the next payment.',
+            dividendAccruedAndPaid:
+              '{{instrument}} accrued {{accrued}} in dividends and paid {{paid}}.',
+            institutionRevenue:
+              '{{instrument}} collected {{amount}} and distributed {{dividends}}.',
+            institutionRevenueAccrued:
+              '{{instrument}} collected {{amount}} and accrued {{accrued}} in pending dividends.',
+            institutionRevenueAccruedAndPaid:
+              '{{instrument}} collected {{amount}}, accrued {{accrued}}, and paid {{paid}} in dividends.',
+            marketExpanded: '{{count}} new institutions joined the market.',
+            positionLiquidated:
+              "{{player}}'s investment position was liquidated for {{amount}}.",
+            dividendsSettled:
+              'The market settled {{amount}} in round {{round}} dividends.',
+            limitOrderPlaced:
+              '{{player}} placed a {{side}} order for {{count}} {{instrument}} shares at {{price}}.',
+            limitOrderCancelled:
+              '{{player}} cancelled their {{instrument}} order.',
+            orderFilled:
+              '{{buyer}} bought {{count}} {{instrument}} shares from {{seller}} at {{price}}.',
+            marginCall:
+              'Margin call for {{player}}: {{count}} buy order(s) were cancelled.',
+          },
+        },
+        marketPanel: {
+          title: 'Game stock market',
+          subtitle: 'Live quotes, activity, and positions',
+          tabs: {
+            label: 'Stock market sections',
+            market: 'Market',
+            performance: 'My performance',
+          },
+          performance: {
+            empty: 'You do not have investments to analyze yet.',
+            startTitle: 'How to begin',
+            startAdvice:
+              'Evaluate price, dividends, liquidity, and concentration. The BGX fund provides diversified exposure for a first position.',
+            currentValue: 'Current value',
+            totalProfit: 'Total profit',
+            totalReturn: 'Cumulative return',
+            dividends: 'Dividends received',
+            pending: 'Pending dividends',
+            risk: 'Portfolio risk',
+            riskLevels: {
+              low: 'Low',
+              medium: 'Medium',
+              high: 'High',
+            },
+            evolution: 'Profit and loss history',
+            evolutionChart: 'Historical portfolio performance',
+            evolutionHelp:
+              'Includes price movements, completed trades, and settled dividends recorded in the game.',
+            breakdown: 'Portfolio breakdown',
+            costBasis: 'Current cost basis',
+            unrealized: 'Unrealized profit',
+            realized: 'Realized profit',
+            concentration: 'Largest concentration',
+            positionShares: '{{count}} share(s) · {{average}} average cost',
+            unrealizedShort: 'Unrealized: {{amount}}',
+            realizedShort: 'Realized: {{amount}}',
+            dividendsShort: 'Dividends: {{amount}}',
+            estimatedBasis:
+              'The cost basis includes an estimate because part of the history lacks an acquisition price.',
+            adviceTitle: 'Portfolio-based guidance',
+            advice: {
+              concentration:
+                'One investment represents at least 60% of the portfolio. Diversification reduces the impact of a single decline.',
+              leverage:
+                'You have an active loan. Preserve installment reserves and avoid increasing exposure only because of a recent rise.',
+              losses:
+                'Total return is negative. Review actual revenue and liquidity before averaging down.',
+              pendingDividends:
+                'You have accrued dividends that will settle at the end of the round; they are not available cash yet.',
+              diversify:
+                'Your portfolio depends on one instrument. BGX can spread risk across the game assets.',
+              balanced:
+                'The portfolio has no major concentration, debt, or cumulative-loss alerts.',
+            },
+            aiTitle: 'AI advice and analysis',
+            aiHelp:
+              'The advisor analyzes a filtered game snapshot and cannot execute trades.',
+            aiButton: 'Analyze with AI',
+            aiThinking: 'Analyzing…',
+            aiError: 'The AI analysis could not be retrieved. Try again.',
+            aiPrompt:
+              'Analyze my current stock portfolio in detail. Separate realized return, unrealized return, and dividends; evaluate concentration, liquidity, loans, open orders, and risk. Give me three concrete actions, but do not execute any of them.',
+          },
+          initializing: 'The market will initialize on the next update.',
+          disabled: 'The stock market was disabled in this room configuration.',
+          empty: 'This board has no available instruments.',
+          live: 'Live · #{{sequence}}',
+          index: 'BGX market index',
+          indexFundName: 'BGX index fund',
+          indexChart: 'Overall stock market index performance',
+          indexHelp:
+            'Base-100 index, equally weighted across every instrument in the game.',
+          owned: '{{count}} owned',
+          volume: 'Volume {{count}}',
+          openDetail: 'View details',
+          close: 'Close',
+          currentPrice: 'Current price',
+          instrumentChart: '{{instrument}} price performance',
+          position: 'Your position',
+          ownedLabel: 'Shares',
+          availableToSell: 'Available to sell',
+          positionValue: 'Market value',
+          availableLabel: 'Available',
+          maximumHolding: 'Maximum allowed',
+          balance: 'Available balance',
+          bid: 'Best bid',
+          ask: 'Best ask',
+          sessionRange: 'Low / high',
+          totalVolume: 'Trading volume',
+          revenue: 'Cumulative revenue',
+          dividends: 'Dividends distributed',
+          dividendsAccrued: 'Dividends accrued',
+          pendingDividends: 'Pending dividends',
+          order: 'Place order',
+          orderType: 'Order type',
+          marketOrder: 'Market',
+          limitOrder: 'Limit price',
+          limitPrice: 'Limit price',
+          quantity: 'Quantity',
+          buyEstimate: 'Buy estimate',
+          sellEstimate: 'Sell estimate',
+          averagePrice: 'Average price',
+          fee: 'Fee',
+          total: 'Total cost',
+          proceeds: 'Net proceeds',
+          estimatedPrice: 'Estimated price after order',
+          spread: 'Dynamic spread',
+          impact: 'Estimated impact',
+          buy: 'Buy {{count}}',
+          sell: 'Sell {{count}}',
+          available: 'available',
+          operationLimits: 'Buy: {{buy}} · Sell: {{sell}}',
+          recentActivity: 'Recent trades',
+          noActivity: 'This instrument has no trades yet.',
+          orderBook: 'Order book',
+          emptyOrderBook: 'There are no open limit orders.',
+          bookEntry: '{{count}} share(s) at {{price}}',
+          cancelOrder: 'Cancel',
+          sides: {
+            buy: 'Buy',
+            sell: 'Sell',
+          },
+          reasons: {
+            turn: 'wait for your turn',
+            pending: 'resolve the pending debt, auction, or selection first',
+            quantity: 'enter a whole number greater than zero',
+            availability: 'not enough shares are available',
+            ownership: 'the per-player maximum is {{count}}',
+            balance: 'insufficient balance',
+            credit: 'leveraged investment conditions are not met',
+            holdings: 'you do not own enough shares',
+            reserve: 'the bank reserve cannot repurchase that quantity',
+            limitPrice: 'enter a whole limit price greater than zero',
+          },
+          activity: {
+            bought: '{{player}} bought {{count}} share(s) at {{price}} average.',
+            sold: '{{player}} sold {{count}} share(s) at {{price}} average.',
+            dividend: '{{amount}} in dividends were distributed.',
+            dividendAccrued:
+              '{{amount}} in dividends accrued; {{paid}} was paid.',
+            revenue: 'The instrument recorded {{amount}} in revenue.',
+            revenueAccrued:
+              'Recorded {{amount}} in revenue, accrued {{accrued}}, and paid {{paid}}.',
+            limitPlaced:
+              '{{player}} placed a {{side}} order for {{count}} at {{price}}.',
+            limitCancelled: '{{player}} cancelled a limit order.',
+            filled: '{{count}} share(s) traded between players at {{price}}.',
+          },
+        },
         room: 'Room',
         copyRoomId: 'Copy room ID',
         gamePanels: 'Game panels',
@@ -939,6 +1601,10 @@ void i18n.use(initReactI18next).init({
           auction_unpurchased_properties: 'Auction unpurchased properties',
           free_parking_jackpot: 'Collect taxes and fines on Rest',
           double_salary_on_start: 'Pay double salary when landing on Start',
+          loans_enabled: 'Enable bank loans',
+          stock_market_enabled: 'Enable stock market and investments',
+          custom_rent_debts_enabled:
+            'Allow forgiveness and custom rent installments',
         },
         bankPot: 'Bank pot: ${{amount}}',
         rollDice: 'Roll dice',
@@ -974,6 +1640,8 @@ void i18n.use(initReactI18next).init({
         trades: 'Trades',
         propertiesAndTrades: 'Properties and trades',
         createTrade: 'Create trade',
+        counterOffer: 'Counter-offer',
+        sendCounterOffer: 'Send counter-offer',
         noPendingTrades: 'There are no pending trades.',
         viewDetails: 'View details',
         tradeDetails: 'Trade details',
@@ -987,26 +1655,47 @@ void i18n.use(initReactI18next).init({
         tradeSystemAnalysis: 'System analysis',
         tradeSystemAnalyzing: 'Calculating the strategic value of this trade…',
         tradeSystemUnavailable: 'This trade could not be analyzed.',
+        tradeSystemComparisonHelp:
+          'Compares the proposer and recipient, including value, liquidity, and next-roll exposure.',
         tradeSystemVerdict: {
-          accept: 'Based on the current valuation, this trade benefits you.',
-          counter: 'It is close, but a counter-offer would be better.',
-          reject: 'Based on the current valuation, this trade does not benefit you.',
+          accept: 'It is worthwhile under the current valuation.',
+          counter: 'It is close, but a counter-offer is preferable.',
+          reject: 'It is not worthwhile under the current valuation.',
         },
+        tradeConvenienceLevel: {
+          very_favorable: 'Very favorable',
+          favorable: 'Favorable',
+          balanced: 'Balanced',
+          unfavorable: 'Unfavorable',
+          very_unfavorable: 'Very unfavorable',
+        },
+        tradeRoles: {
+          proposer: 'Proposer',
+          recipient: 'Recipient',
+        },
+        tradeYou: 'You',
         tradeSystemReason: 'Main reason: {{reason}}.',
         tradeEstimatedGain: 'Value received',
         tradeEstimatedCost: 'Value given',
         tradeEstimatedBalance: 'Estimated balance',
+        tradeRiskAdjustedBalance: 'Landing-risk balance',
         tradeCashAfter: 'Cash afterward',
+        tradeCashAfterWithReserve: 'Cash afterward · ${{reserve}} reserve',
+        tradeProjectionTitle: 'Next roll: before → after',
+        tradePaymentProbability: 'Payment probability',
+        tradeExpectedPayments: 'Expected payments',
+        tradeExpectedIncome: 'Expected rent income',
+        tradeHighestPayment: 'Highest possible payment',
         tradeSystemDisclaimer:
-          'Estimate based on cash, groups, buildings, and mortgages. It uses a suggested reserve of ${{reserve}} and does not guarantee the outcome.',
+          'The projection uses all 36 dice results: one roll for payments and one per rival for rent income. It includes deterministic rent and taxes; cards, auctions, and chained effects are excluded, and results are not guaranteed.',
         tradeAiAnalysis: 'AI analysis',
         tradeAiAnalysisHelp:
-          'Generated only when requested and cannot accept or reject for you.',
+          'Generated only when requested, compares both sides, and cannot accept or reject for you.',
         tradeGenerateAi: 'Analyze with AI',
         tradeRegenerateAi: 'Analyze again',
         tradeAiUnavailable: 'AI analysis is currently unavailable.',
         tradeAiQuestion:
-          'Analyze this pending trade from my perspective. These flows are exact; do not reverse who pays or receives: I RECEIVE ${{incomingCash}} and these properties: {{incomingProperties}}; I GIVE ${{outgoingCash}} and these properties: {{outgoingProperties}}. My net cash change is ${{netCash}}; a positive value means my cash increases and the other party\'s cash decreases. The deterministic valuation recommends {{systemVerdict}} and estimates received value ${{estimatedGain}}, given value ${{estimatedCost}}, surplus {{estimatedSurplus}}, final cash ${{cashAfter}}, and a suggested reserve of ${{liquidityFloor}}. Is it good for me? You may qualify the recommendation based on strategic factors, but do not contradict these flows. Answer briefly with a recommendation, reasons, and the main risk.',
+          'Analyze the trade for both sides. I am the {{myRole}}. Exact flow: PROPOSER gives ${{offeredCash}} and {{offeredPropertyCount}} properties; receives ${{requestedCash}} and {{requestedPropertyCount}}. Use the pending trade properties in context. P: {{proposerLevel}}, {{proposerVerdict}}, surplus {{proposerSurplus}}, adjusted {{proposerRiskSurplus}}, cash ${{proposerCashAfter}}, payment chance {{proposerPaymentProbabilityBefore}}→{{proposerPaymentProbabilityAfter}}%, payments ${{proposerExpectedPaymentsBefore}}→${{proposerExpectedPaymentsAfter}}, rent ${{proposerIncomeBefore}}→${{proposerIncomeAfter}}. R: {{recipientLevel}}, {{recipientVerdict}}, surplus {{recipientSurplus}}, adjusted {{recipientRiskSurplus}}, cash ${{recipientCashAfter}}, payment chance {{recipientPaymentProbabilityBefore}}→{{recipientPaymentProbabilityAfter}}%, payments ${{recipientExpectedPaymentsBefore}}→${{recipientExpectedPaymentsAfter}}, rent ${{recipientIncomeBefore}}→${{recipientIncomeAfter}}. Say whether each side benefits, who gains more, and the main landing, payment, and liquidity risk. Do not contradict the data or decide for me. Be brief.',
         selectTradePlayer: 'Select a player to trade with',
         cash: 'Cash',
         properties: 'Properties',
@@ -1021,6 +1710,53 @@ void i18n.use(initReactI18next).init({
         sendOffer: 'Send offer',
         accept: 'Accept',
         reject: 'Reject',
+        relationships: {
+          levels: {
+            enemy: 'Enemy',
+            hostile: 'Hostile',
+            neutral: 'Neutral',
+            ally: 'Ally',
+            superFriend: 'Super friend',
+          },
+          details: 'Affinity: {{score}} · {{count}} interactions',
+          ariaLabel: '{{bot}} considers your relationship: {{level}}',
+          tooltipWhy: 'Why: {{reason}}',
+          tooltipAction: 'Click to view the history and how to improve.',
+          noInteractions: 'there are no interactions yet',
+          modalTitle: 'Relationship with {{bot}}',
+          modalSummary: '{{bot}} considers you {{level}}',
+          historyTitle: 'What produced this result',
+          historyHelp:
+            'Each interaction shows how much affinity changed and the score left afterward.',
+          emptyHistory:
+            'No interactions have changed this relationship yet.',
+          partialHistory:
+            'The current connection only contains the most recent interactions.',
+          resultingScore: 'Result: {{score}} · {{level}}',
+          adviceTitle: 'How to improve the relationship',
+          reasons: {
+            trade_accepted: 'You completed a trade with this bot',
+            trade_rejected: 'You rejected a trade with this bot',
+            trade_cancelled: 'You cancelled a trade with this bot',
+            counter_offer: 'You responded with a counteroffer',
+            blocked_group: 'You bought a property that completed its group',
+            lost_auction: 'You beat it in an auction where it placed a bid',
+            paid_rent: 'The bot had to pay rent to you',
+            unknown: 'A social interaction was recorded',
+          },
+          advice: {
+            acceptedTrade:
+              'Complete trades the bot accepts: each accepted deal can add up to 14 points.',
+            counterOffer:
+              'If an offer does not work for you, send a counteroffer: it can add 2 points; rejecting can subtract 6 and cancelling 3.',
+            blockedGroup:
+              'Avoid buying the property that would complete its group when the relationship matters: doing so can subtract 10 points.',
+            lostAuction:
+              'Avoid competing with it in auctions when the relationship matters: winning after it placed a bid can subtract 5 points.',
+            paidRent:
+              'Charging rent is part of the game, but every payment from the bot to you can subtract 3 affinity points.',
+          },
+        },
         tradeSummary:
           '{{proposer}} offers ${{offered}} and requests ${{requested}} from {{recipient}}.',
         tradePropertySummary:
@@ -1104,10 +1840,39 @@ void i18n.use(initReactI18next).init({
         buyHouse: 'Buy house ${{amount}}',
         buyHotel: 'Buy hotel ${{amount}}',
         sellBuilding: 'Sell building',
+        buildGroupRound: 'Build round ${{amount}}',
+        sellGroupRound: 'Sell round +${{amount}}',
         payDebt: 'Pay debt',
         declareBankruptcy: 'Declare bankruptcy',
         debtSummary:
           '{{debtor}} owes ${{amount}} to {{creditor}}. Buildings can be sold or properties mortgaged before resolving it.',
+        rentDebt: {
+          demandNow: 'Demand payment now',
+          forgiveDebt: 'Forgive debt',
+          forgivePlan: 'Forgive plan balance',
+          template: 'Template',
+          installments: 'Installments',
+          interest: 'Interest %',
+          proposePlan: 'Propose plan',
+          updatePlan: 'Update proposal',
+          acceptPlan: 'Accept installments',
+          rejectPlan: 'Reject installments',
+          awaitingCreditor:
+            'Waiting for the creditor to demand payment, forgive, or propose installments.',
+          collectionDemanded:
+            'Payment demanded. The debtor must resolve the debt.',
+          preview: 'Total ${{total}} in {{installments}} installments.',
+          proposalSummary:
+            'Proposal: ${{total}} in {{installments}} installments at {{interest}}% interest.',
+          activePlan:
+            'Active plan: ${{remaining}} remaining, {{installments}} installments left.',
+          templates: {
+            friendly: 'Friendly',
+            standard: 'Standard',
+            flexible: 'Flexible',
+            custom: 'Custom',
+          },
+        },
         advisor: {
           title: 'Strategy advisor',
           open: 'Open strategy advisor',
@@ -1178,7 +1943,19 @@ void i18n.use(initReactI18next).init({
           auctionNoWinner: '{{property}} remained unsold.',
           paymentCompleted: '{{player}} paid ${{amount}}.',
           debtCreated: '{{player}} must settle a ${{amount}} debt.',
+          debtCollectionDemanded:
+            '{{creditor}} demanded that {{debtor}} pay ${{amount}}.',
           debtPaid: '{{player}} paid a ${{amount}} debt.',
+          debtForgiven:
+            '{{creditor}} forgave ${{amount}} of {{debtor}}’s debt.',
+          debtPlanProposed:
+            '{{creditor}} proposed that {{debtor}} pay ${{total}} in {{installments}} installments.',
+          debtPlanAccepted: '{{player}} accepted the installment plan.',
+          debtPlanRejected: '{{player}} rejected the installment plan.',
+          debtInstallmentPaid:
+            '{{player}} paid a ${{amount}} installment. Remaining: ${{remaining}}.',
+          debtPlanCompleted: '{{player}} completed the installment plan.',
+          debtPlanCancelled: 'The installment plan was cancelled.',
           cardDrawn: '{{player}} drew: {{card}}',
           cardCash: "The card adjusted {{player}}'s balance by ${{amount}}.",
           cardCashEach:
@@ -1201,13 +1978,18 @@ void i18n.use(initReactI18next).init({
           tradeAccepted: 'The trade was accepted.',
           tradeRejected: 'The trade was rejected.',
           tradeCancelled: 'The trade was cancelled.',
+          tradeCountered: '{{player}} sent a counter-offer.',
+          relationshipChanged:
+            '{{bot}} changed their relationship with {{player}} to {{score}} ({{change}}).',
           botReason: {
             accept_completes_group: 'it completes a group',
             accept_needed_cash: 'the cash was needed',
             accept_good_value: 'the value works out',
             accept_fair_deal: 'it looked like an even deal',
+            accept_rent_outlook: 'improves expected rent and payments',
             reject_below_value: 'gets back less than it gives',
             reject_liquidity_risk: 'would leave no cash for rent',
+            reject_landing_exposure: 'worsens landing and payment exposure',
             reject_completes_rival_group:
               'will not hand over the piece that completes a rival group',
             reject_nothing_in_return: 'nothing offered in return',
@@ -1224,6 +2006,9 @@ void i18n.use(initReactI18next).init({
             ai_reject_trade: 'AI decision',
             ai_propose_trade: 'AI decision',
             chat_propose_trade: 'offered the deal while talking in the chat',
+            develop_complete_group_round: 'developing one group round',
+            liquidate_group_round_for_debt:
+              'selling one group round to cover the debt',
           },
           playerBankrupt: '{{player}} went bankrupt.',
           turnStarted: "{{player}}'s turn started.",

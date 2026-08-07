@@ -82,6 +82,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "panel_layout": None,
         "audio_settings": None,
         "token_appearance": None,
+        "automation_settings": None,
     }
 
     panel_layout = {
@@ -105,6 +106,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "panel_layout": panel_layout,
         "audio_settings": None,
         "token_appearance": None,
+        "automation_settings": None,
     }
 
     audio_settings = {
@@ -122,6 +124,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "panel_layout": panel_layout,
         "audio_settings": audio_settings,
         "token_appearance": None,
+        "automation_settings": None,
     }
 
     token_appearance = {
@@ -139,6 +142,25 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "panel_layout": panel_layout,
         "audio_settings": audio_settings,
         "token_appearance": token_appearance,
+        "automation_settings": None,
+    }
+
+    automation_settings = {
+        "auto_reject_trades": True,
+        "auto_roll_dice": True,
+        "auto_end_turns": True,
+    }
+    automation_updated = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=first_headers,
+        json={"automation_settings": automation_settings},
+    )
+    assert automation_updated.status_code == 200
+    assert automation_updated.json() == {
+        "panel_layout": panel_layout,
+        "audio_settings": audio_settings,
+        "token_appearance": token_appearance,
+        "automation_settings": automation_settings,
     }
 
     restored = await client.get(
@@ -150,6 +172,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "panel_layout": panel_layout,
         "audio_settings": audio_settings,
         "token_appearance": token_appearance,
+        "automation_settings": automation_settings,
     }
 
     first_user = await session.scalar(
@@ -160,6 +183,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "panel_layout": panel_layout,
         "audio_settings": audio_settings,
         "token_appearance": token_appearance,
+        "automation_settings": automation_settings,
     }
     await session.rollback()
 
@@ -173,6 +197,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "panel_layout": None,
         "audio_settings": None,
         "token_appearance": None,
+        "automation_settings": None,
     }
 
 
@@ -382,9 +407,21 @@ async def test_trade_analysis_uses_authenticated_participant_perspective(
     assert proposer_analysis.status_code == 200
     assert proposer_analysis.json()["perspective"] == "proposer"
     assert proposer_analysis.json()["estimated_surplus"] == -200
+    assert proposer_analysis.json()["proposer_analysis"]["convenience_level"] == (
+        "very_unfavorable"
+    )
+    assert proposer_analysis.json()["recipient_analysis"]["convenience_level"] == (
+        "very_favorable"
+    )
     assert recipient_analysis.status_code == 200
     assert recipient_analysis.json()["perspective"] == "recipient"
     assert recipient_analysis.json()["estimated_surplus"] == 200
+    assert recipient_analysis.json()["proposer_analysis"] == proposer_analysis.json()[
+        "proposer_analysis"
+    ]
+    assert recipient_analysis.json()["recipient_analysis"] == proposer_analysis.json()[
+        "recipient_analysis"
+    ]
 
 
 async def test_lists_active_games_for_each_member(
@@ -516,7 +553,10 @@ async def test_room_settings_and_spectator_permissions(
             "auction_unpurchased_properties": True,
             "free_parking_jackpot": True,
             "double_salary_on_start": False,
-        },
+                "loans_enabled": False,
+                "stock_market_enabled": False,
+                "custom_rent_debts_enabled": False,
+            },
     }
 
 

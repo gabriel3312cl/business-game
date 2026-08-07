@@ -1,7 +1,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import business_game.realtime as realtime
 from business_game.application.bots import BotAction, BotPolicy
+from business_game.application.economy import initialize_bank
 from business_game.application.pack_loader import PackLoader
 from business_game.application.services import GameService, UserService
 from business_game.domain.errors import ConflictError, ForbiddenError
@@ -19,21 +20,27 @@ from business_game.domain.models import (
     BidCommand,
     BotController,
     BotPersonality,
-    BuildPropertyCommand,
+    BuildGroupRoundCommand,
     BuyPropertyCommand,
+    BuySharesCommand,
     CancelTradeCommand,
     DebtReason,
     DebtState,
+    DemandRentDebtCommand,
     GameEvent,
+    GameSettings,
     GameState,
     GameStatus,
     MortgagePropertyCommand,
+    OptionalRules,
     PassAuctionCommand,
+    PayDebtCommand,
     PlayerState,
     ProposeTradeCommand,
     RejectTradeCommand,
+    RequestLoanCommand,
     RollCommand,
-    SellBuildingCommand,
+    SellGroupRoundCommand,
     TradeOffer,
     TurnPhase,
     UserCreate,
@@ -217,6 +224,117 @@ async def test_personalities_bid_to_different_valuation_limits(
     assert aggressive.command.amount > game.active_auction.current_bid
 
 
+def test_bot_borrows_to_resolve_debt_when_credit_is_convenient(
+    packs_dir: Path,
+) -> None:
+    pack = PackLoader(packs_dir).load("classic-demo")
+    bot = PlayerState(
+        user_id=uuid4(),
+        display_name="Bot",
+        is_bot=True,
+        bot_personality=BotPersonality.BALANCED,
+        balance=0,
+    )
+    game = GameState(
+        host_user_id=bot.user_id,
+        pack_id=pack.manifest.id,
+        pack_version=pack.manifest.version,
+        status=GameStatus.PLAYING,
+        phase=TurnPhase.WAITING_FOR_END,
+        players=[bot],
+        settings=GameSettings(
+            rules=OptionalRules(loans_enabled=True, stock_market_enabled=True)
+        ),
+        active_debt=DebtState(
+            debtor_id=bot.user_id,
+            amount=50,
+            reason=DebtReason.RENT,
+            tile_id="property_01",
+        ),
+    )
+    initialize_bank(game, pack)
+
+    action = BotPolicy().choose_action(game, pack)
+
+    assert action is not None
+    assert isinstance(action.command, RequestLoanCommand)
+    assert action.command.amount == 50
+
+
+def test_bot_waits_for_human_creditor_rent_choice(packs_dir: Path) -> None:
+    pack = PackLoader(packs_dir).load("classic-demo")
+    creditor = PlayerState(user_id=uuid4(), display_name="Creditor")
+    debtor = PlayerState(
+        user_id=uuid4(),
+        display_name="Bot debtor",
+        is_bot=True,
+        bot_personality=BotPersonality.BALANCED,
+        balance=100,
+    )
+    game = GameState(
+        host_user_id=creditor.user_id,
+        pack_id=pack.manifest.id,
+        pack_version=pack.manifest.version,
+        status=GameStatus.PLAYING,
+        players=[debtor, creditor],
+        settings=GameSettings(
+            rules=OptionalRules(custom_rent_debts_enabled=True)
+        ),
+        active_debt=DebtState(
+            debtor_id=debtor.user_id,
+            creditor_id=creditor.user_id,
+            amount=50,
+            reason=DebtReason.RENT,
+            tile_id="property_01",
+        ),
+    )
+
+    assert BotPolicy().choose_action(game, pack) is None
+
+    creditor.is_bot = True
+    creditor.bot_personality = BotPersonality.BALANCED
+    action = BotPolicy().choose_action(game, pack)
+    assert action is not None
+    assert action.actor_id == creditor.user_id
+    assert isinstance(action.command, DemandRentDebtCommand)
+
+    creditor.is_bot = False
+    game.active_debt.collection_demanded = True
+    action = BotPolicy().choose_action(game, pack)
+    assert action is not None
+    assert action.actor_id == debtor.user_id
+    assert isinstance(action.command, PayDebtCommand)
+
+
+def test_bot_invests_only_surplus_cash_at_a_fair_price(packs_dir: Path) -> None:
+    pack = PackLoader(packs_dir).load("classic-demo")
+    bot = PlayerState(
+        user_id=uuid4(),
+        display_name="Bot",
+        is_bot=True,
+        bot_personality=BotPersonality.BALANCED,
+        balance=pack.manifest.starting_balance,
+    )
+    game = GameState(
+        host_user_id=bot.user_id,
+        pack_id=pack.manifest.id,
+        pack_version=pack.manifest.version,
+        status=GameStatus.PLAYING,
+        phase=TurnPhase.WAITING_FOR_END,
+        players=[bot],
+        settings=GameSettings(
+            rules=OptionalRules(loans_enabled=True, stock_market_enabled=True)
+        ),
+    )
+    initialize_bank(game, pack)
+
+    action = BotPolicy().choose_action(game, pack)
+
+    assert action is not None
+    assert isinstance(action.command, BuySharesCommand)
+    assert action.command.quantity == 1
+
+
 def test_ai_auction_timeout_preserves_time_for_the_fallback() -> None:
     now = datetime(2026, 8, 6, tzinfo=UTC)
     bot_id = UUID("6c35eb0a-d48e-441d-9f37-f915a4947460")
@@ -275,8 +393,8 @@ async def test_bot_builds_evenly_on_complete_group(
     action = BotPolicy().choose_action(game, pack)
 
     assert action is not None
-    assert isinstance(action.command, BuildPropertyCommand)
-    assert action.command.property_id in {tile.id for tile in group}
+    assert isinstance(action.command, BuildGroupRoundCommand)
+    assert action.command.group_id == group_tile.group
 
 
 async def test_bot_accepts_profitable_trade_and_rejects_bad_trade(
@@ -441,7 +559,8 @@ async def test_bot_liquidates_buildings_then_mortgages_for_debt(
     )
     action = BotPolicy().choose_action(game, pack)
     assert action is not None
-    assert isinstance(action.command, SellBuildingCommand)
+    assert isinstance(action.command, SellGroupRoundCommand)
+    assert action.command.group_id == group_tile.group
 
     game.building_levels.clear()
     action = BotPolicy().choose_action(game, pack)
@@ -679,10 +798,18 @@ async def test_bot_refusal_reaches_the_activity_feed_with_its_reason(
         automation_note="Me deja sin caja para la renta",
     )
 
-    refusal = game.events[-1]
+    refusal = next(
+        event for event in reversed(game.events) if event.type == "trade.rejected"
+    )
     assert refusal.type == "trade.rejected"
     assert refusal.data["bot_reason"] == "reject_liquidity_risk"
     assert refusal.data["bot_note"] == "Me deja sin caja para la renta"
+    relationship = game.bot_relationships[0]
+    assert relationship.bot_id == bot.user_id
+    assert relationship.player_id == host.id
+    assert relationship.score == -6
+    assert relationship.interaction_count == 1
+    assert game.events[-1].type == "relationship.changed"
     assert all(
         "bot_reason" not in event.data
         for event in game.events

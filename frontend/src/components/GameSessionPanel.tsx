@@ -15,6 +15,7 @@ import {
   BottomNavigationAction,
   Box,
   Button,
+  Checkbox,
   Chip,
   Dialog,
   DialogActions,
@@ -23,6 +24,7 @@ import {
   DialogTitle,
   Drawer,
   FormControl,
+  FormControlLabel,
   IconButton,
   MenuItem,
   Select,
@@ -57,6 +59,7 @@ import { GameChatPanel } from '../chat/GameChatPanel'
 import type { ChatMessage } from '../chat/types'
 import { useGameChat } from '../chat/useGameChat'
 import type {
+  AutomationPreferenceSettings,
   BotController,
   BotPersonality,
   ContentPack,
@@ -70,7 +73,9 @@ import type {
   TokenAppearanceSettings,
   User,
 } from '../types'
+import { nextAutomationCommand } from '../gameAutomation'
 import { BotManagementPanel } from './BotManagementPanel'
+import { BankPanel } from './BankPanel'
 import { GameActionCenter } from './GameActionCenter'
 import { GameAuctionDialog } from './GameAuctionDialog'
 import { GameBoard } from './GameBoard'
@@ -90,8 +95,10 @@ import { GamePlayersPanel } from './GamePlayersPanel'
 import { playerColors } from './gameColors'
 import { GameTradePanel } from './GameTradePanel'
 import { LobbySettingsPanel } from './LobbySettingsPanel'
+import { MarketPanel } from './MarketPanel'
 import { PersonalizablePanel } from './PersonalizablePanel'
 import { PropertyManagementPanel } from './PropertyManagementPanel'
+import { RentDebtResolutionPanel } from './RentDebtResolutionPanel'
 import { TokenCustomizationDialog } from './TokenCustomizationDialog'
 import { normalizeTokenAppearance } from './tokenAppearance'
 
@@ -148,6 +155,11 @@ const DEFAULT_PANEL_LAYOUT: PanelLayout = {
 }
 const PANEL_LAYOUT_STORAGE_PREFIX = 'business-game:panel-layout:v1:'
 const TOKEN_APPEARANCE_STORAGE_PREFIX = 'business-game:token-appearance:v1:'
+const DEFAULT_AUTOMATION_SETTINGS: AutomationPreferenceSettings = {
+  auto_reject_trades: false,
+  auto_roll_dice: false,
+  auto_end_turns: false,
+}
 
 function readPanelLayout(userId: string): PanelLayout {
   try {
@@ -275,6 +287,12 @@ export function GameSessionPanel({
     useState<TokenAppearanceSettings | null>(() => readTokenAppearance(user.id))
   const tokenAppearanceRef = useRef(tokenAppearance)
   const tokenAppearanceChangeRef = useRef(0)
+  const [automationSettings, setAutomationSettings] =
+    useState<AutomationPreferenceSettings>(DEFAULT_AUTOMATION_SETTINGS)
+  const [automationSettingsReady, setAutomationSettingsReady] = useState(false)
+  const automationSettingsRef = useRef(automationSettings)
+  const automationSettingsChangeRef = useRef(0)
+  const automationAttemptsRef = useRef(new Set<string>())
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
   const panelLayoutRef = useRef(panelLayout)
   const panelLayoutChangeRef = useRef(0)
@@ -328,7 +346,13 @@ export function GameSessionPanel({
         (event) => event.sequence <= motionSettlement.sequence,
       )
     : game.events
-  useGameEventAudio(game, visibleEvents, pack, user.id)
+  useGameEventAudio(
+    game,
+    visibleEvents,
+    pack,
+    user.id,
+    connectionState === 'connected',
+  )
   const maximumHeatmapSequence =
     visibleEvents[visibleEvents.length - 1]?.sequence ?? 1
   const selectedHeatmapPlayerId = game.players.some(
@@ -465,6 +489,21 @@ export function GameSessionPanel({
     [],
   )
 
+  const saveAutomationSettingsRemotely = useCallback(
+    (settings: AutomationPreferenceSettings) => {
+      preferenceSaveQueueRef.current = preferenceSaveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            await api.updateAutomationSettings(settings)
+          } catch {
+            // The current controls remain usable until a later change retries.
+          }
+        })
+    },
+    [],
+  )
+
   useEffect(() => {
     gameAudio.useUser(user.id)
     const unsubscribe = gameAudio.subscribe(() => {
@@ -492,6 +531,7 @@ export function GameSessionPanel({
     const changesAtStart = panelLayoutChangeRef.current
     const audioChangesAtStart = audioSettingsChangeRef.current
     const tokenChangesAtStart = tokenAppearanceChangeRef.current
+    const automationChangesAtStart = automationSettingsChangeRef.current
     void api
       .getUserPreferences()
       .then((preferences) => {
@@ -535,19 +575,44 @@ export function GameSessionPanel({
         } else if (tokenAppearanceRef.current) {
           saveTokenAppearanceRemotely(tokenAppearanceRef.current)
         }
+        if (
+          preferences.automation_settings &&
+          automationSettingsChangeRef.current === automationChangesAtStart
+        ) {
+          automationSettingsRef.current = preferences.automation_settings
+          setAutomationSettings(preferences.automation_settings)
+        } else if (
+          automationSettingsChangeRef.current !== automationChangesAtStart
+        ) {
+          saveAutomationSettingsRemotely(automationSettingsRef.current)
+        }
+        setAutomationSettingsReady(true)
       })
       .catch(() => {
         // The per-user browser cache keeps customization available offline.
+        if (active) setAutomationSettingsReady(true)
       })
     return () => {
       active = false
     }
   }, [
     saveAudioSettingsRemotely,
+    saveAutomationSettingsRemotely,
     savePanelLayoutRemotely,
     saveTokenAppearanceRemotely,
     user.id,
   ])
+
+  const updateAutomationSettings = useCallback(
+    (settings: AutomationPreferenceSettings) => {
+      automationSettingsRef.current = settings
+      automationSettingsChangeRef.current += 1
+      setAutomationSettings(settings)
+      setAutomationSettingsReady(true)
+      saveAutomationSettingsRemotely(settings)
+    },
+    [saveAutomationSettingsRemotely],
+  )
 
   const updateTokenAppearance = useCallback(
     (appearance: TokenAppearanceSettings) => {
@@ -803,75 +868,105 @@ export function GameSessionPanel({
     }
   }
 
-  const sendCommand = async (command: GameCommand): Promise<boolean> => {
-    const socket = socketRef.current
-    if (!socket?.connected) {
+  const sendCommand = useCallback(
+    async (command: GameCommand): Promise<boolean> => {
+      const socket = socketRef.current
+      if (!socket?.connected) {
+        setBusy(true)
+        setError(null)
+        try {
+          onChange(await api.executeCommand(game.id, command, game.event_sequence))
+          return true
+        } catch (requestError) {
+          if (requestError instanceof ApiError && requestError.status === 401) {
+            onSessionExpired()
+          } else {
+            gameAudio.play('action-rejected', { gain: 0.72 })
+            setError(
+              requestError instanceof Error
+                ? requestError.message
+                : t('operationRejected'),
+            )
+          }
+          return false
+        } finally {
+          setBusy(false)
+        }
+      }
       setBusy(true)
       setError(null)
-      try {
-        onChange(await api.executeCommand(game.id, command, game.event_sequence))
-        return true
-      } catch (requestError) {
-        if (requestError instanceof ApiError && requestError.status === 401) {
-          onSessionExpired()
-        } else {
-          gameAudio.play('action-rejected', { gain: 0.72 })
-          setError(
-            requestError instanceof Error
-              ? requestError.message
-              : t('operationRejected'),
-          )
-        }
-        return false
-      } finally {
-        setBusy(false)
-      }
-    }
-    setBusy(true)
-    setError(null)
-    const commandId = crypto.randomUUID()
-    return new Promise<boolean>((resolve) => {
-      socket.timeout(8000).emit(
-        'game_command',
-        {
-          game_id: game.id,
-          command,
-          expected_sequence: game.event_sequence,
-          command_id: commandId,
-        },
-        (timeoutError: Error | null, ack?: CommandAck) => {
-          if (timeoutError) {
-            gameAudio.play('action-rejected', { gain: 0.72 })
-            setError(t('realtimeError'))
-            setConnectionState('reconnecting')
-            setBusy(false)
-            resolve(false)
-            return
-          }
-          if (!ack) {
-            gameAudio.play('action-rejected', { gain: 0.72 })
-            setError(t('commandRejected'))
-            setBusy(false)
-            resolve(false)
-            return
-          }
-          if (!ack.ok) {
-            gameAudio.play('action-rejected', { gain: 0.72 })
-            setError(ack.error ?? t('commandRejected'))
-            if (isAuthenticationError(ack.code, ack.error)) {
-              socket.disconnect()
-              socket.connect()
+      const commandId = crypto.randomUUID()
+      return new Promise<boolean>((resolve) => {
+        socket.timeout(8000).emit(
+          'game_command',
+          {
+            game_id: game.id,
+            command,
+            expected_sequence: game.event_sequence,
+            command_id: commandId,
+          },
+          (timeoutError: Error | null, ack?: CommandAck) => {
+            if (timeoutError) {
+              gameAudio.play('action-rejected', { gain: 0.72 })
+              setError(t('realtimeError'))
+              setConnectionState('reconnecting')
+              setBusy(false)
+              resolve(false)
+              return
+            }
+            if (!ack) {
+              gameAudio.play('action-rejected', { gain: 0.72 })
+              setError(t('commandRejected'))
+              setBusy(false)
+              resolve(false)
+              return
+            }
+            if (!ack.ok) {
+              gameAudio.play('action-rejected', { gain: 0.72 })
+              setError(ack.error ?? t('commandRejected'))
+              if (isAuthenticationError(ack.code, ack.error)) {
+                socket.disconnect()
+                socket.connect()
+              }
+              setBusy(false)
+              resolve(false)
+              return
             }
             setBusy(false)
-            resolve(false)
-            return
-          }
-          setBusy(false)
-          resolve(true)
-        },
-      )
+            resolve(true)
+          },
+        )
+      })
+    },
+    [game.event_sequence, game.id, onChange, onSessionExpired, t],
+  )
+
+  useEffect(() => {
+    if (!automationSettingsReady || busy) return
+    const command = nextAutomationCommand({
+      game,
+      userId: user.id,
+      autoRejectTrades: automationSettings.auto_reject_trades,
+      autoRollDice: automationSettings.auto_roll_dice,
+      autoEndTurns: automationSettings.auto_end_turns,
+      motionPending,
     })
-  }
+    if (!command) return
+    const attemptKey = `${game.id}:${command.action}:${
+      command.action === 'reject_trade' ? command.trade_id : ''
+    }:${game.event_sequence}`
+    if (automationAttemptsRef.current.has(attemptKey)) return
+    automationAttemptsRef.current.add(attemptKey)
+    void sendCommand(command)
+  }, [
+    automationSettings,
+    automationSettingsReady,
+    busy,
+    game,
+    motionPending,
+    sendCommand,
+    user.id,
+  ])
 
   const sendChatMessage = async (body: string): Promise<boolean> => {
     const socket = socketRef.current
@@ -1120,6 +1215,56 @@ export function GameSessionPanel({
             )}
           </Stack>
 
+          {isParticipant && (
+            <Stack spacing={0}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={automationSettings.auto_reject_trades}
+                    onChange={(event) =>
+                      updateAutomationSettings({
+                        ...automationSettings,
+                        auto_reject_trades: event.target.checked,
+                      })
+                    }
+                  />
+                }
+                label={t('autoRejectTrades')}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={automationSettings.auto_roll_dice}
+                    onChange={(event) =>
+                      updateAutomationSettings({
+                        ...automationSettings,
+                        auto_roll_dice: event.target.checked,
+                      })
+                    }
+                  />
+                }
+                label={t('autoRollDice')}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={automationSettings.auto_end_turns}
+                    onChange={(event) =>
+                      updateAutomationSettings({
+                        ...automationSettings,
+                        auto_end_turns: event.target.checked,
+                      })
+                    }
+                  />
+                }
+                label={t('autoEndTurns')}
+              />
+            </Stack>
+          )}
+
           <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
             <Chip
               size="small"
@@ -1228,7 +1373,34 @@ export function GameSessionPanel({
     />
   )
 
-  const tabContent = sideTab === 0 ? propertiesContent : tradesContent
+  const bankContent = (
+    <BankPanel
+      game={game}
+      pack={pack}
+      user={user}
+      busy={busy}
+      onCommand={sendCommand}
+    />
+  )
+
+  const marketContent = (
+    <MarketPanel
+      game={game}
+      pack={pack}
+      user={user}
+      busy={busy}
+      onCommand={sendCommand}
+    />
+  )
+
+  const tabContent =
+    sideTab === 0
+      ? propertiesContent
+      : sideTab === 1
+        ? tradesContent
+        : sideTab === 2
+          ? bankContent
+          : marketContent
 
   const managementContent = (
     <>
@@ -1250,6 +1422,18 @@ export function GameSessionPanel({
           id="game-panel-tab-1"
           aria-controls="game-panel-1"
           label={t('trades')}
+        />
+        <Tab
+          value={2}
+          id="game-panel-tab-2"
+          aria-controls="game-panel-2"
+          label={t('bank')}
+        />
+        <Tab
+          value={3}
+          id="game-panel-tab-3"
+          aria-controls="game-panel-3"
+          label={t('market')}
         />
       </Tabs>
       <Box
@@ -1286,34 +1470,14 @@ export function GameSessionPanel({
               alignSelf: { xs: 'stretch', sm: 'center' },
             },
           }}
-          action={
-            game.active_debt.debtor_id === user.id ? (
-              <Stack direction="row" useFlexGap flexWrap="wrap">
-                <Button
-                  color="inherit"
-                  disabled={busy}
-                  onClick={() => void sendCommand({ action: 'pay_debt' })}
-                >
-                  {t('payDebt')}
-                </Button>
-                <Button
-                  color="inherit"
-                  disabled={busy}
-                  onClick={() =>
-                    void sendCommand({ action: 'declare_bankruptcy' })
-                  }
-                >
-                  {t('declareBankruptcy')}
-                </Button>
-              </Stack>
-            ) : undefined
-          }
         >
-          {t('debtSummary', {
-            debtor: playerName(game.active_debt.debtor_id),
-            amount: game.active_debt.amount,
-            creditor: playerName(game.active_debt.creditor_id),
-          })}
+          <RentDebtResolutionPanel
+            game={game}
+            user={user}
+            busy={busy}
+            playerName={playerName}
+            onCommand={sendCommand}
+          />
         </Alert>
       )}
     </>
@@ -1332,7 +1496,7 @@ export function GameSessionPanel({
           : panelId === 'players'
             ? t('playersPanel')
             : panelId === 'management'
-              ? t('propertiesAndTrades')
+              ? t('manage')
               : t('chat.title')
     const content =
       panelId === 'room'
@@ -1503,6 +1667,7 @@ export function GameSessionPanel({
               busy={busy}
               onCommand={sendCommand}
               heatmap={boardHeatmap}
+              actionEvents={visibleEvents}
               centerContent={
                 <GameActionCenter
                   game={game}

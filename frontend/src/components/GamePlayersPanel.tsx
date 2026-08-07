@@ -1,19 +1,37 @@
 import CrownRoundedIcon from '@mui/icons-material/EmojiEventsRounded'
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
+import LightbulbRoundedIcon from '@mui/icons-material/LightbulbRounded'
 import SmartToyRoundedIcon from '@mui/icons-material/SmartToyRounded'
 import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded'
 import {
   Avatar,
   Box,
+  Button,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  IconButton,
   List,
   ListItem,
   ListItemAvatar,
   ListItemText,
+  Paper,
+  Stack,
+  Tooltip,
   Typography,
 } from '@mui/material'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { santiagoTokenAssets } from '../assets/monopolySantiago'
-import type { GameState, TokenAppearanceSettings, User } from '../types'
+import type {
+  GameEvent,
+  GameState,
+  TokenAppearanceSettings,
+  User,
+} from '../types'
 import { AssetGlyph } from './AssetVisual'
 import { playerColors } from './gameColors'
 import { tokenAssetPath, tokenShapeStyle } from './tokenAppearance'
@@ -33,7 +51,23 @@ export function GamePlayersPanel({
   currentUserTokenAppearance = null,
   showTitle = true,
 }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const [selectedBotId, setSelectedBotId] = useState<string | null>(null)
+  const selectedBot = game.players.find(
+    (player) => player.is_bot && player.user_id === selectedBotId,
+  )
+  const selectedRelationship = selectedBot
+    ? game.bot_relationships.find(
+        (item) =>
+          item.bot_id === selectedBot.user_id && item.player_id === user.id,
+      )
+    : undefined
+  const selectedScore = selectedRelationship?.score ?? 0
+  const selectedPresentation = relationshipLevel(selectedScore)
+  const selectedInteractions = selectedBot
+    ? relationshipInteractions(game.events, selectedBot.user_id, user.id)
+    : []
+  const adviceKeys = relationshipAdviceKeys(selectedInteractions)
 
   return (
     <Box>
@@ -54,6 +88,15 @@ export function GamePlayersPanel({
             : useAssetTokens
               ? santiagoTokenAssets[index % santiagoTokenAssets.length].path
               : undefined
+          const relationship = player.is_bot
+            ? game.bot_relationships.find(
+                (item) =>
+                  item.bot_id === player.user_id && item.player_id === user.id,
+              )
+            : undefined
+          const relationshipPresentation = relationshipLevel(
+            relationship?.score ?? 0,
+          )
           return (
             <ListItem
               key={player.user_id}
@@ -115,6 +158,66 @@ export function GamePlayersPanel({
                         aria-label={t('bot')}
                       />
                     )}
+                    {player.is_bot && (
+                      <Tooltip
+                        arrow
+                        title={
+                          <Stack spacing={0.35} sx={{ py: 0.25 }}>
+                            <Typography variant="caption" fontWeight={800}>
+                              {t('relationships.tooltipWhy', {
+                                reason: relationship?.last_reason
+                                  ? t(
+                                      `relationships.reasons.${relationship.last_reason}`,
+                                      {
+                                        defaultValue: relationship.last_reason,
+                                      },
+                                    )
+                                  : t('relationships.noInteractions'),
+                              })}
+                            </Typography>
+                            <Typography variant="caption">
+                              {t('relationships.details', {
+                                score: relationship?.score ?? 0,
+                                count: relationship?.interaction_count ?? 0,
+                              })}
+                            </Typography>
+                            <Typography variant="caption" color="inherit">
+                              {t('relationships.tooltipAction')}
+                            </Typography>
+                          </Stack>
+                        }
+                      >
+                        <Chip
+                          size="small"
+                          clickable
+                          onClick={() => setSelectedBotId(player.user_id)}
+                          label={t(
+                            `relationships.levels.${relationshipPresentation.level}`,
+                          )}
+                          aria-label={t('relationships.ariaLabel', {
+                            bot: player.display_name,
+                            level: t(
+                              `relationships.levels.${relationshipPresentation.level}`,
+                            ),
+                          })}
+                          sx={{
+                            height: 19,
+                            bgcolor: relationshipPresentation.background,
+                            color: relationshipPresentation.color,
+                            border: `1px solid ${relationshipPresentation.border}`,
+                            '&:hover': {
+                              bgcolor: relationshipPresentation.background,
+                              filter: 'brightness(1.2)',
+                            },
+                            '& .MuiChip-label': {
+                              px: 0.65,
+                              fontSize: '0.62rem',
+                              fontWeight: 850,
+                            },
+                          }}
+                        />
+                      </Tooltip>
+                    )}
                     {player.user_id === game.host_user_id && (
                       <CrownRoundedIcon
                         color="primary"
@@ -160,6 +263,296 @@ export function GamePlayersPanel({
           </ListItem>
         ))}
       </List>
+      {selectedBot && (
+        <Dialog
+          open
+          fullWidth
+          maxWidth="sm"
+          onClose={() => setSelectedBotId(null)}
+          aria-labelledby="relationship-dialog-title"
+        >
+          <DialogTitle id="relationship-dialog-title" sx={{ pr: 7 }}>
+            {t('relationships.modalTitle', { bot: selectedBot.display_name })}
+            <IconButton
+              aria-label={t('close')}
+              onClick={() => setSelectedBotId(null)}
+              sx={{ position: 'absolute', top: 12, right: 12 }}
+            >
+              <CloseRoundedIcon />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent dividers>
+            <Stack spacing={2.25}>
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 1.5,
+                  borderColor: selectedPresentation.border,
+                  bgcolor: selectedPresentation.background,
+                }}
+              >
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  spacing={1}
+                  alignItems={{ xs: 'flex-start', sm: 'center' }}
+                  justifyContent="space-between"
+                >
+                  <Box>
+                    <Typography fontWeight={850}>
+                      {t('relationships.modalSummary', {
+                        bot: selectedBot.display_name,
+                        level: t(
+                          `relationships.levels.${selectedPresentation.level}`,
+                        ),
+                      })}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {t('relationships.details', {
+                        score: selectedScore,
+                        count: selectedRelationship?.interaction_count ?? 0,
+                      })}
+                    </Typography>
+                  </Box>
+                  <Chip
+                    label={t(
+                      `relationships.levels.${selectedPresentation.level}`,
+                    )}
+                    sx={{
+                      bgcolor: selectedPresentation.background,
+                      color: selectedPresentation.color,
+                      border: `1px solid ${selectedPresentation.border}`,
+                      fontWeight: 850,
+                    }}
+                  />
+                </Stack>
+              </Paper>
+
+              <Box>
+                <Typography fontWeight={850}>
+                  {t('relationships.historyTitle')}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {t('relationships.historyHelp')}
+                </Typography>
+                {selectedInteractions.length === 0 ? (
+                  <Typography variant="body2" sx={{ mt: 1.25 }}>
+                    {t('relationships.emptyHistory')}
+                  </Typography>
+                ) : (
+                  <List disablePadding sx={{ mt: 1 }}>
+                    {selectedInteractions.map((interaction, index) => {
+                      const result = relationshipLevel(interaction.score)
+                      return (
+                        <Box key={interaction.sequence}>
+                          {index > 0 && <Divider />}
+                          <ListItem disableGutters alignItems="flex-start">
+                            <ListItemText
+                              primary={t(
+                                `relationships.reasons.${interaction.reason}`,
+                                { defaultValue: interaction.reason },
+                              )}
+                              secondary={formatRelationshipTime(
+                                interaction.occurredAt,
+                                i18n.language,
+                              )}
+                              slotProps={{
+                                primary: { fontWeight: 700 },
+                                secondary: { variant: 'caption' },
+                              }}
+                            />
+                            <Stack alignItems="flex-end" spacing={0.4} sx={{ pl: 1 }}>
+                              <Typography
+                                fontWeight={900}
+                                color={
+                                  interaction.delta > 0
+                                    ? 'success.main'
+                                    : interaction.delta < 0
+                                      ? 'error.main'
+                                      : 'text.secondary'
+                                }
+                              >
+                                {formatDelta(interaction.delta)}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {t('relationships.resultingScore', {
+                                  score: interaction.score,
+                                  level: t(`relationships.levels.${result.level}`),
+                                })}
+                              </Typography>
+                            </Stack>
+                          </ListItem>
+                        </Box>
+                      )
+                    })}
+                  </List>
+                )}
+                {!game.events_complete && selectedInteractions.length > 0 && (
+                  <Typography variant="caption" color="warning.main">
+                    {t('relationships.partialHistory')}
+                  </Typography>
+                )}
+              </Box>
+
+              <Paper variant="outlined" sx={{ p: 1.5 }}>
+                <Stack direction="row" spacing={0.8} alignItems="center">
+                  <LightbulbRoundedIcon color="primary" fontSize="small" />
+                  <Typography fontWeight={850}>
+                    {t('relationships.adviceTitle')}
+                  </Typography>
+                </Stack>
+                <List dense disablePadding sx={{ mt: 0.75, pl: 2.5, listStyle: 'disc' }}>
+                  {adviceKeys.map((key) => (
+                    <ListItem
+                      key={key}
+                      disableGutters
+                      sx={{ display: 'list-item', py: 0.3 }}
+                    >
+                      <Typography variant="body2">
+                        {t(`relationships.advice.${key}`)}
+                      </Typography>
+                    </ListItem>
+                  ))}
+                </List>
+              </Paper>
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setSelectedBotId(null)}>{t('close')}</Button>
+          </DialogActions>
+        </Dialog>
+      )}
     </Box>
   )
+}
+
+interface RelationshipInteraction {
+  sequence: number
+  occurredAt: string
+  delta: number
+  score: number
+  reason: string
+}
+
+function relationshipInteractions(
+  events: GameEvent[],
+  botId: string,
+  playerId: string,
+): RelationshipInteraction[] {
+  return events
+    .filter(
+      (event) =>
+        event.type === 'relationship.changed' &&
+        event.data.bot_id === botId &&
+        event.data.player_id === playerId,
+    )
+    .map((event) => ({
+      sequence: event.sequence,
+      occurredAt: event.occurred_at,
+      delta: numberEventData(event, 'delta'),
+      score: numberEventData(event, 'score'),
+      reason: stringEventData(event, 'reason') ?? 'unknown',
+    }))
+    .sort((first, second) => second.sequence - first.sequence)
+}
+
+type RelationshipAdviceKey =
+  | 'acceptedTrade'
+  | 'counterOffer'
+  | 'blockedGroup'
+  | 'lostAuction'
+  | 'paidRent'
+
+function relationshipAdviceKeys(
+  interactions: RelationshipInteraction[],
+): RelationshipAdviceKey[] {
+  const adviceByReason: Record<string, RelationshipAdviceKey> = {
+    trade_rejected: 'counterOffer',
+    trade_cancelled: 'counterOffer',
+    blocked_group: 'blockedGroup',
+    lost_auction: 'lostAuction',
+    paid_rent: 'paidRent',
+  }
+  const keys = interactions
+    .map((interaction) => adviceByReason[interaction.reason])
+    .filter((key): key is RelationshipAdviceKey => Boolean(key))
+  const defaults: RelationshipAdviceKey[] = ['acceptedTrade', 'counterOffer']
+  return [...new Set<RelationshipAdviceKey>([...keys, ...defaults])].slice(0, 3)
+}
+
+function numberEventData(event: GameEvent, key: string): number {
+  const value = event.data[key]
+  return typeof value === 'number' ? value : 0
+}
+
+function stringEventData(event: GameEvent, key: string): string | undefined {
+  const value = event.data[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+function formatDelta(delta: number): string {
+  return delta > 0 ? `+${delta}` : `${delta}`
+}
+
+function formatRelationshipTime(value: string, locale: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat(locale, {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+type RelationshipLevel =
+  | 'enemy'
+  | 'hostile'
+  | 'neutral'
+  | 'ally'
+  | 'superFriend'
+
+function relationshipLevel(score: number): {
+  level: RelationshipLevel
+  background: string
+  border: string
+  color: string
+} {
+  if (score <= -41) {
+    return {
+      level: 'enemy',
+      background: 'rgba(239,83,80,.18)',
+      border: 'rgba(239,83,80,.72)',
+      color: '#ff8a80',
+    }
+  }
+  if (score <= -16) {
+    return {
+      level: 'hostile',
+      background: 'rgba(255,152,0,.16)',
+      border: 'rgba(255,152,0,.7)',
+      color: '#ffb74d',
+    }
+  }
+  if (score <= 15) {
+    return {
+      level: 'neutral',
+      background: 'rgba(255,255,255,.07)',
+      border: 'rgba(255,255,255,.32)',
+      color: '#f3f0ff',
+    }
+  }
+  if (score <= 40) {
+    return {
+      level: 'ally',
+      background: 'rgba(102,187,106,.16)',
+      border: 'rgba(102,187,106,.68)',
+      color: '#81c784',
+    }
+  }
+  return {
+    level: 'superFriend',
+    background: 'rgba(184,255,61,.2)',
+    border: 'rgba(184,255,61,.78)',
+    color: '#c9ff70',
+  }
 }

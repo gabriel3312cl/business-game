@@ -1,6 +1,7 @@
 import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded'
 import {
   Box,
+  Button,
   ButtonBase,
   Chip,
   Divider,
@@ -22,6 +23,10 @@ import type {
 } from '../types'
 import { BoardTileDialog } from './BoardTileDialog'
 import { playerColors } from './gameColors'
+import {
+  buildGroupRoundAvailability,
+  sellGroupRoundAvailability,
+} from './propertyRules'
 import { defaultTileColor } from './tilePresentation'
 
 interface Props {
@@ -37,6 +42,7 @@ type PropertyFilter = 'all' | 'available' | 'mine' | 'mortgaged'
 
 interface PropertyAlbumGroup {
   id: string
+  groupId: string | null
   name: string
   accent: string
   tiles: TileDefinition[]
@@ -124,6 +130,12 @@ export function PropertyManagementPanel({
             ).length
             const complete =
               group.tiles.length > 1 && ownedByUser === group.tiles.length
+            const buildRound = group.groupId
+              ? buildGroupRoundAvailability(game, group.tiles, user.id)
+              : null
+            const sellRound = group.groupId
+              ? sellGroupRoundAvailability(game, pack, group.tiles, user.id)
+              : null
             return (
               <Paper
                 key={group.id}
@@ -159,7 +171,7 @@ export function PropertyManagementPanel({
                       })}
                     </Typography>
                   </Box>
-                  {complete && (
+                  {complete && group.groupId && (
                     <Chip
                       size="small"
                       color="success"
@@ -167,6 +179,67 @@ export function PropertyManagementPanel({
                     />
                   )}
                 </Stack>
+
+                {complete && group.groupId && (
+                  <Stack
+                    direction="row"
+                    spacing={0.75}
+                    sx={{ px: 1.25, pb: 1, bgcolor: `${group.accent}0d` }}
+                  >
+                    <Tooltip
+                      title={
+                        buildRound?.reason
+                          ? t(`propertyRule.${buildRound.reason}`)
+                          : ''
+                      }
+                    >
+                      <span style={{ flex: 1 }}>
+                        <Button
+                          fullWidth
+                          size="small"
+                          variant="contained"
+                          disabled={busy || !buildRound?.allowed}
+                          onClick={() =>
+                            void onCommand({
+                              action: 'build_group_round',
+                              group_id: group.groupId as string,
+                            })
+                          }
+                        >
+                          {t('buildGroupRound', {
+                            amount: buildRound?.amount ?? 0,
+                          })}
+                        </Button>
+                      </span>
+                    </Tooltip>
+                    <Tooltip
+                      title={
+                        sellRound?.reason
+                          ? t(`propertyRule.${sellRound.reason}`)
+                          : ''
+                      }
+                    >
+                      <span style={{ flex: 1 }}>
+                        <Button
+                          fullWidth
+                          size="small"
+                          variant="outlined"
+                          disabled={busy || !sellRound?.allowed}
+                          onClick={() =>
+                            void onCommand({
+                              action: 'sell_group_round',
+                              group_id: group.groupId as string,
+                            })
+                          }
+                        >
+                          {t('sellGroupRound', {
+                            amount: sellRound?.amount ?? 0,
+                          })}
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  </Stack>
+                )}
 
                 <Stack divider={<Divider flexItem />}>
                   {group.visibleTiles.map((tile) => {
@@ -315,6 +388,7 @@ function propertyAlbumGroups(
     }
     groups.set(id, {
       id,
+      groupId: tile.kind === 'property' ? (tile.group ?? null) : null,
       name:
         pack.messages[groupDefinition?.name_key ?? ''] ??
         pack.messages[tile.group ?? ''] ??

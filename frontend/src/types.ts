@@ -53,6 +53,21 @@ export interface PackManifest {
   max_consecutive_doubles: number
   house_supply: number
   hotel_supply: number
+  bank_money_supply: number | null
+  bank_minimum_reserve_percent: number
+  loan_interest_percent: number
+  loan_term_laps: number
+  loan_max_term_laps: number
+  loan_salary_payment_percent: number
+  investment_share_count: number
+  investment_dividend_percent: number
+  investment_transaction_fee_percent: number
+  investment_revenue_fee_percent: number
+  investment_max_ownership_percent: number
+  investment_spread_percent: number
+  loan_investment_max_net_worth_percent: number
+  loan_investment_reserve_salary_percent: number
+  loan_investment_installment_reserve: number
   default_rules: OptionalRules
   configurable_rules: RuleOptionName[]
 }
@@ -179,10 +194,17 @@ export interface TokenAppearanceSettings {
   icon: TokenIcon
 }
 
+export interface AutomationPreferenceSettings {
+  auto_reject_trades: boolean
+  auto_roll_dice: boolean
+  auto_end_turns: boolean
+}
+
 export interface UserPreferences {
   panel_layout: PanelLayoutPreferences | null
   audio_settings: AudioPreferenceSettings | null
   token_appearance: TokenAppearanceSettings | null
+  automation_settings: AutomationPreferenceSettings | null
 }
 
 export interface TokenResponse {
@@ -207,6 +229,7 @@ export interface PlayerState {
   bot_controller: BotController | null
   position: number
   balance: number
+  pending_dividend_units: number
   bankrupt: boolean
   in_jail: boolean
   jail_failed_rolls: number
@@ -222,6 +245,9 @@ export interface OptionalRules {
   auction_unpurchased_properties: boolean
   free_parking_jackpot: boolean
   double_salary_on_start: boolean
+  loans_enabled: boolean
+  stock_market_enabled: boolean
+  custom_rent_debts_enabled: boolean
 }
 
 export type RuleOptionName = keyof OptionalRules
@@ -253,8 +279,127 @@ export interface DebtState {
   debtor_id: string
   creditor_id: string | null
   amount: number
-  reason: 'rent' | 'tax' | 'card' | 'jail_fine' | 'resignation'
+  reason:
+    | 'rent'
+    | 'rent_installment'
+    | 'tax'
+    | 'card'
+    | 'jail_fine'
+    | 'bank_loan'
+    | 'resignation'
   tile_id: string
+  installment_plan_id: string | null
+  plan_proposal: RentDebtPlanProposal | null
+  collection_demanded: boolean
+}
+
+export type RentDebtPlanTemplate =
+  | 'friendly'
+  | 'standard'
+  | 'flexible'
+  | 'custom'
+
+export interface RentDebtPlanProposal {
+  installments: number
+  interest_percent: number
+  template: RentDebtPlanTemplate
+}
+
+export interface RentDebtPlanState {
+  id: string
+  debtor_id: string
+  creditor_id: string
+  tile_id: string
+  original_amount: number
+  interest_percent: number
+  total_amount: number
+  remaining_amount: number
+  installments_total: number
+  installments_remaining: number
+  template: RentDebtPlanTemplate
+  created_at_sequence: number
+}
+
+export interface BankLoanState {
+  id: string
+  player_id: string
+  principal: number
+  interest_amount: number
+  interest_paid: number
+  interest_percent: number
+  remaining_balance: number
+  installment_amount: number
+  installments_remaining: number
+  scheduled_payments_made: number
+  issued_at_sequence: number
+}
+
+export interface BankCreditProfileState {
+  score: number
+  successful_loans: number
+  on_time_payments: number
+  late_payments: number
+  defaults: number
+  total_borrowed: number
+  current_interest_percent: number
+  current_limit: number
+  maximum_term_laps: number
+}
+
+export interface InvestmentInstrumentState {
+  id: string
+  tile_id: string
+  name_key: string
+  instrument_kind: 'asset' | 'bank' | 'jail' | 'tax' | 'index'
+  total_shares: number
+  available_shares: number
+  base_price: number
+  current_price: number
+  dividend_percent: number
+  transaction_fee_percent: number
+  revenue_fee_percent: number
+  max_ownership_percent: number
+  spread_percent: number
+  holdings: Record<string, number>
+  gross_revenue: number
+  period_revenue: number
+  dividends_paid: number
+  dividends_accrued_units: number
+  pending_dividend_units: Record<string, number>
+  last_settlement_sequence: number
+  buy_volume: number
+  sell_volume: number
+  trade_count: number
+  last_trade_price: number | null
+  session_high: number
+  session_low: number
+}
+
+export interface MarketOrderState {
+  id: string
+  instrument_id: string
+  player_id: string
+  side: 'buy' | 'sell'
+  limit_price: number
+  original_quantity: number
+  remaining_quantity: number
+  reserved_cash: number
+  created_at_sequence: number
+}
+
+export interface BankState {
+  initialized: boolean
+  monetary_base: number
+  cash: number
+  emergency_issuance: number
+  dividend_cash_reserve: number
+  dividend_unfunded_units: number
+  market_round: number
+  minimum_reserve_percent: number
+  loans: BankLoanState[]
+  credit_profiles: Record<string, BankCreditProfileState>
+  investments: InvestmentInstrumentState[]
+  market_orders: MarketOrderState[]
 }
 
 export interface TradeOffer {
@@ -265,21 +410,65 @@ export interface TradeOffer {
   requested_cash: number
   offered_property_ids: string[]
   requested_property_ids: string[]
+  parent_trade_id: string | null
   status: 'pending' | 'accepted' | 'rejected' | 'cancelled'
   created_at: string
   resolved_at: string | null
+}
+
+export interface BotRelationshipState {
+  bot_id: string
+  player_id: string
+  score: number
+  interaction_count: number
+  last_reason: string | null
+  last_event_sequence: number | null
+}
+
+export type TradeConvenienceLevel =
+  | 'very_favorable'
+  | 'favorable'
+  | 'balanced'
+  | 'unfavorable'
+  | 'very_unfavorable'
+
+export interface TradeSideAnalysis {
+  player_id: string
+  role: 'proposer' | 'recipient'
+  verdict: 'accept' | 'counter' | 'reject'
+  convenience_level: TradeConvenienceLevel
+  reason_code: string
+  estimated_gain: number
+  estimated_cost: number
+  estimated_surplus: number
+  risk_adjusted_surplus: number
+  cash_before: number
+  cash_after: number
+  liquidity_floor: number
+  payment_probability_before: number
+  payment_probability_after: number
+  expected_payments_before: number
+  expected_payments_after: number
+  expected_rent_income_before: number
+  expected_rent_income_after: number
+  highest_payment_before: number
+  highest_payment_after: number
 }
 
 export interface TradeAnalysis {
   trade_id: string
   perspective: 'proposer' | 'recipient'
   verdict: 'accept' | 'counter' | 'reject'
+  convenience_level: TradeConvenienceLevel
   reason_code: string
   estimated_gain: number
   estimated_cost: number
   estimated_surplus: number
+  risk_adjusted_surplus: number
   cash_after: number
   liquidity_floor: number
+  proposer_analysis: TradeSideAnalysis
+  recipient_analysis: TradeSideAnalysis
   snapshot_sequence: number
 }
 
@@ -289,6 +478,11 @@ export type GameEventType =
   | 'auction.player_passed'
   | 'auction.started'
   | 'bank_pot.increased'
+  | 'bank.emergency_issued'
+  | 'bank.loan_defaulted'
+  | 'bank.loan_issued'
+  | 'bank.loan_payment'
+  | 'bank.loan_payment_missed'
   | 'building.purchased'
   | 'building.sold'
   | 'card.cash_applied'
@@ -299,7 +493,15 @@ export type GameEventType =
   | 'card.repairs_assessed'
   | 'card.utility_dice_rolled'
   | 'debt.created'
+  | 'debt.collection_demanded'
+  | 'debt.forgiven'
+  | 'debt.installment_paid'
   | 'debt.paid'
+  | 'debt.plan_accepted'
+  | 'debt.plan_cancelled'
+  | 'debt.plan_completed'
+  | 'debt.plan_proposed'
+  | 'debt.plan_rejected'
   | 'dice.rolled'
   | 'game.cancelled'
   | 'game.created'
@@ -311,6 +513,17 @@ export type GameEventType =
   | 'jail.entered'
   | 'jail.released'
   | 'jail.roll_failed'
+  | 'investment.dividend_paid'
+  | 'investment.dividends_settled'
+  | 'investment.institution_revenue'
+  | 'investment.limit_order_cancelled'
+  | 'investment.limit_order_placed'
+  | 'investment.order_filled'
+  | 'investment.margin_call'
+  | 'investment.market_expanded'
+  | 'investment.position_liquidated'
+  | 'investment.shares_bought'
+  | 'investment.shares_sold'
   | 'payment.completed'
   | 'player.bankrupt'
   | 'player.joined'
@@ -325,8 +538,10 @@ export type GameEventType =
   | 'salary.collected'
   | 'trade.accepted'
   | 'trade.cancelled'
+  | 'trade.countered'
   | 'trade.proposed'
   | 'trade.rejected'
+  | 'relationship.changed'
   | 'turn.extra_roll'
   | 'turn.started'
 
@@ -350,12 +565,44 @@ export type GameCommand =
   | { action: 'mortgage_property'; property_id: string }
   | { action: 'unmortgage_property'; property_id: string }
   | { action: 'build_property'; property_id: string }
+  | { action: 'build_group_round'; group_id: string }
   | { action: 'sell_building'; property_id: string }
+  | { action: 'sell_group_round'; group_id: string }
+  | { action: 'request_loan'; amount: number }
+  | { action: 'repay_loan'; amount?: number | null }
+  | { action: 'buy_shares'; instrument_id: string; quantity: number }
+  | { action: 'sell_shares'; instrument_id: string; quantity: number }
+  | {
+      action: 'place_limit_order'
+      instrument_id: string
+      side: 'buy' | 'sell'
+      quantity: number
+      limit_price: number
+    }
+  | { action: 'cancel_market_order'; order_id: string }
   | { action: 'pay_debt' }
+  | { action: 'demand_rent_debt' }
+  | { action: 'forgive_rent_debt' }
+  | {
+      action: 'propose_rent_debt_plan'
+      installments: number
+      interest_percent: number
+      template: RentDebtPlanTemplate
+    }
+  | { action: 'accept_rent_debt_plan' }
+  | { action: 'reject_rent_debt_plan' }
   | { action: 'declare_bankruptcy' }
   | {
       action: 'propose_trade'
       recipient_id: string
+      offered_cash: number
+      requested_cash: number
+      offered_property_ids: string[]
+      requested_property_ids: string[]
+    }
+  | {
+      action: 'counter_trade'
+      trade_id: string
       offered_cash: number
       requested_cash: number
       offered_property_ids: string[]
@@ -383,7 +630,9 @@ export interface GameState {
   pending_auction_minimum_bid: number | null
   active_auction: AuctionState | null
   active_debt: DebtState | null
+  rent_debt_plans: RentDebtPlanState[]
   pending_card_payments: CardPaymentState[]
+  bank: BankState
   bank_pot: number
   mortgaged_property_ids: string[]
   building_levels: Record<string, number>
@@ -394,6 +643,7 @@ export interface GameState {
   bank_auction_queue: string[]
   last_card_id: string | null
   trades: TradeOffer[]
+  bot_relationships: BotRelationshipState[]
   last_roll: [number, number] | null
   events: GameEvent[]
   event_sequence: number
