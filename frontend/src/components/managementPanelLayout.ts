@@ -6,6 +6,7 @@ import type {
 export const MANAGEMENT_PANEL_IDS: ManagementPanelId[] = [
   'properties',
   'trades',
+  'debts',
   'bank',
   'market',
 ]
@@ -25,6 +26,10 @@ export function normalizeManagementPanelLayout(
   const order = [
     ...new Set<ManagementPanelId>([...storedOrder, ...MANAGEMENT_PANEL_IDS]),
   ]
+  if (!storedOrder.includes('debts')) {
+    order.splice(order.indexOf('debts'), 1)
+    order.splice(order.indexOf('trades') + 1, 0, 'debts')
+  }
   const storedVisible = Array.isArray(stored?.visible)
     ? stored.visible.filter(isManagementPanelId)
     : []

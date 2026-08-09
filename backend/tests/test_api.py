@@ -54,7 +54,7 @@ def test_legacy_panel_layout_defaults_to_properties_view() -> None:
     layout = PanelLayoutPreferences.model_validate(legacy_payload)
 
     assert layout.management.model_dump() == {
-        "order": ["properties", "trades", "bank", "market"],
+        "order": ["properties", "trades", "debts", "bank", "market"],
         "visible": ["properties"],
         "heights": {},
     }
@@ -126,6 +126,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "audio_settings": None,
         "token_appearance": None,
         "automation_settings": None,
+        "visual_effects": None,
     }
 
     panel_layout = {
@@ -139,7 +140,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         },
         "heights": {"chat": 420, "management": 500},
         "management": {
-            "order": ["bank", "properties", "trades", "market"],
+            "order": ["bank", "properties", "trades", "debts", "market"],
             "visible": ["bank", "trades"],
             "heights": {"bank": 360, "trades": 280},
         },
@@ -149,6 +150,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
                 "bank",
                 "properties",
                 "trades",
+                "debts",
                 "market",
                 "players",
                 "heatmap",
@@ -162,6 +164,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
                 "players": "left",
                 "properties": "right",
                 "trades": "right",
+                "debts": "right",
                 "bank": "floating",
                 "market": "right",
                 "chat": "left",
@@ -182,6 +185,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "audio_settings": None,
         "token_appearance": None,
         "automation_settings": None,
+        "visual_effects": None,
     }
 
     audio_settings = {
@@ -200,12 +204,18 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "audio_settings": audio_settings,
         "token_appearance": None,
         "automation_settings": None,
+        "visual_effects": None,
     }
 
     token_appearance = {
         "color": "#70b7ff",
-        "shape": "diamond",
-        "icon": "cat",
+        "secondary_color": "#ff6ea8",
+        "fill": "gradient",
+        "gradient_angle": 45,
+        "pattern": "waves",
+        "shape": "star",
+        "icon": "emoji",
+        "emoji": "🚀",
     }
     token_updated = await client.patch(
         "/api/v1/users/me/preferences",
@@ -218,6 +228,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "audio_settings": audio_settings,
         "token_appearance": token_appearance,
         "automation_settings": None,
+        "visual_effects": None,
     }
 
     automation_settings = {
@@ -236,6 +247,22 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "audio_settings": audio_settings,
         "token_appearance": token_appearance,
         "automation_settings": automation_settings,
+        "visual_effects": None,
+    }
+
+    visual_effects = {"intensity": "soft"}
+    visual_effects_updated = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=first_headers,
+        json={"visual_effects": visual_effects},
+    )
+    assert visual_effects_updated.status_code == 200
+    assert visual_effects_updated.json() == {
+        "panel_layout": panel_layout,
+        "audio_settings": audio_settings,
+        "token_appearance": token_appearance,
+        "automation_settings": automation_settings,
+        "visual_effects": visual_effects,
     }
 
     restored = await client.get(
@@ -248,6 +275,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "audio_settings": audio_settings,
         "token_appearance": token_appearance,
         "automation_settings": automation_settings,
+        "visual_effects": visual_effects,
     }
 
     first_user = await session.scalar(
@@ -259,6 +287,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "audio_settings": audio_settings,
         "token_appearance": token_appearance,
         "automation_settings": automation_settings,
+        "visual_effects": visual_effects,
     }
     await session.rollback()
 
@@ -273,6 +302,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "audio_settings": None,
         "token_appearance": None,
         "automation_settings": None,
+        "visual_effects": None,
     }
 
 
@@ -378,6 +408,13 @@ async def test_rejects_invalid_or_unauthenticated_panel_preferences(
         },
     )
     assert invalid_token.status_code == 422
+
+    invalid_visual_effects = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=headers,
+        json={"visual_effects": {"intensity": "extreme"}},
+    )
+    assert invalid_visual_effects.status_code == 422
 
 
 async def test_rejects_duplicate_email_and_invalid_password(

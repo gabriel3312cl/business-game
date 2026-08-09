@@ -6,6 +6,8 @@ from business_game.domain.errors import NotFoundError
 from business_game.domain.models import (
     BoardDefinition,
     ContentPack,
+    InteractiveChoiceCardEffect,
+    MoveToNearestAuctionCardEffect,
     PackManifest,
     TileKind,
 )
@@ -51,6 +53,9 @@ class PackLoader:
         tile_ids = [tile.id for tile in board.tiles]
         if len(tile_ids) != len(set(tile_ids)):
             raise ValueError(f"pack '{pack_id}' contains duplicate tile ids")
+        card_tags = [tag for tile in board.tiles for tag in tile.card_tags]
+        if len(card_tags) != len(set(card_tags)):
+            raise ValueError(f"pack '{pack_id}' contains duplicate card target tags")
         for required_kind in (TileKind.START, TileKind.JAIL, TileKind.GO_TO_JAIL):
             if sum(tile.kind is required_kind for tile in board.tiles) != 1:
                 raise ValueError(
@@ -112,6 +117,11 @@ class PackLoader:
             *(group.name_key for group in board.groups),
             *(tile.name_key for tile in board.tiles),
             *(deck.name_key for deck in board.decks if deck.name_key is not None),
+            *(
+                collection.name_key
+                for deck in board.decks
+                for collection in deck.collections
+            ),
             *(card.message_key for deck in board.decks for card in deck.cards),
             *(
                 card.title_key
@@ -120,6 +130,17 @@ class PackLoader:
                 if card.title_key is not None
             ),
         }
+        for deck in board.decks:
+            for card in deck.cards:
+                for effect in card.resolved_effects():
+                    if not isinstance(effect, InteractiveChoiceCardEffect):
+                        continue
+                    required_keys.add(effect.prompt_key)
+                    for choice in effect.choices:
+                        required_keys.add(choice.label_key)
+                        required_keys.update(
+                            outcome.result_key for outcome in choice.outcomes
+                        )
         missing = sorted(required_keys - messages.keys())
         if missing:
             raise ValueError(
@@ -135,10 +156,30 @@ class PackLoader:
         known_tile_ids: set[str],
         board: BoardDefinition,
     ) -> None:
+        if isinstance(effect, InteractiveChoiceCardEffect):
+            for choice in effect.choices:
+                for outcome in choice.outcomes:
+                    for outcome_effect in outcome.effects:
+                        PackLoader._validate_effect_reference(
+                            pack_id,
+                            source_id,
+                            outcome_effect,
+                            known_tile_ids,
+                            board,
+                        )
+            return
         target_id = getattr(effect, "tile_id", None)
         if target_id is not None and target_id not in known_tile_ids:
             raise ValueError(
                 f"pack '{pack_id}' effect '{source_id}' references an unknown tile"
+            )
+        target_tag = getattr(effect, "tile_tag", None)
+        if target_tag is not None and not any(
+            target_tag in tile.card_tags for tile in board.tiles
+        ):
+            raise ValueError(
+                f"pack '{pack_id}' effect '{source_id}' references an "
+                f"unknown card target tag '{target_tag}'"
             )
         target_kind = getattr(effect, "tile_kind", None)
         if target_kind is not None and not any(
@@ -147,4 +188,10 @@ class PackLoader:
             raise ValueError(
                 f"pack '{pack_id}' effect '{source_id}' references an "
                 f"unavailable tile kind '{target_kind}'"
+            )
+        if isinstance(effect, MoveToNearestAuctionCardEffect) and not any(
+            tile.auction_minimum_bid is not None for tile in board.tiles
+        ):
+            raise ValueError(
+                f"pack '{pack_id}' effect '{source_id}' requires an auction tile"
             )

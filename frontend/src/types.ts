@@ -72,9 +72,14 @@ export interface PackManifest {
   configurable_rules: RuleOptionName[]
 }
 
-export type CardEffect =
+export type ImmediateCardEffect =
   | { type: 'cash'; amount: number }
-  | { type: 'move_to'; tile_id: string; collect_start: boolean }
+  | {
+      type: 'move_to'
+      tile_id?: string | null
+      tile_tag?: string | null
+      collect_start: boolean
+    }
   | {
       type: 'move_relative'
       steps: number
@@ -102,6 +107,43 @@ export type CardEffect =
   | { type: 'owned_properties_cash'; amount_per_property: number }
   | { type: 'mortgaged_properties_cash'; amount_per_property: number }
   | { type: 'refinance_mortgage' }
+  | { type: 'salary_cash'; salary_percent: number }
+  | { type: 'equalize_cash'; target: 'wealthiest' | 'poorest' }
+  | { type: 'swap_position'; target: 'wealthiest' | 'poorest' }
+  | {
+      type: 'all_players_move_relative'
+      steps: number
+      collect_start: boolean
+    }
+
+export interface CardChoiceOutcomeDefinition {
+  weight: number
+  result_key: string
+  effects: ImmediateCardEffect[]
+}
+
+export interface CardChoiceOptionDefinition {
+  id: string
+  label_key: string
+  outcomes: CardChoiceOutcomeDefinition[]
+}
+
+export type CardChoiceCategory =
+  | 'scam'
+  | 'lottery'
+  | 'employment'
+  | 'contest'
+  | 'social'
+  | 'mystery'
+
+export interface InteractiveChoiceCardEffect {
+  type: 'interactive_choice'
+  prompt_key: string
+  category: CardChoiceCategory
+  choices: CardChoiceOptionDefinition[]
+}
+
+export type CardEffect = ImmediateCardEffect | InteractiveChoiceCardEffect
 
 export interface CardDefinition {
   id: string
@@ -115,12 +157,21 @@ export interface CardDeckDefinition {
   id: string
   name_key?: string
   cards: CardDefinition[]
+  collections: CardCollectionDefinition[]
+  default_collection_ids: string[]
+}
+
+export interface CardCollectionDefinition {
+  id: string
+  name_key: string
+  card_ids: string[]
 }
 
 export interface TileDefinition {
   id: string
   kind: TileKind
   name_key: string
+  card_tags?: string[]
   deck_id?: string
   group?: string
   color?: string
@@ -165,7 +216,12 @@ export interface User {
 
 export type PanelId = 'room' | 'heatmap' | 'players' | 'management' | 'chat'
 export type PanelZone = 'left' | 'right'
-export type ManagementPanelId = 'properties' | 'trades' | 'bank' | 'market'
+export type ManagementPanelId =
+  | 'properties'
+  | 'trades'
+  | 'debts'
+  | 'bank'
+  | 'market'
 export type WorkspacePanelId =
   | 'room'
   | 'heatmap'
@@ -209,7 +265,15 @@ export interface AudioPreferenceSettings {
   disabled_sounds: string[]
 }
 
-export type TokenShape = 'circle' | 'rounded' | 'diamond'
+export type TokenShape =
+  | 'circle'
+  | 'rounded'
+  | 'diamond'
+  | 'hexagon'
+  | 'shield'
+  | 'star'
+export type TokenFillMode = 'solid' | 'gradient' | 'pattern'
+export type TokenPattern = 'dots' | 'stripes' | 'checker' | 'waves'
 export type TokenIcon =
   | 'number'
   | 'micro'
@@ -218,11 +282,17 @@ export type TokenIcon =
   | 'terremoto'
   | 'cerro'
   | 'cat'
+  | 'emoji'
 
 export interface TokenAppearanceSettings {
   color: string
+  secondary_color: string
+  fill: TokenFillMode
+  gradient_angle: number
+  pattern: TokenPattern
   shape: TokenShape
   icon: TokenIcon
+  emoji: string | null
 }
 
 export interface AutomationPreferenceSettings {
@@ -231,11 +301,18 @@ export interface AutomationPreferenceSettings {
   auto_end_turns: boolean
 }
 
+export type VisualEffectsIntensity = 'full' | 'soft' | 'off'
+
+export interface VisualEffectsPreferenceSettings {
+  intensity: VisualEffectsIntensity
+}
+
 export interface UserPreferences {
   panel_layout: PanelLayoutPreferences | null
   audio_settings: AudioPreferenceSettings | null
   token_appearance: TokenAppearanceSettings | null
   automation_settings: AutomationPreferenceSettings | null
+  visual_effects: VisualEffectsPreferenceSettings | null
 }
 
 export interface TokenResponse {
@@ -294,6 +371,29 @@ export interface CardPaymentState {
   recipient_id: string
   amount: number
   card_id: string
+}
+
+export interface PendingCardChoiceState {
+  player_id: string
+  card_id: string
+  effect: InteractiveChoiceCardEffect
+}
+
+export interface PendingCardChoiceResultState extends PendingCardChoiceState {
+  choice_id: string
+  choice_label_key: string
+  result_key: string
+  resolved_sequence: number
+}
+
+export interface PendingCardDrawState {
+  player_id: string
+  deck_id: string
+  card_id: string | null
+  selected_index: number | null
+  offer_count: number
+  draw_sequence: number
+  reveal_sequence: number | null
 }
 
 export interface AuctionState {
@@ -518,11 +618,17 @@ export type GameEventType =
   | 'building.purchased'
   | 'building.sold'
   | 'card.cash_applied'
+  | 'card.cash_equalized'
   | 'card.cash_each_applied'
+  | 'card.choice_presented'
+  | 'card.choice_resolved'
+  | 'card.choice_result_acknowledged'
+  | 'card.continued'
   | 'card.deck_empty'
   | 'card.drawn'
   | 'card.player_moved'
   | 'card.repairs_assessed'
+  | 'card.selection_started'
   | 'card.utility_dice_rolled'
   | 'debt.created'
   | 'debt.collection_demanded'
@@ -564,6 +670,7 @@ export type GameEventType =
   | 'property.declined'
   | 'property.mortgaged'
   | 'property.purchased'
+  | 'property.trade_availability_changed'
   | 'property.unmortgaged'
   | 'spectator.joined'
   | 'spectator.left'
@@ -613,6 +720,11 @@ export type GameCommand =
     }
   | { action: 'cancel_market_order'; order_id: string }
   | { action: 'pay_debt' }
+  | {
+      action: 'pay_rent_debt_plan'
+      plan_id: string
+      payment_kind: 'installment' | 'full'
+    }
   | { action: 'demand_rent_debt' }
   | { action: 'forgive_rent_debt' }
   | {
@@ -625,6 +737,15 @@ export type GameCommand =
   | { action: 'accept_rent_debt_plan' }
   | { action: 'reject_rent_debt_plan' }
   | { action: 'declare_bankruptcy' }
+  | {
+      action: 'set_property_trade_availability'
+      property_id: string
+      available: boolean
+    }
+  | { action: 'resolve_card_choice'; choice_id: string }
+  | { action: 'continue_card_choice_result' }
+  | { action: 'continue_card' }
+  | { action: 'choose_card'; card_index: number }
   | {
       action: 'propose_trade'
       recipient_id: string
@@ -650,6 +771,7 @@ export interface GameState {
   host_user_id: string
   pack_id: string
   pack_version: string
+  deck_collection_ids: Record<string, string[]>
   status: 'lobby' | 'playing' | 'finished' | 'cancelled'
   players: PlayerState[]
   spectators: SpectatorState[]
@@ -665,9 +787,13 @@ export interface GameState {
   active_debt: DebtState | null
   rent_debt_plans: RentDebtPlanState[]
   pending_card_payments: CardPaymentState[]
+  pending_card_draw: PendingCardDrawState | null
+  pending_card_choice: PendingCardChoiceState | null
+  pending_card_choice_result: PendingCardChoiceResultState | null
   bank: BankState
   bank_pot: number
   mortgaged_property_ids: string[]
+  trade_unavailable_property_ids: string[]
   building_levels: Record<string, number>
   houses_remaining: number
   hotels_remaining: number

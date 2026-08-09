@@ -1,9 +1,15 @@
 import { Box, Tooltip, Typography } from '@mui/material'
 import type { ReactNode } from 'react'
-import type { TileDefinition } from '../types'
-import type { TokenShape } from '../types'
+import type {
+  TileDefinition,
+  TokenAppearanceSettings,
+  TokenShape,
+  VisualEffectsIntensity,
+} from '../types'
+import type { PropertyEffectAction } from '../visualEffects'
 import { AssetGlyph, TileVisual } from './AssetVisual'
 import { defaultTileColor, tileIconBackgroundStyle } from './tilePresentation'
+import { tokenFillStyle, tokenShapeStyle } from './tokenAppearance'
 
 interface BoardTileProps {
   tile: TileDefinition
@@ -18,6 +24,10 @@ interface BoardTileProps {
   mortgaged?: boolean
   mortgageLabel?: string
   actionPulse?: boolean
+  actionEffect?: PropertyEffectAction | 'pulse'
+  actionEffectLabel?: string
+  motionIntensity?: VisualEffectsIntensity
+  highlighted?: boolean
   tokens?: BoardToken[]
   owner?: BoardOwner
   heatmap?: BoardTileHeatmap
@@ -33,6 +43,8 @@ export interface BoardToken {
   displayName: string
   color: string
   shape?: TokenShape
+  appearance?: TokenAppearanceSettings
+  emoji?: string
   assetPath?: string
   active: boolean
   currentUser: boolean
@@ -42,6 +54,7 @@ export interface BoardOwner {
   playerNumber: number
   displayName: string
   color: string
+  appearance?: TokenAppearanceSettings
   ariaLabel: string
 }
 
@@ -65,6 +78,10 @@ export function BoardTile({
   mortgaged = false,
   mortgageLabel,
   actionPulse = false,
+  actionEffect = 'pulse',
+  actionEffectLabel,
+  motionIntensity = 'full',
+  highlighted = false,
   tokens = [],
   owner,
   heatmap,
@@ -91,6 +108,8 @@ export function BoardTile({
     <Box
       component="button"
       type="button"
+      data-board-tile-id={tile.id}
+      data-highlighted={highlighted || undefined}
       aria-label={`${name}${priceLabel}${ownerLabel}${buildingsLabel}${mortgagedLabel}${heatmapLabel}`}
       onClick={onClick}
       sx={{
@@ -109,20 +128,29 @@ export function BoardTile({
         background: mortgaged
           ? 'repeating-linear-gradient(135deg, rgba(255,174,51,.10) 0 7px, rgba(11,9,18,.12) 7px 14px), linear-gradient(155deg, rgba(55,49,83,.98), rgba(27,23,42,.98) 72%)'
           : 'linear-gradient(155deg, rgba(55,49,83,.98), rgba(27,23,42,.98) 72%)',
-        boxShadow: mortgaged
-          ? 'inset 0 0 0 2px rgba(255,174,51,.82), inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)'
-          : 'inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)',
+        boxShadow: highlighted
+          ? 'inset 0 0 0 3px #b8ff3d, inset 0 0 18px rgba(184,255,61,.45), 0 0 16px rgba(184,255,61,.85)'
+          : mortgaged
+            ? 'inset 0 0 0 2px rgba(255,174,51,.82), inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)'
+            : 'inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)',
         position: 'relative',
         isolation: 'isolate',
         p: 0,
         color: 'inherit',
         font: 'inherit',
         cursor: 'pointer',
-        animation: actionPulse
-          ? 'board-tile-action-pulse 620ms cubic-bezier(.2,.78,.24,1)'
+        transition:
+          motionIntensity === 'off'
+            ? 'none'
+            : 'filter 160ms ease, box-shadow 180ms ease, transform 160ms ease',
+        animation: actionPulse && motionIntensity !== 'off'
+          ? motionIntensity === 'soft'
+            ? 'board-tile-action-soft 360ms ease-out'
+            : 'board-tile-action-pulse 620ms cubic-bezier(.2,.78,.24,1)'
           : undefined,
         transformOrigin: 'center',
-        zIndex: actionPulse ? 6 : undefined,
+        filter: highlighted ? 'brightness(1.3) saturate(1.15)' : undefined,
+        zIndex: highlighted ? 7 : actionPulse ? 6 : undefined,
         '@keyframes board-tile-action-pulse': {
           '0%, 100%': { transform: 'translateY(0) scale(1)', filter: 'none' },
           '28%': {
@@ -131,6 +159,10 @@ export function BoardTile({
           },
           '55%': { transform: 'translateY(2%) scale(.985)' },
           '76%': { transform: 'translateY(-2%) scale(1.015)' },
+        },
+        '@keyframes board-tile-action-soft': {
+          '0%, 100%': { filter: 'none' },
+          '45%': { filter: 'brightness(1.28) saturate(1.12)' },
         },
         '&:focus-visible': {
           outline: '2px solid #b8ff3d',
@@ -196,11 +228,80 @@ export function BoardTile({
           sx={{
             position: 'absolute',
             zIndex: 1,
-            bgcolor: owner.color,
+            ...(owner.appearance
+              ? tokenFillStyle(owner.appearance)
+              : { bgcolor: owner.color }),
+            borderRadius: 999,
             boxShadow: `0 0 12px ${owner.color}`,
+            animation:
+              motionIntensity !== 'off' &&
+              (actionEffect === 'purchased' || actionEffect === 'transferred')
+                ? motionIntensity === 'soft'
+                  ? 'owner-band-soft 360ms ease-out both'
+                  : 'owner-band-sweep 620ms cubic-bezier(.2,.8,.2,1) both'
+                : undefined,
+            '@keyframes owner-band-sweep': {
+              from: { opacity: 0, transform: 'scaleX(.05)', filter: 'brightness(2)' },
+              '70%': { opacity: 1, transform: 'scaleX(1.08)' },
+              to: { opacity: 1, transform: 'scaleX(1)', filter: 'none' },
+            },
+            '@keyframes owner-band-soft': {
+              from: { opacity: 0 },
+              to: { opacity: 1 },
+            },
             ...ownerBandPosition(edge, compact),
           }}
         />
+      )}
+
+      {actionEffectLabel && actionEffect !== 'pulse' && (
+        <Typography
+          component="span"
+          aria-hidden
+          sx={{
+            position: 'absolute',
+            inset: '34% 3% auto',
+            zIndex: 8,
+            px: 0.35,
+            py: 0.2,
+            borderRadius: 0.75,
+            bgcolor:
+              actionEffect === 'mortgaged'
+                ? '#ffae33'
+                : actionEffect === 'unmortgaged'
+                  ? '#67dc8a'
+                  : 'rgba(9,7,17,.92)',
+            color:
+              actionEffect === 'mortgaged' || actionEffect === 'unmortgaged'
+                ? '#19120a'
+                : '#fff',
+            fontSize: { xs: 4.5, sm: compact ? 6 : 7.5, md: compact ? 7 : 9 },
+            lineHeight: 1.1,
+            fontWeight: 950,
+            textAlign: 'center',
+            textTransform: 'uppercase',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+            animation:
+              motionIntensity === 'off'
+                ? undefined
+                : motionIntensity === 'soft'
+                  ? 'tile-stamp-soft 360ms ease-out both'
+                  : 'tile-stamp 720ms cubic-bezier(.2,.8,.2,1) both',
+            '@keyframes tile-stamp': {
+              '0%': { opacity: 0, transform: 'scale(1.8) rotate(-8deg)' },
+              '32%, 75%': { opacity: 1, transform: 'scale(1) rotate(-2deg)' },
+              '100%': { opacity: 0, transform: 'scale(.96) rotate(0)' },
+            },
+            '@keyframes tile-stamp-soft': {
+              '0%': { opacity: 0 },
+              '35%, 75%': { opacity: 1 },
+              '100%': { opacity: 0 },
+            },
+          }}
+        >
+          {actionEffectLabel}
+        </Typography>
       )}
 
       <Box
@@ -226,6 +327,13 @@ export function BoardTile({
           pt: corner
             ? undefined
             : { xs: 0.65, sm: compact ? 0.9 : 1.1 },
+          pb: corner
+            ? undefined
+            : {
+                xs: 0.7,
+                sm: compact ? 1.05 : 1.35,
+                md: compact ? 1.2 : 1.55,
+              },
         }}
       >
         <Box
@@ -267,7 +375,12 @@ export function BoardTile({
           }}
         >
           {propertyColorBand && buildingLevel > 0 && (
-            <BuildingPieces level={buildingLevel} label={buildingLabel} />
+            <BuildingPieces
+              level={buildingLevel}
+              label={buildingLabel}
+              animate={actionEffect === 'built'}
+              intensity={motionIntensity}
+            />
           )}
           {!propertyColorBand && (
             <TileVisual
@@ -290,7 +403,12 @@ export function BoardTile({
                   pointerEvents: 'none',
                 }}
               >
-                <BuildingPieces level={buildingLevel} label={buildingLabel} />
+                <BuildingPieces
+                  level={buildingLevel}
+                  label={buildingLabel}
+                  animate={actionEffect === 'built'}
+                  intensity={motionIntensity}
+                />
               </Box>
             )}
         </Box>
@@ -402,17 +520,10 @@ export function BoardTile({
                 height: { xs: 9, sm: compact ? 11 : 14, md: compact ? 13 : 17 },
                 display: 'grid',
                 placeItems: 'center',
-                borderRadius:
-                  token.shape === 'rounded'
-                    ? '24%'
-                    : token.shape === 'diamond'
-                      ? 0
-                      : '50%',
-                clipPath:
-                  token.shape === 'diamond'
-                    ? 'polygon(50% 0, 100% 50%, 50% 100%, 0 50%)'
-                    : undefined,
-                bgcolor: token.color,
+                ...(token.appearance
+                  ? tokenFillStyle(token.appearance)
+                  : { bgcolor: token.color }),
+                ...(token.shape ? tokenShapeStyle(token.shape) : { borderRadius: '50%' }),
                 color: '#090711',
                 border: token.currentUser
                   ? '2px solid #fff'
@@ -423,17 +534,28 @@ export function BoardTile({
                 fontSize: { xs: 0, sm: compact ? 6 : 7, md: compact ? 7 : 9 },
                 lineHeight: 1,
                 fontWeight: 900,
-                animation: 'token-step 90ms ease-out',
+                animation:
+                  motionIntensity === 'off'
+                    ? 'none'
+                    : motionIntensity === 'soft'
+                      ? 'token-step-soft 55ms ease-out'
+                      : 'token-step 90ms ease-out',
                 '@keyframes token-step': {
                   from: { transform: 'translateY(5px) scale(.72)', opacity: 0.5 },
                   to: { transform: 'scale(1)', opacity: 1 },
+                },
+                '@keyframes token-step-soft': {
+                  from: { opacity: 0.72 },
+                  to: { opacity: 1 },
                 },
                 '@media (prefers-reduced-motion: reduce)': {
                   animation: 'none',
                 },
               }}
             >
-              {token.assetPath ? (
+              {token.emoji ? (
+                token.emoji
+              ) : token.assetPath ? (
                 <AssetGlyph path={token.assetPath} size="78%" />
               ) : (
                 token.playerNumber
@@ -447,7 +569,35 @@ export function BoardTile({
   )
 }
 
-function BuildingPieces({ level, label }: { level: number; label?: string }) {
+function BuildingPieces({
+  level,
+  label,
+  animate = false,
+  intensity = 'full',
+}: {
+  level: number
+  label?: string
+  animate?: boolean
+  intensity?: VisualEffectsIntensity
+}) {
+  const animation =
+    animate && intensity !== 'off'
+      ? intensity === 'soft'
+        ? 'building-soft 360ms ease-out both'
+        : 'building-drop 620ms cubic-bezier(.18,.9,.25,1.25) both'
+      : undefined
+  const animationFrames = {
+    animation,
+    '@keyframes building-drop': {
+      from: { opacity: 0, transform: 'translateY(-12px) scale(.45)' },
+      '68%': { opacity: 1, transform: 'translateY(1px) scale(1.16)' },
+      to: { opacity: 1, transform: 'translateY(0) scale(1)' },
+    },
+    '@keyframes building-soft': {
+      from: { opacity: 0 },
+      to: { opacity: 1 },
+    },
+  }
   if (level >= 5) {
     return (
       <Box
@@ -468,6 +618,7 @@ function BuildingPieces({ level, label }: { level: number; label?: string }) {
           lineHeight: 1,
           fontWeight: 950,
           textShadow: '0 1px 1px rgba(70,0,12,.9)',
+          ...animationFrames,
         }}
       >
         <Box component="span" aria-hidden>
@@ -493,6 +644,7 @@ function BuildingPieces({ level, label }: { level: number; label?: string }) {
         bgcolor: 'rgba(7,10,15,.82)',
         border: '1px solid rgba(255,255,255,.28)',
         boxShadow: '0 1px 4px rgba(0,0,0,.7)',
+        ...animationFrames,
       }}
     >
       {Array.from({ length: Math.min(level, 4) }, (_, index) => (
@@ -520,8 +672,35 @@ function ownerBandPosition(edge: BoardEdge, compact: boolean) {
     sm: compact ? 5 : 7,
     md: compact ? 6 : 9,
   }
-  if (edge === 'right') return { inset: '0 auto 0 0', width: thickness }
-  if (edge === 'bottom') return { inset: '0 0 auto 0', height: thickness }
-  if (edge === 'left') return { inset: '0 0 0 auto', width: thickness }
-  return { inset: 'auto 0 0 0', height: thickness }
+  const edgeOffset = { xs: 1, sm: 2 }
+  if (edge === 'right') {
+    return {
+      top: '8%',
+      right: edgeOffset,
+      bottom: '8%',
+      width: thickness,
+    }
+  }
+  if (edge === 'bottom') {
+    return {
+      right: '8%',
+      bottom: edgeOffset,
+      left: '8%',
+      height: thickness,
+    }
+  }
+  if (edge === 'left') {
+    return {
+      top: '8%',
+      bottom: '8%',
+      left: edgeOffset,
+      width: thickness,
+    }
+  }
+  return {
+    top: edgeOffset,
+    right: '8%',
+    left: '8%',
+    height: thickness,
+  }
 }

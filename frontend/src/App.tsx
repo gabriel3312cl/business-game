@@ -26,6 +26,7 @@ import { GameAdvisorChat } from './advisor/GameAdvisorChat'
 import { BoardStudio } from './board-editor/BoardStudio'
 import { AuthDialog, type AuthMode } from './components/AuthDialog'
 import { GameBoard } from './components/GameBoard'
+import { GameCreationDialog } from './components/GameCreationDialog'
 import { GameSessionPanel } from './components/GameSessionPanel'
 import { mergeGameState } from './gameState'
 import type {
@@ -61,6 +62,7 @@ export default function App() {
   const [activeGamesLoading, setActiveGamesLoading] = useState(false)
   const [gamePack, setGamePack] = useState<ContentPack | null>(null)
   const [gameError, setGameError] = useState<string | null>(null)
+  const [gameCreationOpen, setGameCreationOpen] = useState(false)
   const [joinGameId, setJoinGameId] = useState('')
   const [boardStudioOpen, setBoardStudioOpen] = useState(false)
   const [customPackNames, setCustomPackNames] = useState<Record<string, string>>(
@@ -278,7 +280,9 @@ export default function App() {
     }
   }
 
-  const createGame = async () => {
+  const createGame = async (
+    deckCollectionIds: Record<string, string[]> = {},
+  ) => {
     setCreatedGame(null)
     setGamePack(null)
     setGameError(null)
@@ -290,7 +294,12 @@ export default function App() {
       return
     }
     try {
-      const game = await api.createGame(pack.manifest.id, pack.manifest.version)
+      const game = await api.createGame(
+        pack.manifest.id,
+        pack.manifest.version,
+        deckCollectionIds,
+      )
+      setGameCreationOpen(false)
       activeGameSession.set(game.id)
       setZoom(1)
       applyGameState(game)
@@ -736,7 +745,10 @@ export default function App() {
               zoom={zoom}
               game={createdGame}
               currentUserId={user?.id}
-              onCreateGame={() => void createGame()}
+              onCreateGame={() => {
+                if (user) setGameCreationOpen(true)
+                else void createGame()
+              }}
               fitAvailableHeight={!expanded}
             />
           </Box>
@@ -747,6 +759,14 @@ export default function App() {
           </Stack>
         )}
       </Container>
+      {pack && (
+        <GameCreationDialog
+          open={gameCreationOpen}
+          pack={pack}
+          onClose={() => setGameCreationOpen(false)}
+          onConfirm={(deckCollectionIds) => void createGame(deckCollectionIds)}
+        />
+      )}
       <AuthDialog
         open={authOpen}
         mode={authMode}

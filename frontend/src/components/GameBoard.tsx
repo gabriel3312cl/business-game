@@ -9,7 +9,9 @@ import type {
   GameEvent,
   GameState,
   TokenAppearanceSettings,
+  VisualEffectsIntensity,
 } from '../types'
+import type { PropertyEffectAction } from '../visualEffects'
 import {
   BoardTile,
   type BoardOwner,
@@ -46,11 +48,18 @@ interface GameBoardProps {
   onCommand?: (command: GameCommand) => Promise<boolean>
   heatmap?: BoardHeatmap | null
   actionEvents?: GameEvent[]
+  motionIntensity?: VisualEffectsIntensity
+  highlightedTileId?: string | null
+}
+
+interface TileEffect {
+  sequence: number
+  action: PropertyEffectAction | 'pulse'
 }
 
 interface TilePulseState {
   gameId: string | null
-  sequences: Map<string, number>
+  sequences: Map<string, TileEffect>
 }
 
 export function GameBoard({
@@ -71,6 +80,8 @@ export function GameBoard({
   onCommand,
   heatmap = null,
   actionEvents = [],
+  motionIntensity = 'full',
+  highlightedTileId = null,
 }: GameBoardProps) {
   const { t, i18n } = useTranslation()
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null)
@@ -85,6 +96,7 @@ export function GameBoard({
     onMotionSettled,
     onTokenStep,
     onTokenTeleport,
+    motionIntensity,
   )
   const tokensByPosition = new Map<number, BoardToken[]>()
   const ownersById = new Map<string, BoardOwner>()
@@ -98,6 +110,7 @@ export function GameBoard({
     }
     ownersById.set(player.user_id, {
       ...presentation,
+      appearance: customAppearance ?? undefined,
       ariaLabel: `${t('player')} ${index + 1}: ${player.display_name}`,
     })
     if (player.bankrupt) return
@@ -107,6 +120,11 @@ export function GameBoard({
       playerId: player.user_id,
       ...presentation,
       shape: customAppearance?.shape,
+      appearance: customAppearance ?? undefined,
+      emoji:
+        customAppearance?.icon === 'emoji'
+          ? customAppearance.emoji ?? undefined
+          : undefined,
       assetPath: customAppearance
         ? tokenAssetPath(customAppearance.icon)
         : useAssetTokens
@@ -171,14 +189,17 @@ export function GameBoard({
     )
     if (newEvents.length === 0 || gameId === null) return
 
-    const updates = new Map<string, number>()
+    const updates = new Map<string, TileEffect>()
     for (const event of newEvents) {
       for (const tileId of affectedTileIds(event, {
         tileIds,
         startTileId,
         tradePropertyIds,
       })) {
-        updates.set(tileId, event.sequence)
+        updates.set(tileId, {
+          sequence: event.sequence,
+          action: tileEffectAction(event),
+        })
       }
     }
     if (updates.size === 0) return
@@ -186,7 +207,7 @@ export function GameBoard({
     setTilePulses((current) => {
       const sequences =
         current.gameId === gameId ? new Map(current.sequences) : new Map()
-      for (const [tileId, sequence] of updates) sequences.set(tileId, sequence)
+      for (const [tileId, effect] of updates) sequences.set(tileId, effect)
       return { gameId, sequences }
     })
   }, [actionEvents, game?.id, startTileId, tileIds, tradePropertyIds])
@@ -194,6 +215,7 @@ export function GameBoard({
   return (
     <Box
       data-testid="game-board"
+      data-effect-anchor="bank"
       aria-busy={motionPending}
       sx={{
         display: 'grid',
@@ -218,7 +240,7 @@ export function GameBoard({
         const owner = ownersById.get(game?.owners[tile.id] ?? '')
         const buildingLevel = game?.building_levels[tile.id] ?? 0
         const mortgaged = game?.mortgaged_property_ids.includes(tile.id) ?? false
-        const actionPulseSequence =
+        const tileEffect =
           tilePulses.gameId === game?.id
             ? tilePulses.sequences.get(tile.id)
             : undefined
@@ -234,7 +256,7 @@ export function GameBoard({
           : undefined
         return (
           <BoardTile
-            key={`${tile.id}:${actionPulseSequence ?? 'idle'}`}
+            key={`${tile.id}:${tileEffect?.sequence ?? 'idle'}`}
             tile={tile}
             name={name}
             gridColumn={position.column}
@@ -246,7 +268,15 @@ export function GameBoard({
             buildingLabel={buildingLabel}
             mortgaged={mortgaged}
             mortgageLabel={t('mortgaged')}
-            actionPulse={actionPulseSequence !== undefined}
+            actionPulse={tileEffect !== undefined}
+            actionEffect={tileEffect?.action}
+            actionEffectLabel={
+              tileEffect && tileEffect.action !== 'pulse'
+                ? t(`visualEffects.property.${tileEffect.action}`)
+                : undefined
+            }
+            motionIntensity={motionIntensity}
+            highlighted={tile.id === highlightedTileId}
             tokens={tokensByPosition.get(index)}
             owner={owner}
             heatmap={tileHeatmap}
@@ -446,6 +476,28 @@ function latestEventSequence(events: GameEvent[]): number {
     (latest, event) => Math.max(latest, event.sequence),
     0,
   )
+}
+
+function tileEffectAction(
+  event: GameEvent,
+): PropertyEffectAction | 'pulse' {
+  switch (event.type) {
+    case 'property.purchased':
+      return 'purchased'
+    case 'property.mortgaged':
+      return 'mortgaged'
+    case 'property.unmortgaged':
+      return 'unmortgaged'
+    case 'building.purchased':
+      return 'built'
+    case 'building.sold':
+      return 'sold'
+    case 'trade.accepted':
+    case 'auction.completed':
+      return 'transferred'
+    default:
+      return 'pulse'
+  }
 }
 
 function boardTileHeatmap(

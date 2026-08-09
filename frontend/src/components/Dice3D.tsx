@@ -1,9 +1,11 @@
 import { Box, Stack } from '@mui/material'
+import type { VisualEffectsIntensity } from '../types'
 
 interface Dice3DProps {
   values: readonly [number, number] | null
   rollSequence: number | null
   dieLabel: string
+  motionIntensity?: VisualEffectsIntensity
 }
 
 const faceTransforms: Record<number, string> = {
@@ -37,6 +39,7 @@ export function Dice3D({
   values,
   rollSequence,
   dieLabel,
+  motionIntensity = 'full',
 }: Dice3DProps) {
   const displayedValues = values ?? ([1, 1] as const)
   const decorative = values === null
@@ -53,6 +56,7 @@ export function Dice3D({
           value={value}
           index={index}
           decorative={decorative}
+          motionIntensity={motionIntensity}
           label={`${dieLabel} ${index + 1}: ${value}`}
         />
       ))}
@@ -65,9 +69,10 @@ interface DieProps {
   index: number
   decorative: boolean
   label: string
+  motionIntensity: VisualEffectsIntensity
 }
 
-function Die({ value, index, decorative, label }: DieProps) {
+function Die({ value, index, decorative, label, motionIntensity }: DieProps) {
   const boundedValue = Math.max(1, Math.min(6, Math.trunc(value)))
   const restingTransform = restingTransforms[boundedValue]
 
@@ -96,9 +101,11 @@ function Die({ value, index, decorative, label }: DieProps) {
           height: '100%',
           transformStyle: 'preserve-3d',
           transform: restingTransform,
-          animation: decorative
+          animation: decorative || motionIntensity === 'off'
             ? 'none'
-            : 'dice-tumble 780ms cubic-bezier(.22,.72,.24,1) both',
+            : motionIntensity === 'soft'
+              ? 'dice-soft 360ms ease-out both'
+              : 'dice-tumble 780ms cubic-bezier(.22,.72,.24,1) both',
           animationDelay: decorative ? '0ms' : `${index * 70}ms`,
           '@keyframes dice-tumble': {
             '0%': {
@@ -120,6 +127,11 @@ function Die({ value, index, decorative, label }: DieProps) {
             '100%': {
               transform: 'var(--die-rest-transform)',
             },
+          },
+          '@keyframes dice-soft': {
+            '0%': { opacity: 0.45, transform: 'var(--die-rest-transform) scale(.88)' },
+            '65%': { opacity: 1, transform: 'var(--die-rest-transform) scale(1.06)' },
+            '100%': { opacity: 1, transform: 'var(--die-rest-transform)' },
           },
           '@media (prefers-reduced-motion: reduce)': {
             animation: 'none',

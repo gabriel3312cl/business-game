@@ -245,7 +245,12 @@ async def create_game(
     current_user: Annotated[User, Depends(get_current_user)],
     games: Annotated[GameService, Depends(get_game_service)],
 ) -> GameStateView:
-    game = await games.create(data.pack_id, current_user, data.version)
+    game = await games.create(
+        data.pack_id,
+        current_user,
+        data.version,
+        data.deck_collection_ids,
+    )
     return game_state_view(game, current_user.id)
 
 

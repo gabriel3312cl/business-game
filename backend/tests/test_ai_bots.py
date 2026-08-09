@@ -26,6 +26,7 @@ from business_game.domain.models import (
     GameStatus,
     PlayerState,
     ProposeTradeCommand,
+    SetPropertyTradeAvailabilityCommand,
     TurnPhase,
 )
 
@@ -177,6 +178,39 @@ def test_ai_bot_can_choose_between_real_deals(packs_dir: Path) -> None:
     assert all(proposal.estimate is not None for proposal in proposals)
     assert any("balance_estimate" in option for option in context["options"])
     assert len(json.dumps(context, ensure_ascii=False)) < 9_000
+
+
+def test_ai_bot_does_not_ask_for_trade_unavailable_property(packs_dir: Path) -> None:
+    game, pack, fallback = trade_ready_game(packs_dir)
+    game.trade_unavailable_property_ids = ["property_19"]
+
+    choices = build_ai_bot_choices(game, pack, fallback)
+
+    assert all(
+        "property_19" not in choice.command.requested_property_ids
+        for choice in choices
+        if isinstance(choice.command, ProposeTradeCommand)
+    )
+
+
+def test_ai_bot_keeps_server_property_availability_management(packs_dir: Path) -> None:
+    game, pack, _ = trade_ready_game(packs_dir)
+    game.trade_unavailable_property_ids = ["property_29"]
+    command = SetPropertyTradeAvailabilityCommand(
+        action="set_property_trade_availability",
+        property_id="property_29",
+        available=True,
+    )
+    fallback = BotAction(
+        actor_id=game.players[0].user_id,
+        command=command,
+        reason="enable_spare_for_trade",
+    )
+
+    choices = build_ai_bot_choices(game, pack, fallback)
+
+    assert [choice.command for choice in choices] == [command]
+    assert choices[0].description.startswith("Habilitar")
 
 
 def test_ai_bot_can_keep_a_server_generated_group_round(packs_dir: Path) -> None:

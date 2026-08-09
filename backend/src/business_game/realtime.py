@@ -32,7 +32,10 @@ from business_game.domain.chat_models import ChatMessage, ChatMessageCreate
 from business_game.domain.errors import DomainError, UnauthorizedError
 from business_game.domain.models import (
     BotController,
+    ChooseCardCommand,
     ContentPack,
+    ContinueCardChoiceResultCommand,
+    ContinueCardCommand,
     GameCommandRequest,
     GameState,
     GameStatus,
@@ -53,6 +56,9 @@ logger = logging.getLogger(__name__)
 auction_timer_tasks: dict[UUID, tuple[datetime, asyncio.Task[None]]] = {}
 bot_runner_tasks: dict[UUID, asyncio.Task[None]] = {}
 BOT_ACTION_DELAY_SECONDS = 0.8
+BOT_CARD_SELECTION_SECONDS = 2.0
+BOT_CARD_DISPLAY_SECONDS = 3.0
+BOT_CARD_CHOICE_RESULT_SECONDS = 3.0
 BOT_ACTIONS_PER_YIELD = 48
 BOT_MAX_REPEATED_FAILURES = 3
 AI_BOT_DECISION_DEADLINE_SECONDS = 9.0
@@ -675,7 +681,74 @@ async def _run_bot_runner(game_id: UUID) -> None:
                 (player for player in game.players if player.user_id == action.actor_id),
                 None,
             )
-            if actor is not None and actor.bot_controller is BotController.AI:
+            if isinstance(
+                action.command,
+                (
+                    ChooseCardCommand,
+                    ContinueCardCommand,
+                    ContinueCardChoiceResultCommand,
+                ),
+            ):
+                pending_draw = game.pending_card_draw
+                pending_result = game.pending_card_choice_result
+                if isinstance(action.command, ChooseCardCommand):
+                    event_sequence = (
+                        pending_draw.draw_sequence if pending_draw is not None else None
+                    )
+                    target_delay = BOT_CARD_SELECTION_SECONDS
+                elif isinstance(action.command, ContinueCardCommand):
+                    event_sequence = (
+                        pending_draw.reveal_sequence if pending_draw is not None else None
+                    )
+                    target_delay = BOT_CARD_DISPLAY_SECONDS
+                else:
+                    event_sequence = (
+                        pending_result.resolved_sequence
+                        if pending_result is not None
+                        else None
+                    )
+                    target_delay = BOT_CARD_CHOICE_RESULT_SECONDS
+                draw_event = next(
+                    (
+                        event
+                        for event in reversed(game.events)
+                        if event.sequence == event_sequence
+                    ),
+                    None,
+                )
+                elapsed = (
+                    (datetime.now(UTC) - draw_event.occurred_at).total_seconds()
+                    if draw_event is not None
+                    else 0
+                )
+                remaining = max(0.0, target_delay - elapsed)
+                if remaining:
+                    await asyncio.sleep(remaining)
+                async with session_factory() as session:
+                    game = await GameRepository(session).get(game_id)
+                pack = game.pack_snapshot or pack_loader.load(
+                    game.pack_id,
+                    version=game.pack_version,
+                )
+                action = policy.choose_action(game, pack)
+                if action is None:
+                    return
+                actor = next(
+                    (
+                        player
+                        for player in game.players
+                        if player.user_id == action.actor_id
+                    ),
+                    None,
+                )
+            if (
+                actor is not None
+                and actor.bot_controller is BotController.AI
+                and not isinstance(
+                    action.command,
+                    (ChooseCardCommand, ContinueCardCommand),
+                )
+            ):
                 baseline_action = action
                 decision_timeout = _ai_bot_decision_timeout(game)
                 if decision_timeout <= 0:

@@ -93,16 +93,21 @@ export function GameTradePanel({
   const canTrade = game.players.some(
     (player) => player.user_id === user.id && !player.bankrupt,
   )
+  const tradeUnavailablePropertyIds = game.trade_unavailable_property_ids
   const ownPropertyIds = Object.entries(game.owners)
     .filter(
       ([propertyId, ownerId]) =>
-        ownerId === user.id && (game.building_levels[propertyId] ?? 0) === 0,
+        ownerId === user.id &&
+        (game.building_levels[propertyId] ?? 0) === 0 &&
+        !tradeUnavailablePropertyIds.includes(propertyId),
     )
     .map(([propertyId]) => propertyId)
   const recipientPropertyIds = Object.entries(game.owners)
     .filter(
       ([propertyId, ownerId]) =>
-        ownerId === recipientId && (game.building_levels[propertyId] ?? 0) === 0,
+        ownerId === recipientId &&
+        (game.building_levels[propertyId] ?? 0) === 0 &&
+        !tradeUnavailablePropertyIds.includes(propertyId),
     )
     .map(([propertyId]) => propertyId)
   const pendingTrades = game.trades.filter(
@@ -111,6 +116,14 @@ export function GameTradePanel({
       (trade.proposer_id === user.id || trade.recipient_id === user.id),
   )
   const detailTrade = pendingTrades.find((trade) => trade.id === detailTradeId)
+  useEffect(() => {
+    setOfferedPropertyIds((current) =>
+      current.filter((propertyId) => !tradeUnavailablePropertyIds.includes(propertyId)),
+    )
+    setRequestedPropertyIds((current) =>
+      current.filter((propertyId) => !tradeUnavailablePropertyIds.includes(propertyId)),
+    )
+  }, [tradeUnavailablePropertyIds])
   useEffect(() => {
     setSystemAnalysis(null)
     setSystemAnalysisError(false)
@@ -210,8 +223,16 @@ export function GameTradePanel({
     setRecipientId(trade.proposer_id)
     setOfferedCash(trade.requested_cash)
     setRequestedCash(trade.offered_cash)
-    setOfferedPropertyIds([...trade.requested_property_ids])
-    setRequestedPropertyIds([...trade.offered_property_ids])
+    setOfferedPropertyIds(
+      trade.requested_property_ids.filter(
+        (propertyId) => !tradeUnavailablePropertyIds.includes(propertyId),
+      ),
+    )
+    setRequestedPropertyIds(
+      trade.offered_property_ids.filter(
+        (propertyId) => !tradeUnavailablePropertyIds.includes(propertyId),
+      ),
+    )
     setDetailTradeId(null)
     setOpen(true)
   }

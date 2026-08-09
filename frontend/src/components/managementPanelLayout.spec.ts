@@ -9,7 +9,7 @@ import {
 describe('management panel layout', () => {
   it('defaults legacy preferences to properties only', () => {
     expect(normalizeManagementPanelLayout()).toEqual({
-      order: ['properties', 'trades', 'bank', 'market'],
+      order: ['properties', 'trades', 'debts', 'bank', 'market'],
       visible: ['properties'],
       heights: {},
     })
@@ -26,11 +26,11 @@ describe('management panel layout', () => {
   it('reorders a selected panel before its drop target', () => {
     expect(
       moveManagementPanel(
-        ['properties', 'trades', 'bank', 'market'],
+        ['properties', 'trades', 'debts', 'bank', 'market'],
         'bank',
         'properties',
       ),
-    ).toEqual(['bank', 'properties', 'trades', 'market'])
+    ).toEqual(['bank', 'properties', 'trades', 'debts', 'market'])
   })
 
   it('redistributes only the visible panel heights', () => {

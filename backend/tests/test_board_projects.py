@@ -20,6 +20,8 @@ from business_game.domain.board_models import (
 )
 from business_game.domain.models import (
     BuildPropertyCommand,
+    ChooseCardCommand,
+    ContinueCardCommand,
     RollCommand,
     SellBuildingCommand,
     UserCreate,
@@ -646,6 +648,16 @@ async def test_custom_card_executes_all_safe_chained_effects(
     )
 
     game = await games.execute(game_id, owner_id, RollCommand(action="roll"))
+    game = await games.execute(
+        game_id,
+        owner_id,
+        ChooseCardCommand(action="choose_card", card_index=0),
+    )
+    game = await games.execute(
+        game_id,
+        owner_id,
+        ContinueCardCommand(action="continue_card"),
+    )
 
     assert game.current_player is not None
     assert game.current_player.position == 6
@@ -679,6 +691,16 @@ async def test_movement_destination_can_draw_and_resolve_another_card_tile(
     )
 
     game = await games.execute(game_id, owner_id, RollCommand(action="roll"))
+    game = await games.execute(
+        game_id,
+        owner_id,
+        ChooseCardCommand(action="choose_card", card_index=0),
+    )
+    game = await games.execute(
+        game_id,
+        owner_id,
+        ContinueCardCommand(action="continue_card"),
+    )
 
     assert game.current_player is not None
     assert game.current_player.position == 6

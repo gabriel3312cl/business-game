@@ -14,6 +14,7 @@
       "id": "start_00",
       "kind": "start",
       "name_key": "tile.00.name",
+      "card_tags": ["start"],
       "color": "#b8ff3d",
       "icon_background": "none",
       "asset_path": "/assets/monopoly-classic/svg/salida.svg"
@@ -64,6 +65,7 @@
       "id": "transport_05",
       "kind": "transport",
       "name_key": "tile.05.name",
+      "card_tags": ["reading_railroad"],
       "price": 200,
       "base_rent": 25,
       "mortgage_value": 100,
@@ -129,6 +131,7 @@
       "id": "property_11",
       "kind": "property",
       "name_key": "tile.11.name",
+      "card_tags": ["st_charles_place"],
       "group": "pink",
       "color": "#d93a96",
       "price": 140,
@@ -275,6 +278,7 @@
       "id": "property_24",
       "kind": "property",
       "name_key": "tile.24.name",
+      "card_tags": ["illinois_avenue"],
       "group": "red",
       "color": "#ed1b24",
       "price": 240,
@@ -442,6 +446,7 @@
       "id": "property_39",
       "kind": "property",
       "name_key": "tile.39.name",
+      "card_tags": ["boardwalk"],
       "group": "dark_blue",
       "color": "#0072bb",
       "price": 400,
@@ -456,13 +461,13 @@
       "id": "opportunity",
       "name_key": "deck.opportunity.name",
       "cards": [
-        { "id": "opportunity_start", "message_key": "card.opportunity_start", "effect": { "type": "move_to", "tile_id": "start_00", "collect_start": true } },
-        { "id": "opportunity_illinois", "message_key": "card.opportunity_illinois", "effect": { "type": "move_to", "tile_id": "property_24", "collect_start": true } },
-        { "id": "opportunity_st_charles", "message_key": "card.opportunity_st_charles", "effect": { "type": "move_to", "tile_id": "property_11", "collect_start": true } },
+        { "id": "opportunity_start", "message_key": "card.opportunity_start", "effect": { "type": "move_to", "tile_tag": "start", "collect_start": true } },
+        { "id": "opportunity_illinois", "message_key": "card.opportunity_illinois", "effect": { "type": "move_to", "tile_tag": "illinois_avenue", "collect_start": true } },
+        { "id": "opportunity_st_charles", "message_key": "card.opportunity_st_charles", "effect": { "type": "move_to", "tile_tag": "st_charles_place", "collect_start": true } },
         { "id": "opportunity_nearest_utility", "message_key": "card.opportunity_nearest_utility", "effect": { "type": "move_to_nearest", "tile_kind": "utility", "collect_start": true, "dice_multiplier": 10 } },
         { "id": "opportunity_nearest_transport", "message_key": "card.opportunity_nearest_transport", "effect": { "type": "move_to_nearest", "tile_kind": "transport", "collect_start": true, "rent_multiplier": 2 } },
         { "id": "opportunity_nearest_transport_2", "message_key": "card.opportunity_nearest_transport", "effect": { "type": "move_to_nearest", "tile_kind": "transport", "collect_start": true, "rent_multiplier": 2 } },
-        { "id": "opportunity_reading", "message_key": "card.opportunity_reading", "effect": { "type": "move_to", "tile_id": "transport_05", "collect_start": true } },
+        { "id": "opportunity_reading", "message_key": "card.opportunity_reading", "effect": { "type": "move_to", "tile_tag": "reading_railroad", "collect_start": true } },
         { "id": "opportunity_back", "message_key": "card.opportunity_back", "effect": { "type": "move_relative", "steps": -3 } },
         { "id": "opportunity_jail", "message_key": "card.opportunity_jail", "effect": { "type": "go_to_jail" } },
         { "id": "opportunity_jail_free", "message_key": "card.opportunity_jail_free", "effect": { "type": "get_out_of_jail" } },
@@ -471,14 +476,108 @@
         { "id": "opportunity_chairman", "message_key": "card.opportunity_chairman", "effect": { "type": "cash_each", "amount": -50 } },
         { "id": "opportunity_building_loan", "message_key": "card.opportunity_building_loan", "effect": { "type": "cash", "amount": 150 } },
         { "id": "opportunity_crossword", "message_key": "card.opportunity_crossword", "effect": { "type": "cash", "amount": 100 } },
-        { "id": "opportunity_nearest_transport_3", "message_key": "card.opportunity_nearest_transport", "effect": { "type": "move_to_nearest", "tile_kind": "transport", "collect_start": true, "rent_multiplier": 2 } }
-      ]
+        { "id": "opportunity_boardwalk", "message_key": "card.opportunity_boardwalk", "effect": { "type": "move_to", "tile_tag": "boardwalk", "collect_start": false } },
+        { "id": "opportunity_pay_or_draw", "message_key": "card.opportunity_pay_or_draw", "effect": { "type": "cash", "amount": -10 } },
+        { "id": "opportunity_rate_adjustment", "message_key": "card.opportunity_rate_adjustment", "effect": { "type": "complete_groups_cash", "threshold": 3, "amount_if_at_least": -300, "amount_otherwise": 100 } },
+        { "id": "opportunity_advance_five", "message_key": "card.opportunity_advance_five", "effect": { "type": "move_relative", "steps": 5, "collect_start": true, "purchase_discount_percent": 10 } },
+        { "id": "opportunity_fate_market_windfall", "message_key": "card.opportunity_fate_market_windfall", "effect": { "type": "salary_cash", "salary_percent": 200 } },
+        { "id": "opportunity_fate_hostile_audit", "message_key": "card.opportunity_fate_hostile_audit", "effect": { "type": "salary_cash", "salary_percent": -150 } },
+        { "id": "opportunity_fate_parity_protocol", "message_key": "card.opportunity_fate_parity_protocol", "effect": { "type": "equalize_cash", "target": "wealthiest" } },
+        { "id": "opportunity_fate_unlikely_alliance", "message_key": "card.opportunity_fate_unlikely_alliance", "effect": { "type": "equalize_cash", "target": "poorest" } },
+        { "id": "opportunity_fate_identity_exchange", "message_key": "card.opportunity_fate_identity_exchange", "effect": { "type": "swap_position", "target": "wealthiest" } },
+        { "id": "opportunity_fate_reverse_ambush", "message_key": "card.opportunity_fate_reverse_ambush", "effect": { "type": "all_players_move_relative", "steps": -3 } },
+        { "id": "opportunity_fate_collective_sprint", "message_key": "card.opportunity_fate_collective_sprint", "effect": { "type": "all_players_move_relative", "steps": 5, "collect_start": true } },
+        { "id": "opportunity_fate_leap_of_faith", "message_key": "card.opportunity_fate_leap_of_faith", "effect": { "type": "move_relative", "steps": 12, "collect_start": true, "purchase_discount_percent": 25 } },
+        { "id": "opportunity_fate_second_chance", "message_key": "card.opportunity_fate_second_chance", "effects": [{ "type": "salary_cash", "salary_percent": 50 }, { "type": "move_relative", "steps": -4 }] },
+        { "id": "opportunity_fate_power_vacuum", "message_key": "card.opportunity_fate_power_vacuum", "effect": { "type": "cash_each", "amount": -50 } },
+        { "id": "opportunity_fate_consolidation", "message_key": "card.opportunity_fate_consolidation", "effect": { "type": "complete_groups_cash", "threshold": 2, "amount_if_at_least": 200, "amount_otherwise": -100 } },
+        { "id": "opportunity_fate_property_boom", "message_key": "card.opportunity_fate_property_boom", "effect": { "type": "owned_properties_cash", "amount_per_property": 30 } },
+        { "id": "opportunity_fate_debt_reset", "message_key": "card.opportunity_fate_debt_reset", "effect": { "type": "refinance_mortgage" } },
+        { "id": "opportunity_fate_emergency_pass", "message_key": "card.opportunity_fate_emergency_pass", "effects": [{ "type": "salary_cash", "salary_percent": 100 }, { "type": "get_out_of_jail" }] },
+        { "id": "opportunity_fate_new_cycle", "message_key": "card.opportunity_fate_new_cycle", "effect": { "type": "move_to", "tile_tag": "start", "collect_start": true } },
+        { "id": "opportunity_decision_bank_call", "message_key": "card.opportunity_decision_bank_call", "effect": { "type": "interactive_choice", "prompt_key": "decision.bank_call.prompt", "category": "scam", "choices": [
+          { "id": "hang_up", "label_key": "decision.bank_call.hang_up", "outcomes": [{ "weight": 100, "result_key": "decision.bank_call.hang_up.result", "effects": [] }] },
+          { "id": "share_code", "label_key": "decision.bank_call.share_code", "outcomes": [{ "weight": 80, "result_key": "decision.bank_call.share_code.scam", "effects": [{ "type": "salary_cash", "salary_percent": -100 }] }, { "weight": 20, "result_key": "decision.bank_call.share_code.safe", "effects": [{ "type": "salary_cash", "salary_percent": 50 }] }] },
+          { "id": "report", "label_key": "decision.bank_call.report", "outcomes": [{ "weight": 100, "result_key": "decision.bank_call.report.result", "effects": [{ "type": "salary_cash", "salary_percent": 25 }] }] }
+        ] } },
+        { "id": "opportunity_decision_lottery", "message_key": "card.opportunity_decision_lottery", "effect": { "type": "interactive_choice", "prompt_key": "decision.lottery.prompt", "category": "lottery", "choices": [
+          { "id": "skip", "label_key": "decision.lottery.skip", "outcomes": [{ "weight": 100, "result_key": "decision.lottery.skip.result", "effects": [] }] },
+          { "id": "one_ticket", "label_key": "decision.lottery.one_ticket", "outcomes": [{ "weight": 70, "result_key": "decision.lottery.loss", "effects": [{ "type": "salary_cash", "salary_percent": -25 }] }, { "weight": 25, "result_key": "decision.lottery.prize", "effects": [{ "type": "salary_cash", "salary_percent": 75 }] }, { "weight": 5, "result_key": "decision.lottery.jackpot", "effects": [{ "type": "salary_cash", "salary_percent": 300 }] }] },
+          { "id": "ticket_bundle", "label_key": "decision.lottery.ticket_bundle", "outcomes": [{ "weight": 75, "result_key": "decision.lottery.bundle_loss", "effects": [{ "type": "salary_cash", "salary_percent": -75 }] }, { "weight": 20, "result_key": "decision.lottery.bundle_prize", "effects": [{ "type": "salary_cash", "salary_percent": 150 }] }, { "weight": 5, "result_key": "decision.lottery.super_jackpot", "effects": [{ "type": "salary_cash", "salary_percent": 500 }] }] }
+        ] } },
+        { "id": "opportunity_decision_boss_call", "message_key": "card.opportunity_decision_boss_call", "effect": { "type": "interactive_choice", "prompt_key": "decision.boss_call.prompt", "category": "employment", "choices": [
+          { "id": "solve_calmly", "label_key": "decision.boss_call.solve_calmly", "outcomes": [{ "weight": 100, "result_key": "decision.boss_call.solve_calmly.result", "effects": [{ "type": "salary_cash", "salary_percent": 50 }] }] },
+          { "id": "demand_bonus", "label_key": "decision.boss_call.demand_bonus", "outcomes": [{ "weight": 55, "result_key": "decision.boss_call.bonus_won", "effects": [{ "type": "salary_cash", "salary_percent": 150 }] }, { "weight": 45, "result_key": "decision.boss_call.bonus_lost", "effects": [{ "type": "salary_cash", "salary_percent": -50 }] }] },
+          { "id": "answer_badly", "label_key": "decision.boss_call.answer_badly", "outcomes": [{ "weight": 100, "result_key": "decision.boss_call.answer_badly.result", "effects": [{ "type": "salary_cash", "salary_percent": -100 }] }] }
+        ] } },
+        { "id": "opportunity_decision_millionaire_friend", "message_key": "card.opportunity_decision_millionaire_friend", "effect": { "type": "interactive_choice", "prompt_key": "decision.millionaire.prompt", "category": "contest", "choices": [
+          { "id": "pacific", "label_key": "decision.millionaire.pacific", "outcomes": [{ "weight": 100, "result_key": "decision.millionaire.correct", "effects": [{ "type": "salary_cash", "salary_percent": 125 }] }] },
+          { "id": "atlantic", "label_key": "decision.millionaire.atlantic", "outcomes": [{ "weight": 100, "result_key": "decision.millionaire.wrong", "effects": [{ "type": "salary_cash", "salary_percent": -25 }] }] },
+          { "id": "indian", "label_key": "decision.millionaire.indian", "outcomes": [{ "weight": 100, "result_key": "decision.millionaire.wrong", "effects": [{ "type": "salary_cash", "salary_percent": -25 }] }] }
+        ] } },
+        { "id": "opportunity_decision_startup", "message_key": "card.opportunity_decision_startup", "effect": { "type": "interactive_choice", "prompt_key": "decision.startup.prompt", "category": "mystery", "choices": [
+          { "id": "decline", "label_key": "decision.startup.decline", "outcomes": [{ "weight": 100, "result_key": "decision.startup.decline.result", "effects": [] }] },
+          { "id": "small_investment", "label_key": "decision.startup.small", "outcomes": [{ "weight": 55, "result_key": "decision.startup.small_loss", "effects": [{ "type": "salary_cash", "salary_percent": -50 }] }, { "weight": 45, "result_key": "decision.startup.small_win", "effects": [{ "type": "salary_cash", "salary_percent": 125 }] }] },
+          { "id": "all_in", "label_key": "decision.startup.all_in", "outcomes": [{ "weight": 70, "result_key": "decision.startup.all_in_loss", "effects": [{ "type": "salary_cash", "salary_percent": -150 }] }, { "weight": 30, "result_key": "decision.startup.all_in_win", "effects": [{ "type": "salary_cash", "salary_percent": 400 }] }] }
+        ] } },
+        { "id": "opportunity_decision_recruiter", "message_key": "card.opportunity_decision_recruiter", "effect": { "type": "interactive_choice", "prompt_key": "decision.recruiter.prompt", "category": "employment", "choices": [
+          { "id": "accept", "label_key": "decision.recruiter.accept", "outcomes": [{ "weight": 100, "result_key": "decision.recruiter.accept.result", "effects": [{ "type": "salary_cash", "salary_percent": 75 }] }] },
+          { "id": "negotiate", "label_key": "decision.recruiter.negotiate", "outcomes": [{ "weight": 60, "result_key": "decision.recruiter.negotiate.win", "effects": [{ "type": "salary_cash", "salary_percent": 175 }] }, { "weight": 40, "result_key": "decision.recruiter.negotiate.loss", "effects": [] }] },
+          { "id": "reject", "label_key": "decision.recruiter.reject", "outcomes": [{ "weight": 100, "result_key": "decision.recruiter.reject.result", "effects": [] }] }
+        ] } }
+      ],
+      "collections": [
+        {
+          "id": "classic",
+          "name_key": "collection.classic.name",
+          "card_ids": [
+            "opportunity_start", "opportunity_illinois", "opportunity_st_charles",
+            "opportunity_nearest_utility", "opportunity_nearest_transport",
+            "opportunity_nearest_transport_2", "opportunity_reading", "opportunity_back",
+            "opportunity_jail", "opportunity_jail_free", "opportunity_repairs",
+            "opportunity_speeding", "opportunity_chairman", "opportunity_building_loan",
+            "opportunity_crossword", "opportunity_boardwalk"
+          ]
+        },
+        {
+          "id": "finance",
+          "name_key": "collection.finance.name",
+          "card_ids": [
+            "opportunity_pay_or_draw", "opportunity_rate_adjustment",
+            "opportunity_advance_five"
+          ]
+        },
+        {
+          "id": "fate",
+          "name_key": "collection.fate.name",
+          "card_ids": [
+            "opportunity_fate_market_windfall", "opportunity_fate_hostile_audit",
+            "opportunity_fate_parity_protocol", "opportunity_fate_unlikely_alliance",
+            "opportunity_fate_identity_exchange", "opportunity_fate_reverse_ambush",
+            "opportunity_fate_collective_sprint", "opportunity_fate_leap_of_faith",
+            "opportunity_fate_second_chance", "opportunity_fate_power_vacuum",
+            "opportunity_fate_consolidation", "opportunity_fate_property_boom",
+            "opportunity_fate_debt_reset", "opportunity_fate_emergency_pass",
+            "opportunity_fate_new_cycle"
+          ]
+        },
+        {
+          "id": "decisions",
+          "name_key": "collection.decisions.name",
+          "card_ids": [
+            "opportunity_decision_bank_call", "opportunity_decision_lottery",
+            "opportunity_decision_boss_call", "opportunity_decision_millionaire_friend",
+            "opportunity_decision_startup", "opportunity_decision_recruiter"
+          ]
+        }
+      ],
+      "default_collection_ids": ["classic"]
     },
     {
       "id": "community",
       "name_key": "deck.community.name",
       "cards": [
-        { "id": "community_start", "message_key": "card.community_start", "effect": { "type": "move_to", "tile_id": "start_00", "collect_start": true } },
+        { "id": "community_start", "message_key": "card.community_start", "effect": { "type": "move_to", "tile_tag": "start", "collect_start": true } },
         { "id": "community_bank_error", "message_key": "card.community_bank_error", "effect": { "type": "cash", "amount": 200 } },
         { "id": "community_doctor", "message_key": "card.community_doctor", "effect": { "type": "cash", "amount": -50 } },
         { "id": "community_stock", "message_key": "card.community_stock", "effect": { "type": "cash", "amount": 50 } },
@@ -493,8 +592,101 @@
         { "id": "community_consulting", "message_key": "card.community_consulting", "effect": { "type": "cash", "amount": 25 } },
         { "id": "community_repairs", "message_key": "card.community_repairs", "effect": { "type": "repairs", "house_amount": 40, "hotel_amount": 115 } },
         { "id": "community_beauty", "message_key": "card.community_beauty", "effect": { "type": "cash", "amount": 10 } },
-        { "id": "community_inheritance", "message_key": "card.community_inheritance", "effect": { "type": "cash", "amount": 100 } }
-      ]
+        { "id": "community_inheritance", "message_key": "card.community_inheritance", "effect": { "type": "cash", "amount": 100 } },
+        { "id": "community_pension", "message_key": "card.community_pension", "effect": { "type": "cash", "amount": 250 } },
+        { "id": "community_audit", "message_key": "card.community_audit", "effect": { "type": "owned_properties_cash", "amount_per_property": -25 } },
+        { "id": "community_renewal_subsidy", "message_key": "card.community_renewal_subsidy", "effect": { "type": "mortgaged_properties_cash", "amount_per_property": 50 } },
+        { "id": "community_refinance", "message_key": "card.community_refinance", "effect": { "type": "refinance_mortgage" } },
+        { "id": "community_fate_civic_dividend", "message_key": "card.community_fate_civic_dividend", "effect": { "type": "salary_cash", "salary_percent": 150 } },
+        { "id": "community_fate_emergency_levy", "message_key": "card.community_fate_emergency_levy", "effect": { "type": "salary_cash", "salary_percent": -100 } },
+        { "id": "community_fate_common_ground", "message_key": "card.community_fate_common_ground", "effect": { "type": "equalize_cash", "target": "wealthiest" } },
+        { "id": "community_fate_solidarity_pact", "message_key": "card.community_fate_solidarity_pact", "effect": { "type": "equalize_cash", "target": "poorest" } },
+        { "id": "community_fate_seat_exchange", "message_key": "card.community_fate_seat_exchange", "effect": { "type": "swap_position", "target": "poorest" } },
+        { "id": "community_fate_mass_migration", "message_key": "card.community_fate_mass_migration", "effect": { "type": "all_players_move_relative", "steps": 3, "collect_start": true } },
+        { "id": "community_fate_city_retreat", "message_key": "card.community_fate_city_retreat", "effect": { "type": "all_players_move_relative", "steps": -2 } },
+        { "id": "community_fate_neighborhood_fund", "message_key": "card.community_fate_neighborhood_fund", "effect": { "type": "cash_each", "amount": 25 } },
+        { "id": "community_fate_rescue_program", "message_key": "card.community_fate_rescue_program", "effect": { "type": "mortgaged_properties_cash", "amount_per_property": 75 } },
+        { "id": "community_fate_public_works", "message_key": "card.community_fate_public_works", "effect": { "type": "repairs", "house_amount": 20, "hotel_amount": 60 } },
+        { "id": "community_fate_portfolio_levy", "message_key": "card.community_fate_portfolio_levy", "effect": { "type": "owned_properties_cash", "amount_per_property": -20 } },
+        { "id": "community_fate_second_wind", "message_key": "card.community_fate_second_wind", "effect": { "type": "move_relative", "steps": 7, "collect_start": true, "purchase_discount_percent": 15 } },
+        { "id": "community_fate_prison_reform", "message_key": "card.community_fate_prison_reform", "effect": { "type": "get_out_of_jail" } },
+        { "id": "community_fate_shared_burden", "message_key": "card.community_fate_shared_burden", "effect": { "type": "cash_each", "amount": -25 } },
+        { "id": "community_fate_fresh_start", "message_key": "card.community_fate_fresh_start", "effects": [{ "type": "salary_cash", "salary_percent": 50 }, { "type": "move_to", "tile_tag": "start", "collect_start": false }] },
+        { "id": "community_decision_package_link", "message_key": "card.community_decision_package_link", "effect": { "type": "interactive_choice", "prompt_key": "decision.package.prompt", "category": "scam", "choices": [
+          { "id": "ignore", "label_key": "decision.package.ignore", "outcomes": [{ "weight": 100, "result_key": "decision.package.ignore.result", "effects": [] }] },
+          { "id": "open_link", "label_key": "decision.package.open_link", "outcomes": [{ "weight": 85, "result_key": "decision.package.scam", "effects": [{ "type": "salary_cash", "salary_percent": -100 }] }, { "weight": 15, "result_key": "decision.package.real", "effects": [{ "type": "salary_cash", "salary_percent": 100 }] }] },
+          { "id": "verify", "label_key": "decision.package.verify", "outcomes": [{ "weight": 100, "result_key": "decision.package.verify.result", "effects": [{ "type": "salary_cash", "salary_percent": 25 }] }] }
+        ] } },
+        { "id": "community_decision_raffle", "message_key": "card.community_decision_raffle", "effect": { "type": "interactive_choice", "prompt_key": "decision.raffle.prompt", "category": "lottery", "choices": [
+          { "id": "skip", "label_key": "decision.raffle.skip", "outcomes": [{ "weight": 100, "result_key": "decision.raffle.skip.result", "effects": [] }] },
+          { "id": "buy_one", "label_key": "decision.raffle.buy_one", "outcomes": [{ "weight": 65, "result_key": "decision.raffle.loss", "effects": [{ "type": "salary_cash", "salary_percent": -20 }] }, { "weight": 35, "result_key": "decision.raffle.win", "effects": [{ "type": "salary_cash", "salary_percent": 100 }] }] },
+          { "id": "buy_five", "label_key": "decision.raffle.buy_five", "outcomes": [{ "weight": 60, "result_key": "decision.raffle.big_loss", "effects": [{ "type": "salary_cash", "salary_percent": -75 }] }, { "weight": 35, "result_key": "decision.raffle.big_win", "effects": [{ "type": "salary_cash", "salary_percent": 175 }] }, { "weight": 5, "result_key": "decision.raffle.jackpot", "effects": [{ "type": "salary_cash", "salary_percent": 400 }] }] }
+        ] } },
+        { "id": "community_decision_weekend_boss", "message_key": "card.community_decision_weekend_boss", "effect": { "type": "interactive_choice", "prompt_key": "decision.weekend_boss.prompt", "category": "employment", "choices": [
+          { "id": "help", "label_key": "decision.weekend_boss.help", "outcomes": [{ "weight": 100, "result_key": "decision.weekend_boss.help.result", "effects": [{ "type": "salary_cash", "salary_percent": 50 }] }] },
+          { "id": "set_boundary", "label_key": "decision.weekend_boss.boundary", "outcomes": [{ "weight": 100, "result_key": "decision.weekend_boss.boundary.result", "effects": [] }] },
+          { "id": "lie", "label_key": "decision.weekend_boss.lie", "outcomes": [{ "weight": 60, "result_key": "decision.weekend_boss.lie.safe", "effects": [] }, { "weight": 40, "result_key": "decision.weekend_boss.lie.caught", "effects": [{ "type": "salary_cash", "salary_percent": -75 }] }] }
+        ] } },
+        { "id": "community_decision_talent_show", "message_key": "card.community_decision_talent_show", "effect": { "type": "interactive_choice", "prompt_key": "decision.talent.prompt", "category": "contest", "choices": [
+          { "id": "watch", "label_key": "decision.talent.watch", "outcomes": [{ "weight": 100, "result_key": "decision.talent.watch.result", "effects": [] }] },
+          { "id": "perform", "label_key": "decision.talent.perform", "outcomes": [{ "weight": 50, "result_key": "decision.talent.applause", "effects": [{ "type": "salary_cash", "salary_percent": 100 }] }, { "weight": 50, "result_key": "decision.talent.booed", "effects": [{ "type": "salary_cash", "salary_percent": -25 }] }] },
+          { "id": "improvise", "label_key": "decision.talent.improvise", "outcomes": [{ "weight": 30, "result_key": "decision.talent.viral", "effects": [{ "type": "salary_cash", "salary_percent": 250 }] }, { "weight": 70, "result_key": "decision.talent.disaster", "effects": [{ "type": "salary_cash", "salary_percent": -75 }] }] }
+        ] } },
+        { "id": "community_decision_lost_wallet", "message_key": "card.community_decision_lost_wallet", "effect": { "type": "interactive_choice", "prompt_key": "decision.wallet.prompt", "category": "social", "choices": [
+          { "id": "return", "label_key": "decision.wallet.return", "outcomes": [{ "weight": 100, "result_key": "decision.wallet.return.result", "effects": [{ "type": "salary_cash", "salary_percent": 50 }] }] },
+          { "id": "keep", "label_key": "decision.wallet.keep", "outcomes": [{ "weight": 55, "result_key": "decision.wallet.keep.safe", "effects": [{ "type": "salary_cash", "salary_percent": 75 }] }, { "weight": 45, "result_key": "decision.wallet.keep.caught", "effects": [{ "type": "salary_cash", "salary_percent": -150 }] }] },
+          { "id": "police", "label_key": "decision.wallet.police", "outcomes": [{ "weight": 100, "result_key": "decision.wallet.police.result", "effects": [{ "type": "salary_cash", "salary_percent": 25 }] }] }
+        ] } },
+        { "id": "community_decision_mystery_box", "message_key": "card.community_decision_mystery_box", "effect": { "type": "interactive_choice", "prompt_key": "decision.mystery_box.prompt", "category": "mystery", "choices": [
+          { "id": "leave", "label_key": "decision.mystery_box.leave", "outcomes": [{ "weight": 100, "result_key": "decision.mystery_box.leave.result", "effects": [] }] },
+          { "id": "open", "label_key": "decision.mystery_box.open", "outcomes": [{ "weight": 45, "result_key": "decision.mystery_box.cash", "effects": [{ "type": "salary_cash", "salary_percent": 125 }] }, { "weight": 35, "result_key": "decision.mystery_box.bill", "effects": [{ "type": "salary_cash", "salary_percent": -75 }] }, { "weight": 20, "result_key": "decision.mystery_box.pass", "effects": [{ "type": "get_out_of_jail" }] }] }
+        ] } }
+      ],
+      "collections": [
+        {
+          "id": "classic",
+          "name_key": "collection.classic.name",
+          "card_ids": [
+            "community_start", "community_bank_error", "community_doctor", "community_stock",
+            "community_jail_free", "community_jail", "community_opera",
+            "community_tax_refund", "community_collect_each", "community_life_insurance",
+            "community_hospital", "community_school", "community_consulting",
+            "community_repairs", "community_beauty", "community_inheritance"
+          ]
+        },
+        {
+          "id": "finance",
+          "name_key": "collection.finance.name",
+          "card_ids": [
+            "community_pension", "community_audit", "community_renewal_subsidy",
+            "community_refinance"
+          ]
+        },
+        {
+          "id": "fate",
+          "name_key": "collection.fate.name",
+          "card_ids": [
+            "community_fate_civic_dividend", "community_fate_emergency_levy",
+            "community_fate_common_ground", "community_fate_solidarity_pact",
+            "community_fate_seat_exchange", "community_fate_mass_migration",
+            "community_fate_city_retreat", "community_fate_neighborhood_fund",
+            "community_fate_rescue_program", "community_fate_public_works",
+            "community_fate_portfolio_levy", "community_fate_second_wind",
+            "community_fate_prison_reform", "community_fate_shared_burden",
+            "community_fate_fresh_start"
+          ]
+        },
+        {
+          "id": "decisions",
+          "name_key": "collection.decisions.name",
+          "card_ids": [
+            "community_decision_package_link", "community_decision_raffle",
+            "community_decision_weekend_boss", "community_decision_talent_show",
+            "community_decision_lost_wallet", "community_decision_mystery_box"
+          ]
+        }
+      ],
+      "default_collection_ids": ["classic"]
     }
   ]
 }

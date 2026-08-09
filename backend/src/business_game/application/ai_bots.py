@@ -17,7 +17,10 @@ from business_game.domain.models import (
     BuildGroupRoundCommand,
     BuyPropertyCommand,
     BuySharesCommand,
+    ChooseCardCommand,
     ContentPack,
+    ContinueCardChoiceResultCommand,
+    ContinueCardCommand,
     CounterTradeCommand,
     DeclinePropertyCommand,
     EndTurnCommand,
@@ -30,10 +33,12 @@ from business_game.domain.models import (
     RejectTradeCommand,
     RepayLoanCommand,
     RequestLoanCommand,
+    ResolveCardChoiceCommand,
     RollCommand,
     SelectAuctionPropertyCommand,
     SellGroupRoundCommand,
     SellSharesCommand,
+    SetPropertyTradeAvailabilityCommand,
     TileDefinition,
     TradeStatus,
     TurnPhase,
@@ -177,6 +182,29 @@ def build_ai_bot_choices(
             )
 
     add(fallback.command, _trade_estimate(engine, game, player, fallback.command))
+
+    if isinstance(
+        fallback.command,
+        (
+            ChooseCardCommand,
+            ContinueCardCommand,
+            ContinueCardChoiceResultCommand,
+        ),
+    ):
+        return choices
+
+    if isinstance(fallback.command, SetPropertyTradeAvailabilityCommand):
+        return choices
+
+    if game.pending_card_choice is not None:
+        for choice in game.pending_card_choice.effect.choices:
+            add(
+                ResolveCardChoiceCommand(
+                    action="resolve_card_choice",
+                    choice_id=choice.id,
+                )
+            )
+        return choices
 
     incoming_trade = next(
         (
@@ -498,6 +526,29 @@ def _describe_command(command: GameCommand, game: GameState, pack: ContentPack) 
         return "Lanzar los dados"
     if isinstance(command, EndTurnCommand):
         return "Finalizar el turno"
+    if isinstance(command, ContinueCardCommand):
+        return "Continuar después de leer la carta"
+    if isinstance(command, ContinueCardChoiceResultCommand):
+        return "Continuar después de revisar el resultado de la decisión"
+    if isinstance(command, ChooseCardCommand):
+        return f"Elegir la carta boca abajo {command.card_index + 1}"
+    if isinstance(command, SetPropertyTradeAvailabilityCommand):
+        property_name = _tile_name(pack, command.property_id)
+        return (
+            f"Habilitar {property_name} para intercambios"
+            if command.available
+            else f"Proteger {property_name} de intercambios"
+        )
+    if isinstance(command, ResolveCardChoiceCommand):
+        pending = game.pending_card_choice
+        if pending is not None:
+            choice = next(
+                (item for item in pending.effect.choices if item.id == command.choice_id),
+                None,
+            )
+            if choice is not None:
+                return pack.messages.get(choice.label_key, choice.id)
+        return "Resolver el evento de la carta"
     if isinstance(command, BuildGroupRoundCommand):
         return f"Construir una ronda en el grupo {command.group_id}"
     if isinstance(command, SellGroupRoundCommand):

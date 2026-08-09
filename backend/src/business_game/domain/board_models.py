@@ -14,6 +14,7 @@ from business_game.domain.models import (
     ContentPack,
     MoveRelativeCardEffect,
     MoveToCardEffect,
+    MoveToNearestAuctionCardEffect,
     MoveToNearestCardEffect,
     OptionalRules,
     PackManifest,
@@ -68,6 +69,9 @@ class EditablePackContent(BaseModel):
         tile_ids = [tile.id for tile in self.tiles]
         if len(tile_ids) != len(set(tile_ids)):
             raise ValueError("tile ids must be unique")
+        card_tags = [tag for tile in self.tiles for tag in tile.card_tags]
+        if len(card_tags) != len(set(card_tags)):
+            raise ValueError("card target tags must be unique")
         for required_kind in (TileKind.START, TileKind.JAIL, TileKind.GO_TO_JAIL):
             if sum(tile.kind is required_kind for tile in self.tiles) != 1:
                 raise ValueError(
@@ -118,6 +122,11 @@ class EditablePackContent(BaseModel):
             *(group.name_key for group in self.groups),
             *(tile.name_key for tile in self.tiles),
             *(deck.name_key for deck in self.decks if deck.name_key is not None),
+            *(
+                collection.name_key
+                for deck in self.decks
+                for collection in deck.collections
+            ),
             *(
                 card.message_key
                 for deck in self.decks
@@ -202,12 +211,20 @@ class EditablePackContent(BaseModel):
 
     def _validate_effect_references(self) -> None:
         known_tile_ids = {tile.id for tile in self.tiles}
+        known_card_tags = {tag for tile in self.tiles for tag in tile.card_tags}
         available_kinds = {tile.kind.value for tile in self.tiles}
         for source_id, effect in self._iter_effects():
-            if isinstance(effect, MoveToCardEffect) and effect.tile_id not in known_tile_ids:
-                raise ValueError(
-                    f"effect on '{source_id}' references unknown tile '{effect.tile_id}'"
-                )
+            if isinstance(effect, MoveToCardEffect):
+                if effect.tile_id is not None and effect.tile_id not in known_tile_ids:
+                    raise ValueError(
+                        f"effect on '{source_id}' references unknown tile "
+                        f"'{effect.tile_id}'"
+                    )
+                if effect.tile_tag is not None and effect.tile_tag not in known_card_tags:
+                    raise ValueError(
+                        f"effect on '{source_id}' references unknown card target tag "
+                        f"'{effect.tile_tag}'"
+                    )
             if (
                 isinstance(effect, MoveToNearestCardEffect)
                 and effect.tile_kind not in available_kinds
@@ -215,6 +232,12 @@ class EditablePackContent(BaseModel):
                 raise ValueError(
                     f"effect on '{source_id}' references unavailable tile kind "
                     f"'{effect.tile_kind}'"
+                )
+            if isinstance(effect, MoveToNearestAuctionCardEffect) and not any(
+                tile.auction_minimum_bid is not None for tile in self.tiles
+            ):
+                raise ValueError(
+                    f"effect on '{source_id}' requires an auction tile"
                 )
 
     def _validate_movement_cycles(self) -> None:
@@ -269,7 +292,13 @@ class EditablePackContent(BaseModel):
         source_position: int,
     ) -> str | None:
         if isinstance(effect, MoveToCardEffect):
-            return effect.tile_id
+            if effect.tile_id is not None:
+                return effect.tile_id
+            return next(
+                tile.id
+                for tile in self.tiles
+                if effect.tile_tag in tile.card_tags
+            )
         if isinstance(effect, MoveRelativeCardEffect):
             return self.tiles[
                 (source_position + effect.steps) % len(self.tiles)

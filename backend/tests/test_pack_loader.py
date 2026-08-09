@@ -36,7 +36,11 @@ def test_loads_classic_and_extended_topologies(packs_dir: Path) -> None:
         "community",
         "opportunity",
     }
-    assert all(len(deck.cards) == 16 for deck in classic.board.decks)
+    assert {deck.id: len(deck.cards) for deck in classic.board.decks} == {
+        "community": 41,
+        "opportunity": 40,
+    }
+    assert all(deck.default_collection_ids == ["classic"] for deck in classic.board.decks)
     assert classic.manifest.default_rules.auction_unpurchased_properties
     assert len(classic.manifest.configurable_rules) == 5
 
@@ -55,7 +59,13 @@ def test_loads_classic_and_extended_topologies(packs_dir: Path) -> None:
     assert sum(tile.kind.value == "utility" for tile in extended.board.tiles) == 4
     assert sum(tile.price or 0 for tile in extended.board.tiles) == 11_380
     assert sum(tile.auction_minimum_bid == 10 for tile in extended.board.tiles) == 2
-    assert all(len(deck.cards) == 20 for deck in extended.board.decks)
+    assert {deck.id: len(deck.cards) for deck in extended.board.decks} == {
+        "community": 41,
+        "opportunity": 41,
+    }
+    assert next(
+        deck for deck in extended.board.decks if deck.id == "opportunity"
+    ).default_collection_ids == ["classic", "finance", "auction"]
     assert extended.board.tiles[16].kind.value == "jail"
     assert extended.board.tiles[32].kind.value == "free"
     assert extended.board.tiles[48].kind.value == "go_to_jail"

@@ -155,6 +155,26 @@ def test_injected_text_does_not_reach_the_scripted_reply(pack: ContentPack) -> N
     assert select_addressed_bots(game, f"@Bot Negociador {INJECTION}") == [bot]
 
 
+def test_bot_does_not_ask_for_trade_unavailable_property(pack: ContentPack) -> None:
+    bot = make_bot(BotPersonality.NEGOTIATOR, name="Bot Negociador")
+    human = PlayerState(user_id=uuid4(), display_name="Gabriela Real", balance=2_000)
+    game = make_game(
+        pack,
+        [bot, human],
+        owners={
+            ORANGE[0]: bot.user_id,
+            ORANGE[1]: bot.user_id,
+            ORANGE[2]: human.user_id,
+        },
+    )
+
+    assert build_template_reply(game, pack, bot, human.user_id).key == "reply.wants_property"
+
+    game.trade_unavailable_property_ids = [ORANGE[2]]
+
+    assert build_template_reply(game, pack, bot, human.user_id).key == "reply.idle_negotiator"
+
+
 async def test_injected_message_keeps_the_ai_choice_within_server_options(
     pack: ContentPack,
 ) -> None:

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class ContentModel(BaseModel):
@@ -37,8 +45,18 @@ class CashCardEffect(ContentModel):
 
 class MoveToCardEffect(ContentModel):
     type: Literal["move_to"]
-    tile_id: str
+    tile_id: str | None = None
+    tile_tag: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9][a-z0-9_-]*$",
+    )
     collect_start: bool = True
+
+    @model_validator(mode="after")
+    def validate_target(self) -> MoveToCardEffect:
+        if (self.tile_id is None) == (self.tile_tag is None):
+            raise ValueError("move_to requires exactly one of tile_id or tile_tag")
+        return self
 
 
 class MoveRelativeCardEffect(ContentModel):
@@ -120,6 +138,105 @@ class RefinanceMortgageCardEffect(ContentModel):
     type: Literal["refinance_mortgage"]
 
 
+class SalaryCashCardEffect(ContentModel):
+    type: Literal["salary_cash"]
+    salary_percent: int = Field(ge=-500, le=500)
+
+    @model_validator(mode="after")
+    def validate_percentage(self) -> SalaryCashCardEffect:
+        if self.salary_percent == 0:
+            raise ValueError("salary_cash percentage cannot be zero")
+        return self
+
+
+class EqualizeCashCardEffect(ContentModel):
+    type: Literal["equalize_cash"]
+    target: Literal["wealthiest", "poorest"]
+
+
+class SwapPositionCardEffect(ContentModel):
+    type: Literal["swap_position"]
+    target: Literal["wealthiest", "poorest"]
+
+
+class AllPlayersMoveRelativeCardEffect(ContentModel):
+    type: Literal["all_players_move_relative"]
+    steps: int = Field(ge=-116, le=116)
+    collect_start: bool = False
+
+    @model_validator(mode="after")
+    def validate_steps(self) -> AllPlayersMoveRelativeCardEffect:
+        if self.steps == 0:
+            raise ValueError("all-player relative movement cannot be zero")
+        return self
+
+
+ImmediateCardEffect = Annotated[
+    CashCardEffect
+    | MoveToCardEffect
+    | MoveRelativeCardEffect
+    | MoveToNearestCardEffect
+    | RepairsCardEffect
+    | CashEachCardEffect
+    | GoToJailCardEffect
+    | GetOutOfJailCardEffect
+    | MoveToNearestAuctionCardEffect
+    | CompleteGroupsCashCardEffect
+    | OwnedPropertiesCashCardEffect
+    | MortgagedPropertiesCashCardEffect
+    | RefinanceMortgageCardEffect
+    | SalaryCashCardEffect
+    | EqualizeCashCardEffect
+    | SwapPositionCardEffect
+    | AllPlayersMoveRelativeCardEffect,
+    Field(discriminator="type"),
+]
+
+
+class CardChoiceOutcomeDefinition(ContentModel):
+    weight: int = Field(ge=1, le=100)
+    result_key: str = Field(min_length=1)
+    effects: list[ImmediateCardEffect] = Field(default_factory=list, max_length=4)
+
+    @model_validator(mode="after")
+    def validate_effects(self) -> CardChoiceOutcomeDefinition:
+        _validate_effect_order(self.effects)
+        return self
+
+
+class CardChoiceOptionDefinition(ContentModel):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    label_key: str = Field(min_length=1)
+    outcomes: list[CardChoiceOutcomeDefinition] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def validate_weights(self) -> CardChoiceOptionDefinition:
+        if sum(outcome.weight for outcome in self.outcomes) != 100:
+            raise ValueError("card choice outcome weights must total 100")
+        return self
+
+
+class InteractiveChoiceCardEffect(ContentModel):
+    type: Literal["interactive_choice"]
+    prompt_key: str = Field(min_length=1)
+    category: Literal[
+        "scam",
+        "lottery",
+        "employment",
+        "contest",
+        "social",
+        "mystery",
+    ]
+    choices: list[CardChoiceOptionDefinition] = Field(min_length=2, max_length=4)
+
+    @model_validator(mode="after")
+    def validate_choice_ids(self) -> InteractiveChoiceCardEffect:
+        ids = [choice.id for choice in self.choices]
+        if len(ids) != len(set(ids)):
+            raise ValueError("interactive card choices cannot be repeated")
+        return self
+
+
 CardEffect = Annotated[
     CashCardEffect
     | MoveToCardEffect
@@ -133,7 +250,12 @@ CardEffect = Annotated[
     | CompleteGroupsCashCardEffect
     | OwnedPropertiesCashCardEffect
     | MortgagedPropertiesCashCardEffect
-    | RefinanceMortgageCardEffect,
+    | RefinanceMortgageCardEffect
+    | SalaryCashCardEffect
+    | EqualizeCashCardEffect
+    | SwapPositionCardEffect
+    | AllPlayersMoveRelativeCardEffect
+    | InteractiveChoiceCardEffect,
     Field(discriminator="type"),
 ]
 
@@ -152,8 +274,15 @@ def _effect_must_be_terminal(effect: CardEffect) -> bool:
             OwnedPropertiesCashCardEffect,
             MortgagedPropertiesCashCardEffect,
             GoToJailCardEffect,
+            SwapPositionCardEffect,
+            AllPlayersMoveRelativeCardEffect,
+            InteractiveChoiceCardEffect,
         ),
-    ) or (isinstance(effect, CashCardEffect) and effect.amount < 0)
+    ) or (
+        isinstance(effect, CashCardEffect) and effect.amount < 0
+    ) or (
+        isinstance(effect, SalaryCashCardEffect) and effect.salary_percent < 0
+    )
 
 
 def _validate_effect_order(effects: list[CardEffect]) -> None:
@@ -183,10 +312,44 @@ class CardDefinition(ContentModel):
         return self.effects or ([self.effect] if self.effect is not None else [])
 
 
+class CardCollectionDefinition(ContentModel):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    name_key: str
+    card_ids: list[str] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_card_ids(self) -> CardCollectionDefinition:
+        if len(self.card_ids) != len(set(self.card_ids)):
+            raise ValueError("card collection ids cannot contain duplicates")
+        return self
+
+
 class CardDeckDefinition(ContentModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
     name_key: str | None = Field(default=None, min_length=1)
     cards: list[CardDefinition] = Field(min_length=1, max_length=100)
+    collections: list[CardCollectionDefinition] = Field(default_factory=list, max_length=20)
+    default_collection_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_collections(self) -> CardDeckDefinition:
+        collection_ids = [collection.id for collection in self.collections]
+        if len(collection_ids) != len(set(collection_ids)):
+            raise ValueError("card collection ids must be unique within a deck")
+        known_cards = {card.id for card in self.cards}
+        for collection in self.collections:
+            if missing := sorted(set(collection.card_ids) - known_cards):
+                raise ValueError(
+                    f"card collection '{collection.id}' references unknown cards: {missing}"
+                )
+        if self.default_collection_ids:
+            if len(self.default_collection_ids) != len(set(self.default_collection_ids)):
+                raise ValueError("default card collections cannot contain duplicates")
+            if missing := sorted(set(self.default_collection_ids) - set(collection_ids)):
+                raise ValueError(f"default card collections are unknown: {missing}")
+        elif self.collections:
+            raise ValueError("decks with collections require default_collection_ids")
+        return self
 
 
 class PropertyGroupDefinition(ContentModel):
@@ -199,6 +362,9 @@ class TileDefinition(ContentModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
     kind: TileKind
     name_key: str
+    card_tags: list[
+        Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")]
+    ] = Field(default_factory=list, max_length=20)
     deck_id: str | None = None
     group: str | None = None
     color: str | None = None
@@ -563,14 +729,15 @@ class UserUpdate(BaseModel):
 PanelId = Literal["room", "heatmap", "players", "management", "chat"]
 PanelZone = Literal["left", "right"]
 PANEL_IDS = {"room", "heatmap", "players", "management", "chat"}
-ManagementPanelId = Literal["properties", "trades", "bank", "market"]
-MANAGEMENT_PANEL_IDS = {"properties", "trades", "bank", "market"}
+ManagementPanelId = Literal["properties", "trades", "debts", "bank", "market"]
+MANAGEMENT_PANEL_IDS = {"properties", "trades", "debts", "bank", "market"}
 WorkspacePanelId = Literal[
     "room",
     "heatmap",
     "players",
     "properties",
     "trades",
+    "debts",
     "bank",
     "market",
     "chat",
@@ -581,6 +748,7 @@ WORKSPACE_PANEL_IDS = {
     "players",
     "properties",
     "trades",
+    "debts",
     "bank",
     "market",
     "chat",
@@ -590,16 +758,30 @@ WorkspacePanelPlacement = Literal["left", "right", "floating"]
 
 class ManagementPanelLayoutPreferences(ContentModel):
     order: list[ManagementPanelId] = Field(
-        default_factory=lambda: ["properties", "trades", "bank", "market"],
-        min_length=4,
-        max_length=4,
+        default_factory=lambda: ["properties", "trades", "debts", "bank", "market"],
+        min_length=5,
+        max_length=5,
     )
     visible: list[ManagementPanelId] = Field(
         default_factory=lambda: ["properties"],
         min_length=1,
-        max_length=4,
+        max_length=5,
     )
     heights: dict[ManagementPanelId, int] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def include_debt_panel(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        order = normalized.get("order")
+        if isinstance(order, list) and "debts" not in order:
+            order = list(order)
+            insert_at = order.index("trades") + 1 if "trades" in order else len(order)
+            order.insert(insert_at, "debts")
+            normalized["order"] = order
+        return normalized
 
     @model_validator(mode="after")
     def validate_complete_layout(self) -> ManagementPanelLayoutPreferences:
@@ -625,8 +807,8 @@ class WorkspacePanelWindowGeometry(ContentModel):
 
 
 class WorkspacePanelLayoutPreferences(ContentModel):
-    order: list[WorkspacePanelId] = Field(min_length=8, max_length=8)
-    visible: list[WorkspacePanelId] = Field(min_length=1, max_length=8)
+    order: list[WorkspacePanelId] = Field(min_length=9, max_length=9)
+    visible: list[WorkspacePanelId] = Field(min_length=1, max_length=9)
     heights: dict[WorkspacePanelId, int] = Field(default_factory=dict)
     placements: dict[WorkspacePanelId, WorkspacePanelPlacement] = Field(
         default_factory=lambda: {
@@ -636,6 +818,23 @@ class WorkspacePanelLayoutPreferences(ContentModel):
     windows: dict[WorkspacePanelId, WorkspacePanelWindowGeometry] = Field(
         default_factory=dict
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def include_debt_panel(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        order = normalized.get("order")
+        if isinstance(order, list) and "debts" not in order:
+            order = list(order)
+            insert_at = order.index("trades") + 1 if "trades" in order else len(order)
+            order.insert(insert_at, "debts")
+            normalized["order"] = order
+        placements = normalized.get("placements")
+        if isinstance(placements, dict) and "debts" not in placements:
+            normalized["placements"] = {**placements, "debts": "right"}
+        return normalized
 
     @model_validator(mode="after")
     def validate_complete_layout(self) -> WorkspacePanelLayoutPreferences:
@@ -697,7 +896,9 @@ class AudioPreferences(ContentModel):
         return self
 
 
-TokenShape = Literal["circle", "rounded", "diamond"]
+TokenShape = Literal["circle", "rounded", "diamond", "hexagon", "shield", "star"]
+TokenFillMode = Literal["solid", "gradient", "pattern"]
+TokenPattern = Literal["dots", "stripes", "checker", "waves"]
 TokenIcon = Literal[
     "number",
     "micro",
@@ -706,13 +907,38 @@ TokenIcon = Literal[
     "terremoto",
     "cerro",
     "cat",
+    "emoji",
 ]
 
 
 class TokenAppearancePreferences(ContentModel):
     color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
+    secondary_color: str = Field(
+        default="#9d8cff",
+        pattern=r"^#[0-9a-fA-F]{6}$",
+    )
+    fill: TokenFillMode = "solid"
+    gradient_angle: int = Field(default=135, ge=0, le=360)
+    pattern: TokenPattern = "dots"
     shape: TokenShape
     icon: TokenIcon
+    emoji: str | None = Field(default=None, max_length=16)
+
+    @field_validator("emoji")
+    @classmethod
+    def normalize_emoji(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("emoji cannot be blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_emoji_icon(self) -> TokenAppearancePreferences:
+        if self.icon == "emoji" and self.emoji is None:
+            raise ValueError("emoji is required when the emoji icon is selected")
+        return self
 
 
 class AutomationPreferences(ContentModel):
@@ -721,11 +947,16 @@ class AutomationPreferences(ContentModel):
     auto_end_turns: bool = False
 
 
+class VisualEffectsPreferences(ContentModel):
+    intensity: Literal["full", "soft", "off"] = "full"
+
+
 class UserPreferences(ContentModel):
     panel_layout: PanelLayoutPreferences | None = None
     audio_settings: AudioPreferences | None = None
     token_appearance: TokenAppearancePreferences | None = None
     automation_settings: AutomationPreferences | None = None
+    visual_effects: VisualEffectsPreferences | None = None
 
 
 class UserPreferencesUpdate(ContentModel):
@@ -733,6 +964,7 @@ class UserPreferencesUpdate(ContentModel):
     audio_settings: AudioPreferences | None = None
     token_appearance: TokenAppearancePreferences | None = None
     automation_settings: AutomationPreferences | None = None
+    visual_effects: VisualEffectsPreferences | None = None
 
     @model_validator(mode="after")
     def validate_non_empty_update(self) -> UserPreferencesUpdate:
@@ -741,6 +973,7 @@ class UserPreferencesUpdate(ContentModel):
             and self.audio_settings is None
             and self.token_appearance is None
             and self.automation_settings is None
+            and self.visual_effects is None
         ):
             raise ValueError("at least one preference must be provided")
         return self
@@ -1093,12 +1326,39 @@ class GameEvent(BaseModel):
     data: dict[str, object] = Field(default_factory=dict)
 
 
+class PendingCardChoiceState(BaseModel):
+    player_id: UUID
+    card_id: str
+    effect: InteractiveChoiceCardEffect
+
+
+class PendingCardChoiceResultState(BaseModel):
+    player_id: UUID
+    card_id: str
+    effect: InteractiveChoiceCardEffect
+    choice_id: str
+    choice_label_key: str
+    result_key: str
+    resolved_sequence: int = Field(ge=1)
+
+
+class PendingCardDrawState(BaseModel):
+    player_id: UUID
+    deck_id: str
+    card_id: str | None = None
+    selected_index: int | None = Field(default=None, ge=0, le=6)
+    offer_count: int = Field(default=7, ge=1, le=7)
+    draw_sequence: int = Field(ge=1)
+    reveal_sequence: int | None = Field(default=None, ge=1)
+
+
 class GameState(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     host_user_id: UUID
     pack_id: str
     pack_version: str
     pack_snapshot: ContentPack | None = Field(default=None, exclude=True)
+    deck_collection_ids: dict[str, list[str]] = Field(default_factory=dict)
     status: GameStatus = GameStatus.LOBBY
     players: list[PlayerState] = Field(default_factory=list)
     spectators: list[SpectatorState] = Field(default_factory=list, max_length=50)
@@ -1120,9 +1380,13 @@ class GameState(BaseModel):
         default_factory=list,
         max_length=12,
     )
+    pending_card_draw: PendingCardDrawState | None = None
+    pending_card_choice: PendingCardChoiceState | None = None
+    pending_card_choice_result: PendingCardChoiceResultState | None = None
     bank: BankState = Field(default_factory=BankState)
     bank_pot: int = Field(default=0, ge=0)
     mortgaged_property_ids: list[str] = Field(default_factory=list)
+    trade_unavailable_property_ids: list[str] = Field(default_factory=list)
     building_levels: dict[
         str,
         Annotated[int, Field(ge=1, le=5)],
@@ -1234,13 +1498,20 @@ class GameState(BaseModel):
             set(self.mortgaged_property_ids)
         ):
             raise ValueError("mortgaged properties cannot be repeated")
+        if len(self.trade_unavailable_property_ids) != len(
+            set(self.trade_unavailable_property_ids)
+        ):
+            raise ValueError("trade-unavailable properties cannot be repeated")
         owner_ids = set(self.owners)
         mortgaged_ids = set(self.mortgaged_property_ids)
+        trade_unavailable_ids = set(self.trade_unavailable_property_ids)
         building_ids = set(self.building_levels)
         if not mortgaged_ids.issubset(owner_ids):
             raise ValueError("mortgaged properties must have an owner")
         if not building_ids.issubset(owner_ids):
             raise ValueError("developed properties must have an owner")
+        if not trade_unavailable_ids.issubset(owner_ids):
+            raise ValueError("trade-unavailable properties must have an owner")
         if mortgaged_ids & building_ids:
             raise ValueError("a mortgaged property cannot have buildings")
         if self.active_debt is not None and not any(
@@ -1277,6 +1548,23 @@ class GameState(BaseModel):
                 raise ValueError("card payments require game participants")
             if payment.payer_id == payment.recipient_id:
                 raise ValueError("card payments require different participants")
+        if (
+            self.pending_card_choice is not None
+            and self.pending_card_choice.player_id not in player_ids
+        ):
+            raise ValueError("a pending card choice requires a game participant")
+        if (
+            self.pending_card_choice_result is not None
+            and self.pending_card_choice_result.player_id not in player_ids
+        ):
+            raise ValueError("a pending card choice result requires a game participant")
+        if (
+            self.pending_card_draw is not None
+            and self.pending_card_draw.player_id not in player_ids
+        ):
+            raise ValueError("a pending card draw requires a game participant")
+        if self.pending_card_draw is not None and self.pending_card_choice is not None:
+            raise ValueError("a card draw and card choice cannot both be pending")
         return self
 
 
@@ -1387,6 +1675,12 @@ class PayDebtCommand(BaseModel):
     action: Literal["pay_debt"]
 
 
+class PayRentDebtPlanCommand(BaseModel):
+    action: Literal["pay_rent_debt_plan"]
+    plan_id: UUID
+    payment_kind: Literal["installment", "full"]
+
+
 class DemandRentDebtCommand(BaseModel):
     action: Literal["demand_rent_debt"]
 
@@ -1425,6 +1719,30 @@ class RejectRentDebtPlanCommand(BaseModel):
 
 class DeclareBankruptcyCommand(BaseModel):
     action: Literal["declare_bankruptcy"]
+
+
+class SetPropertyTradeAvailabilityCommand(BaseModel):
+    action: Literal["set_property_trade_availability"]
+    property_id: str = Field(min_length=1, max_length=160)
+    available: bool
+
+
+class ContinueCardCommand(BaseModel):
+    action: Literal["continue_card"]
+
+
+class ChooseCardCommand(BaseModel):
+    action: Literal["choose_card"]
+    card_index: int = Field(ge=0, le=6)
+
+
+class ResolveCardChoiceCommand(BaseModel):
+    action: Literal["resolve_card_choice"]
+    choice_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
+
+
+class ContinueCardChoiceResultCommand(BaseModel):
+    action: Literal["continue_card_choice_result"]
 
 
 class ProposeTradeCommand(BaseModel):
@@ -1521,12 +1839,18 @@ GameCommand = Annotated[
     | PlaceLimitOrderCommand
     | CancelMarketOrderCommand
     | PayDebtCommand
+    | PayRentDebtPlanCommand
     | DemandRentDebtCommand
     | ForgiveRentDebtCommand
     | ProposeRentDebtPlanCommand
     | AcceptRentDebtPlanCommand
     | RejectRentDebtPlanCommand
     | DeclareBankruptcyCommand
+    | SetPropertyTradeAvailabilityCommand
+    | ContinueCardCommand
+    | ChooseCardCommand
+    | ResolveCardChoiceCommand
+    | ContinueCardChoiceResultCommand
     | ProposeTradeCommand
     | CounterTradeCommand
     | AcceptTradeCommand
@@ -1558,6 +1882,25 @@ class CreateGameRequest(BaseModel):
         max_length=30,
         pattern=r"^\d+\.\d+\.\d+$",
     )
+    deck_collection_ids: dict[str, list[str]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_deck_collections(self) -> CreateGameRequest:
+        if len(self.deck_collection_ids) > 20:
+            raise ValueError("too many deck selections")
+        for deck_id, collection_ids in self.deck_collection_ids.items():
+            if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", deck_id) is None:
+                raise ValueError("deck selection contains an invalid deck id")
+            if not collection_ids:
+                raise ValueError("select at least one collection per deck")
+            if len(collection_ids) != len(set(collection_ids)):
+                raise ValueError("deck selections cannot contain duplicates")
+            if any(
+                re.fullmatch(r"[a-z0-9][a-z0-9_-]*", item) is None
+                for item in collection_ids
+            ):
+                raise ValueError("deck selection contains an invalid collection id")
+        return self
 
 
 class AddBotRequest(BaseModel):

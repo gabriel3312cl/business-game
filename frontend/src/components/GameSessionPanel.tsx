@@ -1,6 +1,7 @@
 import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded'
 import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded'
 import AccountCircleRoundedIcon from '@mui/icons-material/AccountCircleRounded'
+import AnalyticsRoundedIcon from '@mui/icons-material/AnalyticsRounded'
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import ForumRoundedIcon from '@mui/icons-material/ForumRounded'
@@ -12,6 +13,7 @@ import MenuRoundedIcon from '@mui/icons-material/MenuRounded'
 import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded'
 import PaletteRoundedIcon from '@mui/icons-material/PaletteRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
+import ReceiptLongRoundedIcon from '@mui/icons-material/ReceiptLongRounded'
 import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded'
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded'
 import VerticalAlignCenterRoundedIcon from '@mui/icons-material/VerticalAlignCenterRounded'
@@ -44,6 +46,8 @@ import {
 } from '@mui/material'
 import {
   type DragEvent,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -71,7 +75,6 @@ import type {
   BotPersonality,
   ContentPack,
   GameCommand,
-  GameEvent,
   GameState,
   AudioPreferenceSettings,
   ManagementPanelId,
@@ -79,6 +82,8 @@ import type {
   PanelLayoutPreferences,
   TokenAppearanceSettings,
   User,
+  VisualEffectsIntensity,
+  VisualEffectsPreferenceSettings,
   WorkspacePanelId,
   WorkspacePanelLayoutPreferences,
   WorkspacePanelPlacement,
@@ -90,8 +95,12 @@ import { BankPanel } from './BankPanel'
 import { GameActionCenter } from './GameActionCenter'
 import { GameAuctionDialog } from './GameAuctionDialog'
 import { GameBoard } from './GameBoard'
+import { GameCardChoiceDialog } from './GameCardChoiceDialog'
+import { GameCardDrawDialog } from './GameCardDrawDialog'
 import { GameFinishedDialog } from './GameFinishedDialog'
+import { GameVisualEffects } from './GameVisualEffects'
 import { BoardHeatmapControls } from './BoardHeatmapControls'
+import { DebtAccountsPanel } from './DebtAccountsPanel'
 import {
   buildHistoryHeatmap,
   buildProbabilityHeatmap,
@@ -121,6 +130,7 @@ import { PersonalizablePanel } from './PersonalizablePanel'
 import { PropertyManagementPanel } from './PropertyManagementPanel'
 import { RentDebtResolutionPanel } from './RentDebtResolutionPanel'
 import { TokenCustomizationDialog } from './TokenCustomizationDialog'
+import { VisualEffectsControl } from './VisualEffectsControl'
 import { normalizeTokenAppearance } from './tokenAppearance'
 import {
   clearWorkspacePanelHeights,
@@ -132,6 +142,12 @@ import {
   placeWorkspacePanel,
   WORKSPACE_PANEL_IDS,
 } from './workspacePanelLayout'
+
+const GameAnalyticsDashboard = lazy(() =>
+  import('./GameAnalyticsDashboard').then((module) => ({
+    default: module.GameAnalyticsDashboard,
+  })),
+)
 
 interface Props {
   game: GameState
@@ -191,6 +207,10 @@ const DEFAULT_PANEL_LAYOUT: PanelLayout = {
 }
 const PANEL_LAYOUT_STORAGE_PREFIX = 'business-game:panel-layout:v1:'
 const TOKEN_APPEARANCE_STORAGE_PREFIX = 'business-game:token-appearance:v1:'
+const VISUAL_EFFECTS_STORAGE_PREFIX = 'business-game:visual-effects:v1:'
+const DEFAULT_VISUAL_EFFECTS: VisualEffectsPreferenceSettings = {
+  intensity: 'full',
+}
 const DEFAULT_AUTOMATION_SETTINGS: AutomationPreferenceSettings = {
   auto_reject_trades: false,
   auto_roll_dice: false,
@@ -280,6 +300,41 @@ function writeTokenAppearance(
   }
 }
 
+function readVisualEffects(userId: string): VisualEffectsPreferenceSettings {
+  try {
+    const raw = localStorage.getItem(`${VISUAL_EFFECTS_STORAGE_PREFIX}${userId}`)
+    return raw
+      ? normalizeVisualEffects(JSON.parse(raw) as Partial<VisualEffectsPreferenceSettings>)
+      : DEFAULT_VISUAL_EFFECTS
+  } catch {
+    return DEFAULT_VISUAL_EFFECTS
+  }
+}
+
+function writeVisualEffects(
+  userId: string,
+  settings: VisualEffectsPreferenceSettings,
+): void {
+  try {
+    localStorage.setItem(
+      `${VISUAL_EFFECTS_STORAGE_PREFIX}${userId}`,
+      JSON.stringify(settings),
+    )
+  } catch {
+    // PostgreSQL remains authoritative when browser storage is unavailable.
+  }
+}
+
+function normalizeVisualEffects(
+  value: Partial<VisualEffectsPreferenceSettings> | null | undefined,
+): VisualEffectsPreferenceSettings {
+  return value?.intensity === 'full' ||
+    value?.intensity === 'soft' ||
+    value?.intensity === 'off'
+    ? { intensity: value.intensity }
+    : DEFAULT_VISUAL_EFFECTS
+}
+
 function isPanelId(value: unknown): value is PanelId {
   return typeof value === 'string' && PANEL_IDS.includes(value as PanelId)
 }
@@ -342,7 +397,15 @@ export function GameSessionPanel({
   const automationSettingsRef = useRef(automationSettings)
   const automationSettingsChangeRef = useRef(0)
   const automationAttemptsRef = useRef(new Set<string>())
+  const [visualEffects, setVisualEffects] =
+    useState<VisualEffectsPreferenceSettings>(() => readVisualEffects(user.id))
+  const visualEffectsRef = useRef(visualEffects)
+  const visualEffectsChangeRef = useRef(0)
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
+  const [analyticsOpen, setAnalyticsOpen] = useState(false)
+  const [highlightedPropertyId, setHighlightedPropertyId] = useState<
+    string | null
+  >(null)
   const panelLayoutRef = useRef(panelLayout)
   const panelLayoutChangeRef = useRef(0)
   const preferenceSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
@@ -381,6 +444,9 @@ export function GameSessionPanel({
   const prefersReducedMotion = useMediaQuery(
     '(prefers-reduced-motion: reduce)',
   )
+  const motionIntensity: VisualEffectsIntensity = prefersReducedMotion
+    ? 'off'
+    : visualEffects.intensity
   const [motionSettlement, setMotionSettlement] = useState<MotionSettlement>(
     () => ({
       gameId: game.id,
@@ -389,7 +455,7 @@ export function GameSessionPanel({
     }),
   )
   const motionPending =
-    !prefersReducedMotion &&
+    motionIntensity !== 'off' &&
     motionSettlement.gameId === game.id &&
     Object.is(motionSettlement.syncMotionKey, motionSyncKey) &&
     latestMotionSequence(game) > motionSettlement.sequence
@@ -419,6 +485,9 @@ export function GameSessionPanel({
     game.pending_auction_selector_id === null &&
     game.active_auction === null &&
     game.active_debt === null &&
+    game.pending_card_draw === null &&
+    game.pending_card_choice === null &&
+    game.pending_card_choice_result === null &&
     currentPlayer !== undefined &&
     !motionPending
   const activeRange =
@@ -556,6 +625,21 @@ export function GameSessionPanel({
     [],
   )
 
+  const saveVisualEffectsRemotely = useCallback(
+    (settings: VisualEffectsPreferenceSettings) => {
+      preferenceSaveQueueRef.current = preferenceSaveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            await api.updateVisualEffects(settings)
+          } catch {
+            // The per-user browser cache remains available until a later change retries.
+          }
+        })
+    },
+    [],
+  )
+
   useEffect(() => {
     gameAudio.useUser(user.id)
     const unsubscribe = gameAudio.subscribe(() => {
@@ -584,6 +668,7 @@ export function GameSessionPanel({
     const audioChangesAtStart = audioSettingsChangeRef.current
     const tokenChangesAtStart = tokenAppearanceChangeRef.current
     const automationChangesAtStart = automationSettingsChangeRef.current
+    const visualEffectsChangesAtStart = visualEffectsChangeRef.current
     void api
       .getUserPreferences()
       .then((preferences) => {
@@ -638,6 +723,21 @@ export function GameSessionPanel({
         ) {
           saveAutomationSettingsRemotely(automationSettingsRef.current)
         }
+        if (
+          preferences.visual_effects &&
+          visualEffectsChangeRef.current === visualEffectsChangesAtStart
+        ) {
+          const restored = normalizeVisualEffects(preferences.visual_effects)
+          visualEffectsRef.current = restored
+          setVisualEffects(restored)
+          writeVisualEffects(user.id, restored)
+        } else if (
+          visualEffectsChangeRef.current !== visualEffectsChangesAtStart
+        ) {
+          saveVisualEffectsRemotely(visualEffectsRef.current)
+        } else if (!preferences.visual_effects) {
+          saveVisualEffectsRemotely(visualEffectsRef.current)
+        }
         setAutomationSettingsReady(true)
       })
       .catch(() => {
@@ -652,6 +752,7 @@ export function GameSessionPanel({
     saveAutomationSettingsRemotely,
     savePanelLayoutRemotely,
     saveTokenAppearanceRemotely,
+    saveVisualEffectsRemotely,
     user.id,
   ])
 
@@ -678,6 +779,18 @@ export function GameSessionPanel({
       setTokenDialogOpen(false)
     },
     [saveTokenAppearanceRemotely, user.id],
+  )
+
+  const updateVisualEffects = useCallback(
+    (intensity: VisualEffectsIntensity) => {
+      const settings = { intensity }
+      visualEffectsRef.current = settings
+      visualEffectsChangeRef.current += 1
+      setVisualEffects(settings)
+      writeVisualEffects(user.id, settings)
+      saveVisualEffectsRemotely(settings)
+    },
+    [saveVisualEffectsRemotely, user.id],
   )
 
   const updatePanelLayout = useCallback(
@@ -1254,16 +1367,16 @@ export function GameSessionPanel({
           playerColors[
             Math.max(0, currentUserPlayerIndex) % playerColors.length
           ],
+        secondary_color: '#9d8cff',
+        fill: 'solid',
+        gradient_angle: 135,
+        pattern: 'dots',
         shape: 'circle',
         icon: 'number',
+        emoji: null,
       },
     [currentUserPlayerIndex, tokenAppearance],
   )
-  const currentCardId = currentTurnCardId(game.events)
-  const lastCard = pack.board.decks
-    .flatMap((deck) => deck.cards)
-    .find((card) => card.id === currentCardId)
-
   const roomContent = (
     <Stack spacing={1.5}>
           <Stack
@@ -1277,6 +1390,11 @@ export function GameSessionPanel({
             </Typography>
             <Stack direction="row" alignItems="center" spacing={0.5}>
               <AudioControls />
+              <VisualEffectsControl
+                value={visualEffects.intensity}
+                systemReducedMotion={prefersReducedMotion}
+                onChange={updateVisualEffects}
+              />
               <FormControl size="small">
                 <Select
                   value={i18n.language}
@@ -1392,6 +1510,17 @@ export function GameSessionPanel({
               onClick={() => void run(() => api.getGame(game.id), true)}
             >
               {t('refresh')}
+            </Button>
+            <Button
+              size="small"
+              color="secondary"
+              startIcon={<AnalyticsRoundedIcon />}
+              onClick={() => {
+                setAnalyticsOpen(true)
+                void run(() => api.getGame(game.id), true)
+              }}
+            >
+              {t('analytics.open')}
             </Button>
             {(isParticipant || isSpectator) && (
               <Button
@@ -1549,6 +1678,7 @@ export function GameSessionPanel({
       useAssetTokens={pack.board.tiles.some((tile) => tile.asset_path)}
       currentUserTokenAppearance={tokenAppearance}
       showTitle={false}
+      motionIntensity={motionIntensity}
     />
   )
 
@@ -1560,6 +1690,7 @@ export function GameSessionPanel({
       user={user}
       busy={busy}
       onCommand={sendCommand}
+      onHoveredPropertyChange={setHighlightedPropertyId}
     />
   )
 
@@ -1594,20 +1725,33 @@ export function GameSessionPanel({
     />
   )
 
+  const debtsContent = (
+    <DebtAccountsPanel
+      game={game}
+      user={user}
+      busy={busy}
+      onCommand={sendCommand}
+    />
+  )
+
   const managementPanelTitle = (panelId: ManagementPanelId) =>
     panelId === 'properties'
       ? t('properties')
       : panelId === 'trades'
         ? t('trades')
-        : panelId === 'bank'
-          ? t('bank')
-          : t('market')
+        : panelId === 'debts'
+          ? t('debts')
+          : panelId === 'bank'
+            ? t('bank')
+            : t('market')
 
   const managementPanelIcon = (panelId: ManagementPanelId) =>
     panelId === 'properties' ? (
       <HomeWorkRoundedIcon fontSize="small" />
     ) : panelId === 'trades' ? (
       <SwapHorizRoundedIcon fontSize="small" />
+    ) : panelId === 'debts' ? (
+      <ReceiptLongRoundedIcon fontSize="small" />
     ) : panelId === 'bank' ? (
       <AccountBalanceRoundedIcon fontSize="small" />
     ) : (
@@ -1619,9 +1763,11 @@ export function GameSessionPanel({
       ? propertiesContent
       : panelId === 'trades'
         ? tradesContent
-        : panelId === 'bank'
-          ? bankContent
-          : marketContent
+        : panelId === 'debts'
+          ? debtsContent
+          : panelId === 'bank'
+            ? bankContent
+            : marketContent
 
   const visibleManagementPanels = panelLayout.management.order.filter((panelId) =>
     panelLayout.management.visible.includes(panelId),
@@ -1711,6 +1857,7 @@ export function GameSessionPanel({
               onHeightChange={(height) =>
                 resizeManagementPanel(panelId, height)
               }
+              motionIntensity={motionIntensity}
             >
               {managementPanelContent(panelId)}
             </PersonalizablePanel>
@@ -1725,11 +1872,6 @@ export function GameSessionPanel({
       {error && (
         <Alert severity="warning" onClose={() => setError(null)}>
           {error}
-        </Alert>
-      )}
-      {!motionPending && lastCard && (
-        <Alert severity="info">
-          {t('drawnCard', { message: pack.messages[lastCard.message_key] })}
         </Alert>
       )}
       {!motionPending && game.active_debt && (
@@ -1868,6 +2010,7 @@ export function GameSessionPanel({
         }}
         onDrop={(event) => dropWorkspacePanel(event, panelId, placement)}
         onHeightChange={(height) => resizeWorkspacePanel(panelId, height)}
+        motionIntensity={motionIntensity}
       >
         {workspacePanelContent(panelId)}
       </PersonalizablePanel>
@@ -1934,6 +2077,7 @@ export function GameSessionPanel({
         key={panelId}
         id={`mobile-panel-${panelId}`}
         title={title}
+        motionIntensity={motionIntensity}
       >
         {content}
       </PersonalizablePanel>
@@ -2013,12 +2157,22 @@ export function GameSessionPanel({
   return (
     <Box
       data-testid="game-workspace"
+      data-motion-intensity={motionIntensity}
       sx={{
         width: '100vw',
         height: '100dvh',
         maxHeight: '100dvh',
         overflow: 'hidden',
         position: 'relative',
+        '& .MuiButton-root, & .MuiIconButton-root, & .MuiToggleButton-root': {
+          transition:
+            motionIntensity === 'off'
+              ? 'none'
+              : `transform ${motionIntensity === 'soft' ? 90 : 130}ms ease, box-shadow ${motionIntensity === 'soft' ? 90 : 130}ms ease, background-color 140ms ease`,
+        },
+        '& .MuiButton-root:active:not(:disabled), & .MuiIconButton-root:active:not(:disabled), & .MuiToggleButton-root:active:not(:disabled)': {
+          transform: motionIntensity === 'off' ? 'none' : 'translateY(1px) scale(.98)',
+        },
       }}
     >
       <Box
@@ -2095,6 +2249,8 @@ export function GameSessionPanel({
               onCommand={sendCommand}
               heatmap={boardHeatmap}
               actionEvents={visibleEvents}
+              motionIntensity={motionIntensity}
+              highlightedTileId={highlightedPropertyId}
               centerContent={
                 <GameActionCenter
                   game={game}
@@ -2112,6 +2268,7 @@ export function GameSessionPanel({
                     )
                   }
                   onStart={() => void run(() => api.startGame(game.id))}
+                  motionIntensity={motionIntensity}
                 />
               }
             />
@@ -2192,6 +2349,17 @@ export function GameSessionPanel({
 
       {isTablet && floatingWorkspacePanels.map(renderFloatingWorkspacePanel)}
 
+      {analyticsOpen && (
+        <Suspense fallback={null}>
+          <GameAnalyticsDashboard
+            open
+            game={game}
+            pack={pack}
+            onClose={() => setAnalyticsOpen(false)}
+          />
+        </Suspense>
+      )}
+
       {!isTablet && (
         <>
           <BottomNavigation
@@ -2242,6 +2410,13 @@ export function GameSessionPanel({
           <Drawer
             anchor="bottom"
             open={mobilePanel !== null}
+            transitionDuration={
+              motionIntensity === 'off'
+                ? 0
+                : motionIntensity === 'soft'
+                  ? 140
+                  : 240
+            }
             onClose={() => setMobilePanel(null)}
             slotProps={{
               paper: {
@@ -2282,7 +2457,44 @@ export function GameSessionPanel({
         </>
       )}
 
-      {!motionPending && (
+      <GameVisualEffects
+        game={game}
+        events={visibleEvents}
+        pack={pack}
+        intensity={motionIntensity}
+        synchronized={connectionState === 'connected'}
+      />
+
+      {!motionPending && !game.pending_card_choice_result && (
+        <GameCardDrawDialog
+          game={game}
+          pack={pack}
+          user={user}
+          busy={busy}
+          error={error}
+          onCommand={sendCommand}
+          motionIntensity={motionIntensity}
+        />
+      )}
+
+      <GameCardChoiceDialog
+        game={game}
+        pack={pack}
+        user={user}
+        busy={busy}
+        error={error}
+        onCommand={sendCommand}
+        motionIntensity={motionIntensity}
+        visible={
+          !motionPending &&
+          (!game.pending_card_draw || game.pending_card_choice_result !== null)
+        }
+      />
+
+      {!motionPending &&
+        !game.pending_card_draw &&
+        !game.pending_card_choice &&
+        !game.pending_card_choice_result && (
         <GameAuctionDialog
           game={game}
           pack={pack}
@@ -2291,6 +2503,7 @@ export function GameSessionPanel({
           error={error}
           onCommand={sendCommand}
           onCountdownWarning={handleAuctionCountdown}
+          motionIntensity={motionIntensity}
         />
       )}
 
@@ -2301,6 +2514,7 @@ export function GameSessionPanel({
         busy={busy}
         onClose={() => setGameResultOpen(false)}
         onExit={() => void leaveGame()}
+        motionIntensity={motionIntensity}
       />
 
       <TokenCustomizationDialog
@@ -2339,36 +2553,6 @@ export function GameSessionPanel({
 
 function isAuthenticationError(code?: string, error?: string): boolean {
   return code === 'AUTH_EXPIRED' || error === 'authentication required'
-}
-
-function currentTurnCardId(events: GameEvent[]): string | null {
-  let latestBoundarySequence = 0
-  let latestCardEvent: GameEvent | null = null
-
-  for (const event of events) {
-    if (
-      event.type === 'turn.started' ||
-      event.type === 'turn.extra_roll' ||
-      event.type === 'game.finished'
-    ) {
-      latestBoundarySequence = Math.max(latestBoundarySequence, event.sequence)
-    } else if (
-      event.type === 'card.drawn' &&
-      (latestCardEvent === null ||
-        event.sequence > latestCardEvent.sequence)
-    ) {
-      latestCardEvent = event
-    }
-  }
-
-  if (
-    latestCardEvent === null ||
-    latestCardEvent.sequence <= latestBoundarySequence
-  ) {
-    return null
-  }
-  const cardId = latestCardEvent.data.card_id
-  return typeof cardId === 'string' ? cardId : null
 }
 
 function socketErrorCode(error: Error): string | undefined {

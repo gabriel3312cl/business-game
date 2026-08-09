@@ -13,6 +13,7 @@ const rightPlacements = {
   players: 'right',
   properties: 'right',
   trades: 'right',
+  debts: 'right',
   bank: 'right',
   market: 'right',
   chat: 'right',
@@ -36,6 +37,7 @@ describe('workspace panel layout', () => {
         'bank',
         'properties',
         'trades',
+        'debts',
         'market',
         'players',
         'heatmap',
@@ -65,7 +67,7 @@ describe('workspace panel layout', () => {
   it('docks panels on either side and creates floating window geometry', () => {
     const layout = normalizeWorkspacePanelLayout(
       {
-        order: ['room', 'heatmap', 'players', 'properties', 'trades', 'bank', 'market', 'chat'],
+        order: ['room', 'heatmap', 'players', 'properties', 'trades', 'debts', 'bank', 'market', 'chat'],
         visible: ['properties', 'chat'],
         heights: {},
       },

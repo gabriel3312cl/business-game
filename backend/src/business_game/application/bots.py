@@ -15,6 +15,7 @@ from business_game.application.negotiation import (
     TradeVerdict,
     profile_for,
 )
+from business_game.application.relationships import relationship_score
 from business_game.domain.models import (
     AcceptRentDebtPlanCommand,
     AcceptTradeCommand,
@@ -24,13 +25,17 @@ from business_game.domain.models import (
     BuyPropertyCommand,
     BuySharesCommand,
     CancelTradeCommand,
+    ChooseCardCommand,
     ContentPack,
+    ContinueCardChoiceResultCommand,
+    ContinueCardCommand,
     CounterTradeCommand,
     DebtReason,
     DeclareBankruptcyCommand,
     DeclinePropertyCommand,
     DemandRentDebtCommand,
     EndTurnCommand,
+    ForgiveRentDebtCommand,
     GameCommand,
     GameState,
     GameStatus,
@@ -39,14 +44,18 @@ from business_game.domain.models import (
     PayDebtCommand,
     PayJailFineCommand,
     PlayerState,
+    ProposeRentDebtPlanCommand,
     RejectRentDebtPlanCommand,
     RejectTradeCommand,
+    RentDebtPlanTemplate,
     RepayLoanCommand,
     RequestLoanCommand,
+    ResolveCardChoiceCommand,
     RollCommand,
     SelectAuctionPropertyCommand,
     SellGroupRoundCommand,
     SellSharesCommand,
+    SetPropertyTradeAvailabilityCommand,
     TileDefinition,
     TradeStatus,
     TurnPhase,
@@ -63,6 +72,162 @@ class BotAction:
     note: str | None = None
 
 
+def build_rent_debt_creditor_choices(
+    game: GameState,
+    pack: ContentPack,
+    engine: NegotiationEngine,
+    creditor: PlayerState,
+) -> list[GameCommand]:
+    """Build legal settlement choices without letting a bot invent terms."""
+    debt = game.active_debt
+    if (
+        debt is None
+        or debt.creditor_id != creditor.user_id
+        or debt.plan_proposal is not None
+        or debt.collection_demanded
+    ):
+        return []
+
+    profile = profile_for(creditor)
+    rejection_count = _rent_debt_rejection_count(game)
+    demand = DemandRentDebtCommand(action="demand_rent_debt")
+    if rejection_count > profile.patience:
+        return [demand]
+
+    base_installments, base_interest = {
+        BotPersonality.CONSERVATIVE: (3, 5),
+        BotPersonality.BALANCED: (3, 5),
+        BotPersonality.AGGRESSIVE: (2, 15),
+        BotPersonality.NEGOTIATOR: (4, 0),
+    }[creditor.bot_personality or BotPersonality.BALANCED]
+    relationship = relationship_score(game, creditor.user_id, debt.debtor_id)
+    if relationship >= 30:
+        base_installments += 1
+        base_interest = max(0, base_interest - 5)
+    elif relationship <= -30:
+        base_installments = max(2, base_installments - 1)
+        base_interest = min(25, base_interest + 5)
+
+    installments = min(6, base_installments + rejection_count)
+    interest = max(0, base_interest - rejection_count * 5)
+    terms = ProposeRentDebtPlanCommand(
+        action="propose_rent_debt_plan",
+        installments=installments,
+        interest_percent=interest,
+        template=_rent_debt_template(installments, interest),
+    )
+    choices: list[GameCommand] = [terms]
+    settlement_amount = _rent_debt_settlement_amount(game)
+    choices.extend(
+        _rent_debt_property_choices(
+            game,
+            pack,
+            engine,
+            creditor,
+            settlement_amount,
+        )
+    )
+    choices.append(demand)
+    if relationship >= 75 and settlement_amount <= pack.manifest.starting_balance // 20:
+        choices.append(ForgiveRentDebtCommand(action="forgive_rent_debt"))
+    return choices
+
+
+def _rent_debt_template(
+    installments: int,
+    interest_percent: int,
+) -> RentDebtPlanTemplate:
+    return {
+        (2, 0): RentDebtPlanTemplate.FRIENDLY,
+        (3, 5): RentDebtPlanTemplate.STANDARD,
+        (4, 10): RentDebtPlanTemplate.FLEXIBLE,
+    }.get((installments, interest_percent), RentDebtPlanTemplate.CUSTOM)
+
+
+def _rent_debt_settlement_amount(game: GameState) -> int:
+    debt = game.active_debt
+    assert debt is not None
+    if debt.installment_plan_id is None:
+        return debt.amount
+    plan = next(
+        (item for item in game.rent_debt_plans if item.id == debt.installment_plan_id),
+        None,
+    )
+    return plan.remaining_amount if plan is not None else debt.amount
+
+
+def _rent_debt_rejection_count(game: GameState) -> int:
+    debt = game.active_debt
+    assert debt is not None
+    debtor_id = str(debt.debtor_id)
+    creditor_id = str(debt.creditor_id)
+    marker = 0
+    for event in reversed(game.events):
+        if (
+            event.type == "debt.created"
+            and event.data.get("debtor_id") == debtor_id
+            and event.data.get("creditor_id") == creditor_id
+            and event.data.get("tile_id") == debt.tile_id
+        ):
+            marker = event.sequence
+            break
+    return sum(
+        event.sequence > marker
+        and event.type == "debt.plan_rejected"
+        and event.data.get("debtor_id") == debtor_id
+        and event.data.get("creditor_id") == creditor_id
+        and event.data.get("tile_id") == debt.tile_id
+        for event in game.events
+    )
+
+
+def _rent_debt_property_choices(
+    game: GameState,
+    pack: ContentPack,
+    engine: NegotiationEngine,
+    creditor: PlayerState,
+    settlement_amount: int,
+) -> list[GameCommand]:
+    debt = game.active_debt
+    assert debt is not None
+    candidates: list[tuple[int, str]] = []
+    for tile in pack.board.tiles:
+        if (
+            not tile.is_purchasable
+            or game.owners.get(tile.id) != debt.debtor_id
+            or game.building_levels.get(tile.id, 0) > 0
+        ):
+            continue
+        valuation = engine.evaluate(
+            creditor.user_id,
+            debt.debtor_id,
+            offered_cash=0,
+            requested_cash=0,
+            offered_property_ids=[],
+            requested_property_ids=[tile.id],
+        )
+        creditor_gain = valuation.proposer_property_gain
+        debtor_cost = valuation.recipient_property_loss
+        if (
+            creditor_gain * 100 < settlement_amount * 70
+            or debtor_cost * 100 > settlement_amount * 125
+        ):
+            continue
+        fairness_gap = abs(debtor_cost - settlement_amount)
+        candidates.append((creditor_gain * 2 - fairness_gap, tile.id))
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return [
+        ProposeRentDebtPlanCommand(
+            action="propose_rent_debt_plan",
+            installments=0,
+            interest_percent=0,
+            template=RentDebtPlanTemplate.CUSTOM,
+            requested_property_ids=[property_id],
+        )
+        for _, property_id in candidates[:3]
+    ]
+
+
 class BotPolicy:
     """Pure, deterministic bot decisions over the authoritative game snapshot."""
 
@@ -70,6 +235,51 @@ class BotPolicy:
         if game.status is not GameStatus.PLAYING:
             return None
         engine = NegotiationEngine(game, pack)
+        if game.pending_card_choice_result is not None:
+            chooser = self._bot(game, game.pending_card_choice_result.player_id)
+            if chooser is None:
+                return None
+            return BotAction(
+                chooser.user_id,
+                ContinueCardChoiceResultCommand(
+                    action="continue_card_choice_result",
+                ),
+                "continue_interactive_card_result",
+            )
+        if game.pending_card_draw is not None:
+            drawer = self._bot(game, game.pending_card_draw.player_id)
+            if drawer is None:
+                return None
+            if game.pending_card_draw.card_id is None:
+                return BotAction(
+                    drawer.user_id,
+                    ChooseCardCommand(
+                        action="choose_card",
+                        card_index=(
+                            game.pending_card_draw.draw_sequence
+                            % game.pending_card_draw.offer_count
+                        ),
+                    ),
+                    "choose_facedown_card",
+                )
+            return BotAction(
+                drawer.user_id,
+                ContinueCardCommand(action="continue_card"),
+                "continue_drawn_card",
+            )
+        if game.pending_card_choice is not None:
+            chooser = self._bot(game, game.pending_card_choice.player_id)
+            if chooser is None:
+                return None
+            choice = game.pending_card_choice.effect.choices[0]
+            return BotAction(
+                chooser.user_id,
+                ResolveCardChoiceCommand(
+                    action="resolve_card_choice",
+                    choice_id=choice.id,
+                ),
+                "resolve_interactive_card",
+            )
         if game.active_auction is not None:
             return self._auction_action(game, pack, engine)
         if game.pending_auction_selector_id is not None:
@@ -92,10 +302,25 @@ class BotPolicy:
                 creditor = self._bot(game, game.active_debt.creditor_id)
                 if creditor is None:
                     return None
+                choices = build_rent_debt_creditor_choices(
+                    game,
+                    pack,
+                    engine,
+                    creditor,
+                )
+                command = choices[0] if choices else DemandRentDebtCommand(
+                    action="demand_rent_debt"
+                )
                 return BotAction(
                     creditor.user_id,
-                    DemandRentDebtCommand(action="demand_rent_debt"),
-                    "demand_rent_payment",
+                    command,
+                    (
+                        "demand_after_failed_debt_negotiation"
+                        if isinstance(command, DemandRentDebtCommand)
+                        else "counter_rent_debt_terms"
+                        if _rent_debt_rejection_count(game) > 0
+                        else "offer_rent_debt_terms"
+                    ),
                 )
             debtor = self._bot(game, game.active_debt.debtor_id)
             if debtor is None:
@@ -131,6 +356,14 @@ class BotPolicy:
             finance = self._financial_action(game, pack, engine, player)
             if finance is not None:
                 return finance
+            availability = self._trade_availability_action(
+                game,
+                pack,
+                engine,
+                player,
+            )
+            if availability is not None:
+                return availability
             return BotAction(
                 player.user_id,
                 EndTurnCommand(action="end_turn"),
@@ -145,6 +378,47 @@ class BotPolicy:
     ) -> BotAction | None:
         """Prefer progress over strategy after repeated invalid/stale decisions."""
         if game.status is not GameStatus.PLAYING:
+            return None
+        if game.pending_card_choice_result is not None:
+            chooser = self._bot(game, game.pending_card_choice_result.player_id)
+            if chooser is not None:
+                return BotAction(
+                    chooser.user_id,
+                    ContinueCardChoiceResultCommand(
+                        action="continue_card_choice_result",
+                    ),
+                    "safeguard_continue_interactive_card_result",
+                )
+            return None
+        if game.pending_card_draw is not None:
+            drawer = self._bot(game, game.pending_card_draw.player_id)
+            if drawer is not None:
+                if game.pending_card_draw.card_id is None:
+                    return BotAction(
+                        drawer.user_id,
+                        ChooseCardCommand(
+                            action="choose_card",
+                            card_index=0,
+                        ),
+                        "safeguard_choose_facedown_card",
+                    )
+                return BotAction(
+                    drawer.user_id,
+                    ContinueCardCommand(action="continue_card"),
+                    "safeguard_continue_drawn_card",
+                )
+            return None
+        if game.pending_card_choice is not None:
+            chooser = self._bot(game, game.pending_card_choice.player_id)
+            if chooser is not None:
+                return BotAction(
+                    chooser.user_id,
+                    ResolveCardChoiceCommand(
+                        action="resolve_card_choice",
+                        choice_id=game.pending_card_choice.effect.choices[0].id,
+                    ),
+                    "safeguard_resolve_interactive_card",
+                )
             return None
         if game.active_auction is not None:
             for player_id in game.active_auction.eligible_player_ids:
@@ -336,20 +610,19 @@ class BotPolicy:
         assert debt is not None
         if debt.plan_proposal is not None:
             proposal = debt.plan_proposal
+            settlement_amount = _rent_debt_settlement_amount(game)
             cash_cost = (
-                (debt.amount * (100 + proposal.interest_percent) + 99) // 100
+                (settlement_amount * (100 + proposal.interest_percent) + 99) // 100
                 if proposal.installments
                 else 0
             )
-            property_cost = sum(
-                engine.strategic_value(
-                    bot.user_id,
-                    self._tile(pack, property_id),
-                    game.owners,
-                )
-                for property_id in proposal.requested_property_ids
+            property_cost = engine.separation_cost(
+                bot.user_id,
+                proposal.requested_property_ids,
             )
-            reasonable_cost = cash_cost + property_cost <= debt.amount * 125 // 100
+            reasonable_cost = (
+                cash_cost + property_cost <= settlement_amount * 125 // 100
+            )
             if (
                 proposal.interest_percent <= 25
                 and proposal.installments <= 6
@@ -601,6 +874,35 @@ class BotPolicy:
             return None
         best = candidates[0]
         return BotAction(bot.user_id, best.command, best.reason)
+
+    @staticmethod
+    def _trade_availability_action(
+        game: GameState,
+        pack: ContentPack,
+        engine: NegotiationEngine,
+        bot: PlayerState,
+    ) -> BotAction | None:
+        unavailable = set(game.trade_unavailable_property_ids)
+        for tile in pack.board.tiles:
+            if game.owners.get(tile.id) != bot.user_id:
+                continue
+            available = engine.should_offer_property_for_trade(bot.user_id, tile)
+            if available == (tile.id not in unavailable):
+                continue
+            return BotAction(
+                bot.user_id,
+                SetPropertyTradeAvailabilityCommand(
+                    action="set_property_trade_availability",
+                    property_id=tile.id,
+                    available=available,
+                ),
+                (
+                    "enable_spare_for_trade"
+                    if available
+                    else "protect_strategic_property"
+                ),
+            )
+        return None
 
     # ------------------------------------------------------------------- turns
 

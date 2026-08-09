@@ -26,7 +26,6 @@ from business_game.domain.models import (
     CancelTradeCommand,
     DebtReason,
     DebtState,
-    DemandRentDebtCommand,
     GameEvent,
     GameSettings,
     GameState,
@@ -36,6 +35,7 @@ from business_game.domain.models import (
     PassAuctionCommand,
     PayDebtCommand,
     PlayerState,
+    ProposeRentDebtPlanCommand,
     ProposeTradeCommand,
     RejectRentDebtPlanCommand,
     RejectTradeCommand,
@@ -44,6 +44,7 @@ from business_game.domain.models import (
     RequestLoanCommand,
     RollCommand,
     SellGroupRoundCommand,
+    SetPropertyTradeAvailabilityCommand,
     TradeOffer,
     TurnPhase,
     UserCreate,
@@ -317,7 +318,9 @@ def test_bot_waits_for_human_creditor_rent_choice(packs_dir: Path) -> None:
     action = BotPolicy().choose_action(game, pack)
     assert action is not None
     assert action.actor_id == creditor.user_id
-    assert isinstance(action.command, DemandRentDebtCommand)
+    assert isinstance(action.command, ProposeRentDebtPlanCommand)
+    assert action.command.installments == 3
+    assert action.command.interest_percent == 5
 
     creditor.is_bot = False
     game.active_debt.collection_demanded = True
@@ -548,6 +551,57 @@ async def test_bot_proposes_profitable_group_completion_trade(
     assert action.command.recipient_id == other.user_id
     assert action.command.requested_property_ids == [group[-1].id]
     assert 0 < action.command.offered_cash < pack.manifest.starting_balance
+
+    game.trade_unavailable_property_ids = [group[-1].id]
+    unavailable_action = BotPolicy().choose_action(game, pack)
+
+    assert unavailable_action is not None
+    assert not isinstance(unavailable_action.command, ProposeTradeCommand)
+
+
+async def test_bot_manages_property_trade_availability(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    host = await create_user(session, "availability-bot@example.com", "Host")
+    pack = PackLoader(packs_dir).load("classic-demo")
+    group_tile = next(tile for tile in pack.board.tiles if tile.group is not None)
+    group = [tile for tile in pack.board.tiles if tile.group == group_tile.group]
+    bot = PlayerState(
+        user_id=host.id,
+        display_name="Bot",
+        is_bot=True,
+        bot_personality=BotPersonality.BALANCED,
+    )
+    other = PlayerState(user_id=uuid4(), display_name="Human")
+    game = GameState(
+        host_user_id=other.user_id,
+        pack_id=pack.manifest.id,
+        pack_version=pack.manifest.version,
+        status=GameStatus.PLAYING,
+        players=[bot, other],
+        phase=TurnPhase.WAITING_FOR_END,
+        owners={group[0].id: bot.user_id},
+        trade_unavailable_property_ids=[group[0].id],
+    )
+
+    enable = BotPolicy().choose_action(game, pack)
+
+    assert enable is not None
+    assert enable.reason == "enable_spare_for_trade"
+    assert isinstance(enable.command, SetPropertyTradeAvailabilityCommand)
+    assert enable.command.property_id == group[0].id
+    assert enable.command.available is True
+
+    game.trade_unavailable_property_ids = [group[1].id]
+    game.owners[group[1].id] = bot.user_id
+    protect = BotPolicy().choose_action(game, pack)
+
+    assert protect is not None
+    assert protect.reason == "protect_strategic_property"
+    assert isinstance(protect.command, SetPropertyTradeAvailabilityCommand)
+    assert protect.command.property_id == group[0].id
+    assert protect.command.available is False
 
 
 async def test_bot_liquidates_buildings_then_mortgages_for_debt(

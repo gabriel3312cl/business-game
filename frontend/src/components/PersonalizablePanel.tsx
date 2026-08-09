@@ -15,6 +15,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import type { VisualEffectsIntensity } from '../types'
 
 const MIN_PANEL_HEIGHT = 144
 
@@ -35,6 +36,7 @@ interface Props {
   onDragOver?: (event: DragEvent<HTMLDivElement>) => void
   onDrop?: (event: DragEvent<HTMLDivElement>) => void
   onHeightChange?: (height: number) => void
+  motionIntensity?: VisualEffectsIntensity
 }
 
 interface ResizeState {
@@ -61,6 +63,7 @@ export function PersonalizablePanel({
   onDragOver,
   onDrop,
   onHeightChange,
+  motionIntensity = 'full',
 }: Props) {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const resizeStateRef = useRef<ResizeState | null>(null)
@@ -128,7 +131,11 @@ export function PersonalizablePanel({
         maxHeight: keepsContentHeight ? 'calc(100dvh - 16px)' : undefined,
         flex: fillsAvailableHeight ? '1 1 0' : '0 0 auto',
         opacity: dragging ? 0.55 : 1,
-        transition: 'opacity 120ms ease',
+        transition:
+          motionIntensity === 'off'
+            ? 'none'
+            : `opacity ${motionIntensity === 'soft' ? 90 : 140}ms ease, transform ${motionIntensity === 'soft' ? 120 : 180}ms ease`,
+        transform: dragging && motionIntensity !== 'off' ? 'scale(.985)' : 'none',
       }}
     >
       <Accordion
@@ -145,6 +152,14 @@ export function PersonalizablePanel({
           bgcolor: 'background.paper',
           overflow: 'hidden',
           '&::before': { display: 'none' },
+          '& > .MuiCollapse-root': {
+            transitionDuration:
+              motionIntensity === 'off'
+                ? '0ms !important'
+                : motionIntensity === 'soft'
+                  ? '140ms !important'
+                  : '240ms !important',
+          },
           ...(keepsContentHeight || fillsAvailableHeight
             ? {
                 '& > .MuiCollapse-root': {

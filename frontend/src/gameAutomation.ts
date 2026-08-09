@@ -17,6 +17,12 @@ export function nextAutomationCommand({
   autoEndTurns,
   motionPending,
 }: AutomationOptions): GameCommand | null {
+  if (
+    game.pending_card_draw ||
+    game.pending_card_choice ||
+    game.pending_card_choice_result
+  ) return null
+
   if (autoRejectTrades) {
     const incomingTrade = game.trades.find(
       (trade) =>

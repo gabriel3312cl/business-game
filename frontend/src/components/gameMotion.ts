@@ -1,6 +1,6 @@
 import { useMediaQuery } from '@mui/material'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { GameEvent, GameState } from '../types'
+import type { GameEvent, GameState, VisualEffectsIntensity } from '../types'
 
 type VisualPositions = Record<string, number>
 
@@ -40,6 +40,7 @@ export function useVisualPlayerPositions(
   onMotionSettled?: (settlement: MotionSettlement) => void,
   onTokenStep?: (cue: MotionAudioCue) => void,
   onTokenTeleport?: (cue: MotionAudioCue) => void,
+  motionIntensity: VisualEffectsIntensity = 'full',
 ): VisualPositions {
   const prefersReducedMotion = useMediaQuery(
     '(prefers-reduced-motion: reduce)',
@@ -152,7 +153,12 @@ export function useVisualPlayerPositions(
 
         if (
           movement.eventType === 'dice.rolled' &&
-          !(await wait(DICE_SETTLE_DELAY_MS, generation))
+          !(await wait(
+            motionIntensity === 'soft'
+              ? Math.round(DICE_SETTLE_DELAY_MS * 0.55)
+              : DICE_SETTLE_DELAY_MS,
+            generation,
+          ))
         ) {
           break
         }
@@ -176,7 +182,7 @@ export function useVisualPlayerPositions(
             direction,
             count,
           )
-        const stepDuration = stepDurationFor(stepCount)
+        const stepDuration = stepDurationFor(stepCount, motionIntensity)
 
         for (let step = 1; step <= stepCount; step += 1) {
           if (generation !== generationRef.current) break
@@ -206,7 +212,7 @@ export function useVisualPlayerPositions(
         syncMotionKeyRef.current,
       )
     })()
-  }, [notifyMotionSettled, replaceVisualPositions, setPlayerPosition, wait])
+  }, [motionIntensity, notifyMotionSettled, replaceVisualPositions, setPlayerPosition, wait])
 
   useEffect(() => {
     tileCountRef.current = tileCount
@@ -220,7 +226,8 @@ export function useVisualPlayerPositions(
       !initializedRef.current ||
       gameChanged ||
       syncChanged ||
-      prefersReducedMotion
+      prefersReducedMotion ||
+      motionIntensity === 'off'
     ) {
       cancelMotion()
       replaceVisualPositions(authoritative)
@@ -256,6 +263,7 @@ export function useVisualPlayerPositions(
     cancelMotion,
     game,
     notifyMotionSettled,
+    motionIntensity,
     prefersReducedMotion,
     replaceVisualPositions,
     runQueue,
@@ -350,15 +358,20 @@ function directionalDistance(
     : normalizePosition(fromPosition - toPosition, tileCount)
 }
 
-function stepDurationFor(stepCount: number): number {
-  if (stepCount <= 0) return DEFAULT_STEP_DURATION_MS
-  return Math.max(
+function stepDurationFor(
+  stepCount: number,
+  intensity: VisualEffectsIntensity,
+): number {
+  const duration = stepCount <= 0
+    ? DEFAULT_STEP_DURATION_MS
+    : Math.max(
     MIN_STEP_DURATION_MS,
     Math.min(
       DEFAULT_STEP_DURATION_MS,
       Math.floor(MAX_MOVEMENT_DURATION_MS / stepCount),
     ),
   )
+  return intensity === 'soft' ? Math.max(16, Math.round(duration * 0.55)) : duration
 }
 
 function normalizePosition(position: number, tileCount: number): number {

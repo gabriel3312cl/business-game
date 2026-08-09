@@ -27,6 +27,9 @@ function game(overrides: Partial<GameState> = {}): GameState {
     pending_auction_selector_id: null,
     active_auction: null,
     active_debt: null,
+    pending_card_draw: null,
+    pending_card_choice: null,
+    pending_card_choice_result: null,
     ...overrides,
   } as GameState
 }
@@ -119,6 +122,48 @@ describe('nextAutomationCommand', () => {
         autoRollDice: false,
         autoEndTurns: true,
         motionPending: true,
+      }),
+    ).toBeNull()
+
+    expect(
+      nextAutomationCommand({
+        game: game({
+          pending_card_choice: {} as never,
+          trades: [trade()],
+        }),
+        userId: user.user_id,
+        autoRejectTrades: true,
+        autoRollDice: true,
+        autoEndTurns: true,
+        motionPending: false,
+      }),
+    ).toBeNull()
+
+    expect(
+      nextAutomationCommand({
+        game: game({
+          pending_card_draw: {} as never,
+          trades: [trade()],
+        }),
+        userId: user.user_id,
+        autoRejectTrades: true,
+        autoRollDice: true,
+        autoEndTurns: true,
+        motionPending: false,
+      }),
+    ).toBeNull()
+
+    expect(
+      nextAutomationCommand({
+        game: game({
+          pending_card_choice_result: {} as never,
+          trades: [trade()],
+        }),
+        userId: user.user_id,
+        autoRejectTrades: true,
+        autoRollDice: true,
+        autoEndTurns: true,
+        motionPending: false,
       }),
     ).toBeNull()
 

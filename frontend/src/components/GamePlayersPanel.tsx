@@ -23,7 +23,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { santiagoTokenAssets } from '../assets/monopolySantiago'
 import type {
@@ -31,10 +31,15 @@ import type {
   GameState,
   TokenAppearanceSettings,
   User,
+  VisualEffectsIntensity,
 } from '../types'
 import { AssetGlyph } from './AssetVisual'
 import { playerColors } from './gameColors'
-import { tokenAssetPath, tokenShapeStyle } from './tokenAppearance'
+import {
+  tokenAssetPath,
+  tokenFillStyle,
+  tokenShapeStyle,
+} from './tokenAppearance'
 
 interface Props {
   game: GameState
@@ -42,6 +47,7 @@ interface Props {
   useAssetTokens?: boolean
   currentUserTokenAppearance?: TokenAppearanceSettings | null
   showTitle?: boolean
+  motionIntensity?: VisualEffectsIntensity
 }
 
 export function GamePlayersPanel({
@@ -50,6 +56,7 @@ export function GamePlayersPanel({
   useAssetTokens = false,
   currentUserTokenAppearance = null,
   showTitle = true,
+  motionIntensity = 'full',
 }: Props) {
   const { t, i18n } = useTranslation()
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null)
@@ -100,6 +107,7 @@ export function GamePlayersPanel({
           return (
             <ListItem
               key={player.user_id}
+              data-player-effect-id={player.user_id}
               sx={{
                 borderRadius: 2,
                 mb: 0.5,
@@ -111,6 +119,21 @@ export function GamePlayersPanel({
                   player.user_id === user.id
                     ? 'rgba(157,140,255,.12)'
                     : 'transparent',
+                opacity: player.bankrupt ? 0.45 : 1,
+                filter: player.bankrupt ? 'grayscale(1)' : 'none',
+                transition:
+                  motionIntensity === 'off'
+                    ? 'none'
+                    : 'background-color 180ms ease, border-color 180ms ease, opacity 180ms ease, filter 180ms ease',
+                animation:
+                  active && !player.bankrupt && motionIntensity === 'full'
+                    ? 'active-player-arrival 760ms ease-out'
+                    : undefined,
+                '@keyframes active-player-arrival': {
+                  '0%': { boxShadow: `0 0 0 0 ${color}00` },
+                  '45%': { boxShadow: `0 0 0 4px ${color}50` },
+                  '100%': { boxShadow: `0 0 0 0 ${color}00` },
+                },
               }}
             >
               <ListItemAvatar sx={{ minWidth: 42 }}>
@@ -118,7 +141,9 @@ export function GamePlayersPanel({
                   sx={{
                     width: 32,
                     height: 32,
-                    bgcolor: color,
+                    ...(customAppearance
+                      ? tokenFillStyle(customAppearance)
+                      : { bgcolor: color }),
                     color: '#0b0912',
                     fontWeight: 900,
                     fontSize: 14,
@@ -127,7 +152,9 @@ export function GamePlayersPanel({
                       : {}),
                   }}
                 >
-                  {assetPath ? (
+                  {customAppearance?.icon === 'emoji' && customAppearance.emoji ? (
+                    customAppearance.emoji
+                  ) : assetPath ? (
                     <AssetGlyph path={assetPath} size="72%" />
                   ) : (
                     index + 1
@@ -230,17 +257,22 @@ export function GamePlayersPanel({
                 secondary={
                   player.bankrupt
                     ? t('bankrupt')
-                    : `$${player.balance}${
-                        player.in_jail ? ` · ${t('detained')}` : ''
-                      }${
-                        player.is_bot
-                          ? ` · ${t(
-                              `botControllers.${player.bot_controller ?? 'standard'}`,
-                            )} · ${t(
-                              `botPersonalities.${player.bot_personality ?? 'balanced'}`,
-                            )}`
-                          : ''
-                      }`
+                    : (
+                        <Box component="span">
+                          <AnimatedBalance
+                            value={player.balance}
+                            intensity={motionIntensity}
+                          />
+                          {player.in_jail ? ` · ${t('detained')}` : ''}
+                          {player.is_bot
+                            ? ` · ${t(
+                                `botControllers.${player.bot_controller ?? 'standard'}`,
+                              )} · ${t(
+                                `botPersonalities.${player.bot_personality ?? 'balanced'}`,
+                              )}`
+                            : ''}
+                        </Box>
+                      )
                 }
               />
               {active && (
@@ -423,6 +455,40 @@ export function GamePlayersPanel({
       )}
     </Box>
   )
+}
+
+function AnimatedBalance({
+  value,
+  intensity,
+}: {
+  value: number
+  intensity: VisualEffectsIntensity
+}) {
+  const previousValue = useRef(value)
+  const [displayedValue, setDisplayedValue] = useState(value)
+
+  useEffect(() => {
+    const from = previousValue.current
+    previousValue.current = value
+    if (from === value || intensity === 'off') {
+      setDisplayedValue(value)
+      return
+    }
+
+    const duration = intensity === 'soft' ? 280 : 650
+    const startedAt = performance.now()
+    let frame = 0
+    const animate = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / duration)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setDisplayedValue(Math.round(from + (value - from) * eased))
+      if (progress < 1) frame = window.requestAnimationFrame(animate)
+    }
+    frame = window.requestAnimationFrame(animate)
+    return () => window.cancelAnimationFrame(frame)
+  }, [intensity, value])
+
+  return <Box component="span" sx={{ fontVariantNumeric: 'tabular-nums' }}>${displayedValue}</Box>
 }
 
 interface RelationshipInteraction {

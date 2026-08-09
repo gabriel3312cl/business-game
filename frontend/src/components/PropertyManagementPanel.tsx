@@ -7,12 +7,13 @@ import {
   Divider,
   Paper,
   Stack,
+  Switch,
   ToggleButton,
   ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type {
   ContentPack,
@@ -35,6 +36,7 @@ interface Props {
   user: User
   busy: boolean
   onCommand: (command: GameCommand) => Promise<boolean>
+  onHoveredPropertyChange?: (propertyId: string | null) => void
   embedded?: boolean
 }
 
@@ -54,6 +56,7 @@ export function PropertyManagementPanel({
   user,
   busy,
   onCommand,
+  onHoveredPropertyChange,
   embedded = false,
 }: Props) {
   const { t } = useTranslation()
@@ -82,6 +85,11 @@ export function PropertyManagementPanel({
     .filter((group) => group.visibleTiles.length > 0)
   const selectedTile =
     pack.board.tiles.find((tile) => tile.id === selectedTileId) ?? null
+
+  useEffect(
+    () => () => onHoveredPropertyChange?.(null),
+    [onHoveredPropertyChange],
+  )
 
   return (
     <Box>
@@ -252,31 +260,43 @@ export function PropertyManagementPanel({
                     )
                     const owner = ownerIndex >= 0 ? game.players[ownerIndex] : null
                     const mortgaged = game.mortgaged_property_ids.includes(tile.id)
+                    const tradeAvailable =
+                      !game.trade_unavailable_property_ids.includes(tile.id)
                     const level = game.building_levels[tile.id] ?? 0
                     const name = pack.messages[tile.name_key] ?? tile.id
                     return (
-                      <Tooltip key={tile.id} title={t('clickForTileDetails')}>
-                        <ButtonBase
-                          onClick={() => setSelectedTileId(tile.id)}
-                          aria-label={`${name}. ${t('clickForTileDetails')}`}
-                          sx={{
-                            width: '100%',
-                            display: 'grid',
-                            gridTemplateColumns: '6px minmax(0, 1fr) auto',
-                            alignItems: 'stretch',
-                            textAlign: 'left',
-                            opacity: mortgaged ? 0.72 : 1,
-                            backgroundImage: mortgaged
-                              ? 'repeating-linear-gradient(-45deg, transparent, transparent 8px, rgba(255,255,255,.025) 8px, rgba(255,255,255,.025) 12px)'
-                              : 'none',
-                            '&:hover': { bgcolor: `${group.accent}12` },
-                            '&:focus-visible': {
-                              outline: `2px solid ${group.accent}`,
-                              outlineOffset: -2,
-                            },
-                          }}
-                        >
-                          <Box sx={{ bgcolor: group.accent }} />
+                      <Box
+                        key={tile.id}
+                        onMouseEnter={() => onHoveredPropertyChange?.(tile.id)}
+                        onMouseLeave={() => onHoveredPropertyChange?.(null)}
+                        sx={{
+                          display: 'grid',
+                          gridTemplateColumns: '6px minmax(0, 1fr) auto',
+                          alignItems: 'stretch',
+                          opacity: mortgaged ? 0.72 : 1,
+                          backgroundImage: mortgaged
+                            ? 'repeating-linear-gradient(-45deg, transparent, transparent 8px, rgba(255,255,255,.025) 8px, rgba(255,255,255,.025) 12px)'
+                            : 'none',
+                        }}
+                      >
+                        <Box sx={{ bgcolor: group.accent }} />
+                        <Tooltip title={t('clickForTileDetails')}>
+                          <ButtonBase
+                            onClick={() => setSelectedTileId(tile.id)}
+                            aria-label={`${name}. ${t('clickForTileDetails')}`}
+                            sx={{
+                              minWidth: 0,
+                              display: 'grid',
+                              gridTemplateColumns: 'minmax(0, 1fr) auto',
+                              alignItems: 'stretch',
+                              textAlign: 'left',
+                              '&:hover': { bgcolor: `${group.accent}12` },
+                              '&:focus-visible': {
+                                outline: `2px solid ${group.accent}`,
+                                outlineOffset: -2,
+                              },
+                            }}
+                          >
                           <Box sx={{ minWidth: 0, px: 1.1, py: 0.9 }}>
                             <Typography variant="body2" fontWeight={800} noWrap>
                               {name}
@@ -345,8 +365,49 @@ export function PropertyManagementPanel({
                               />
                             )}
                           </Stack>
-                        </ButtonBase>
-                      </Tooltip>
+                          </ButtonBase>
+                        </Tooltip>
+                        {ownerId === user.id && (
+                          <Tooltip title={t('tradeAvailabilityHelp')}>
+                            <Stack
+                              alignItems="center"
+                              justifyContent="center"
+                              sx={{ px: 0.75, py: 0.5 }}
+                            >
+                              <Typography
+                                variant="caption"
+                                color={tradeAvailable ? 'success.light' : 'text.disabled'}
+                                fontWeight={750}
+                                noWrap
+                              >
+                                {t(
+                                  tradeAvailable
+                                    ? 'tradeAvailable'
+                                    : 'tradeUnavailable',
+                                )}
+                              </Typography>
+                              <Switch
+                                size="small"
+                                color="success"
+                                checked={tradeAvailable}
+                                disabled={busy}
+                                slotProps={{
+                                  input: {
+                                    'aria-label': t('tradeAvailabilityFor', { name }),
+                                  },
+                                }}
+                                onChange={(_, available) =>
+                                  void onCommand({
+                                    action: 'set_property_trade_availability',
+                                    property_id: tile.id,
+                                    available,
+                                  })
+                                }
+                              />
+                            </Stack>
+                          </Tooltip>
+                        )}
+                      </Box>
                     )
                   })}
                 </Stack>

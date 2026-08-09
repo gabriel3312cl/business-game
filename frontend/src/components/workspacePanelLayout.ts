@@ -6,6 +6,7 @@ import type {
   WorkspacePanelPlacement,
   WorkspacePanelWindowGeometry,
 } from '../types'
+import { normalizeManagementPanelLayout } from './managementPanelLayout'
 
 export const WORKSPACE_PANEL_IDS: WorkspacePanelId[] = [
   'room',
@@ -13,6 +14,7 @@ export const WORKSPACE_PANEL_IDS: WorkspacePanelId[] = [
   'players',
   'properties',
   'trades',
+  'debts',
   'bank',
   'market',
   'chat',
@@ -133,15 +135,16 @@ export function isWorkspacePanelId(value: unknown): value is WorkspacePanelId {
 function migrateLegacyPanelLayout(
   legacy: LegacyPanelLayout,
 ): WorkspacePanelLayoutPreferences {
+  const management = normalizeManagementPanelLayout(legacy.management)
   const order: WorkspacePanelId[] = []
   const visible: WorkspacePanelId[] = []
   const heights: Partial<Record<WorkspacePanelId, number>> = {}
 
   for (const panelId of legacy.order) {
     if (panelId === 'management') {
-      order.push(...legacy.management.order)
-      visible.push(...legacy.management.visible)
-      Object.assign(heights, legacy.management.heights)
+      order.push(...management.order)
+      visible.push(...management.visible)
+      Object.assign(heights, management.heights)
       continue
     }
     order.push(panelId)

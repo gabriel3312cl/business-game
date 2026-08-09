@@ -16,7 +16,13 @@ import {
 } from '@mui/material'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ContentPack, GameCommand, GameState, User } from '../types'
+import type {
+  ContentPack,
+  GameCommand,
+  GameState,
+  User,
+  VisualEffectsIntensity,
+} from '../types'
 import { Dice3D } from './Dice3D'
 import { GameActivityFeed } from './GameActivityFeed'
 
@@ -32,6 +38,7 @@ interface Props {
   onCommand: (command: GameCommand) => Promise<boolean>
   onToggleProbabilityHeatmap: () => void
   onStart: () => void
+  motionIntensity?: VisualEffectsIntensity
 }
 
 export function GameActionCenter({
@@ -46,6 +53,7 @@ export function GameActionCenter({
   onCommand,
   onToggleProbabilityHeatmap,
   onStart,
+  motionIntensity = 'full',
 }: Props) {
   const { t } = useTranslation()
   const currentPlayer = game.players[game.current_player_index]
@@ -112,6 +120,7 @@ export function GameActionCenter({
         values={latestDice.values}
         rollSequence={latestDice.sequence}
         dieLabel={t('dice')}
+        motionIntensity={motionIntensity}
       />
 
       {game.status === 'lobby' ? (
@@ -155,7 +164,10 @@ export function GameActionCenter({
           {isCurrentPlayer &&
             !motionPending &&
             !game.active_auction &&
-            !game.active_debt && (
+            !game.active_debt &&
+            !game.pending_card_draw &&
+            !game.pending_card_choice &&
+            !game.pending_card_choice_result && (
             <Stack
               direction="row"
               spacing={0.75}
@@ -335,6 +347,7 @@ export function GameActionCenter({
           players={game.players}
           spectators={game.spectators}
           pack={pack}
+          motionIntensity={motionIntensity}
         />
       </Box>
     </Stack>

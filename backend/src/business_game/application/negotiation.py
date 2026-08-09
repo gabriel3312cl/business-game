@@ -282,6 +282,21 @@ class NegotiationEngine:
             owners.pop(property_id, None)
         return before - self.portfolio_value(player_id, owners)
 
+    def should_offer_property_for_trade(
+        self,
+        player_id: UUID,
+        tile: TileDefinition,
+    ) -> bool:
+        """A loose asset may be offered; a developed or strategic asset stays protected."""
+        if (
+            not tile.is_purchasable
+            or self._game.owners.get(tile.id) != player_id
+            or self._game.building_levels.get(tile.id, 0) > 0
+        ):
+            return False
+        separation_cost = self.separation_cost(player_id, [tile.id])
+        return separation_cost <= self._anchor(tile) * SWEETENING_PERCENT // 100
+
     def evaluate(
         self,
         proposer_id: UUID,
@@ -819,6 +834,12 @@ class NegotiationEngine:
         proposer = self._player(trade.proposer_id)
         if proposer is None:
             return TradeAssessment(TradeVerdict.REJECT, "reject_unknown_proposer")
+        unavailable_property_ids = set(self._game.trade_unavailable_property_ids)
+        if unavailable_property_ids.intersection(
+            trade.offered_property_ids,
+            trade.requested_property_ids,
+        ):
+            return TradeAssessment(TradeVerdict.REJECT, "reject_property_unavailable")
         valuation = self.evaluate(
             trade.proposer_id,
             trade.recipient_id,
@@ -1164,6 +1185,7 @@ class NegotiationEngine:
             for tile in self._pack.board.tiles
             if self._game.owners.get(tile.id) == player_id
             and self._game.building_levels.get(tile.id, 0) == 0
+            and tile.id not in self._game.trade_unavailable_property_ids
         ]
 
     def _tradable_rivals(self, bot: PlayerState) -> list[PlayerState]:

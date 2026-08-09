@@ -58,6 +58,7 @@ REASON_TEXT: dict[str, str] = {
     "reject_nothing_in_return": "No: no recibo nada a cambio.",
     "reject_favours_proposer": "No: te favorece demasiado.",
     "reject_unknown_proposer": "No reconozco a quien propone.",
+    "reject_property_unavailable": "No: esa propiedad no está disponible para intercambio.",
     "counter_rebalanced": "Está cerca. Te contraoferto.",
     "propose_win_win_swap": "Te propongo un cambio que nos completa grupos a ambos.",
     "propose_swap_for_group": "Te propongo un cambio para cerrar mi grupo.",
@@ -76,6 +77,7 @@ REPLY_TEXT: dict[str, str] = {
     "incoming_counter": "Está cerca, pero no así. Te voy a contraofertar.",
     "incoming_reject_liquidity": "No puedo: ese efectivo me deja sin caja para las rentas.",
     "incoming_reject_group": "No suelto {property}: con eso cierras tu grupo.",
+    "incoming_reject_unavailable": "No: esa propiedad no está disponible para intercambio.",
     "incoming_reject_value": "Recibo menos de lo que entrego. Sube la oferta.",
     "awaiting_answer": "Mi oferta sigue en pie. Dime si la tomas.",
     "wants_property": "Me interesa {property}. ¿Qué pides por ella?",
@@ -88,6 +90,7 @@ REPLY_TEXT: dict[str, str] = {
 REJECTION_REPLY_KEYS: dict[str, str] = {
     "reject_liquidity_risk": "incoming_reject_liquidity",
     "reject_completes_rival_group": "incoming_reject_group",
+    "reject_property_unavailable": "incoming_reject_unavailable",
 }
 
 
@@ -410,6 +413,8 @@ def _wanted_property_name(
         return None
     for tile in pack.board.tiles:
         if game.owners.get(tile.id) != owner_id:
+            continue
+        if tile.id in game.trade_unavailable_property_ids:
             continue
         if engine.completes_group(bot.user_id, tile):
             return _tile_name(pack, tile.id)

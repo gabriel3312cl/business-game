@@ -17,11 +17,13 @@ import {
   Typography,
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
+import { useEffect, useRef, useState } from 'react'
 import type {
   ContentPack,
   GameEvent,
   PlayerState,
   SpectatorState,
+  VisualEffectsIntensity,
 } from '../types'
 import { playerColors } from './gameColors'
 import {
@@ -36,6 +38,7 @@ interface Props {
   spectators: SpectatorState[]
   pack: ContentPack
   compact?: boolean
+  motionIntensity?: VisualEffectsIntensity
 }
 
 export function GameActivityFeed({
@@ -44,9 +47,22 @@ export function GameActivityFeed({
   spectators,
   pack,
   compact = false,
+  motionIntensity = 'full',
 }: Props) {
   const { t, i18n } = useTranslation()
   const visibleEvents = events.slice(-18).reverse()
+  const latestSequence = visibleEvents[0]?.sequence ?? 0
+  const cursor = useRef(latestSequence)
+  const [animatedSequence, setAnimatedSequence] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (latestSequence <= cursor.current) return
+    cursor.current = latestSequence
+    if (motionIntensity === 'off') return
+    setAnimatedSequence(latestSequence)
+    const timer = window.setTimeout(() => setAnimatedSequence(null), 720)
+    return () => window.clearTimeout(timer)
+  }, [latestSequence, motionIntensity])
 
   const playerName = (playerId?: string) =>
     players.find((player) => player.user_id === playerId)?.display_name ??
@@ -108,6 +124,7 @@ export function GameActivityFeed({
               propertyName,
               cardMessage,
               deckName,
+              (key) => pack.messages[key] ?? key,
               i18n.language,
             )
             return (
@@ -121,6 +138,21 @@ export function GameActivityFeed({
                   borderRadius: 1.5,
                   borderLeft: `3px solid ${presentation.color}`,
                   bgcolor: `${presentation.color}0d`,
+                  animation:
+                    event.sequence === animatedSequence
+                      ? motionIntensity === 'soft'
+                        ? 'activity-fade 420ms ease-out'
+                        : 'activity-enter 680ms cubic-bezier(.2,.8,.2,1)'
+                      : undefined,
+                  '@keyframes activity-enter': {
+                    from: { opacity: 0, transform: 'translateX(-18px)' },
+                    '55%': { opacity: 1, transform: 'translateX(3px)' },
+                    to: { opacity: 1, transform: 'translateX(0)' },
+                  },
+                  '@keyframes activity-fade': {
+                    from: { opacity: 0 },
+                    to: { opacity: 1 },
+                  },
                 }}
               >
                 <Box
@@ -262,6 +294,7 @@ function eventMessage(
   propertyName: (tileId?: string) => string,
   cardMessage: (cardId?: string) => string,
   deckName: (deckId?: string) => string,
+  contentMessage: (key: string) => string,
   locale: string,
 ): string {
   const player = playerName(textValue(event, 'player_id'))
@@ -320,6 +353,13 @@ function eventMessage(
       return t('activity.propertyDeclined', { player, property })
     case 'property.mortgaged':
       return t('activity.propertyMortgaged', { player, property, amount })
+    case 'property.trade_availability_changed':
+      return t(
+        event.data.available
+          ? 'activity.propertyTradeEnabled'
+          : 'activity.propertyTradeDisabled',
+        { player, property },
+      )
     case 'property.unmortgaged':
       return t('activity.propertyUnmortgaged', { player, property, amount })
     case 'building.purchased':
@@ -425,19 +465,39 @@ function eventMessage(
       })
     case 'debt.plan_cancelled':
       return t('activity.debtPlanCancelled')
+    case 'card.selection_started':
+      return t('activity.cardSelectionStarted', { player })
     case 'card.drawn':
       return t('activity.cardDrawn', {
         player,
         card: cardMessage(textValue(event, 'card_id')),
       })
+    case 'card.continued':
+      return t('activity.cardContinued', { player })
     case 'card.cash_applied':
       return t('activity.cardCash', { player, amount })
+    case 'card.cash_equalized':
+      return t('activity.cardCashEqualized', {
+        player,
+        target: playerName(textValue(event, 'target_player_id')),
+        playerBalance: numberValue(event, 'player_balance_after'),
+        targetBalance: numberValue(event, 'target_balance_after'),
+      })
     case 'card.cash_each_applied':
       return t('activity.cardCashEach', {
         payer: playerName(textValue(event, 'payer_id')),
         recipient: playerName(textValue(event, 'recipient_id')),
         amount,
       })
+    case 'card.choice_presented':
+      return t('activity.cardChoicePresented', { player })
+    case 'card.choice_resolved':
+      return t('activity.cardChoiceResolved', {
+        player,
+        result: contentMessage(textValue(event, 'result_key') ?? ''),
+      })
+    case 'card.choice_result_acknowledged':
+      return t('activity.cardChoiceResultAcknowledged', { player })
     case 'card.player_moved':
       return t('activity.cardPlayerMoved', { player, property })
     case 'card.repairs_assessed':

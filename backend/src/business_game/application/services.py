@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.application.board_service import PackResolver
+from business_game.application.card_collections import select_deck_collections
 from business_game.application.economy import (
     available_bank_cash,
     credit_offer,
@@ -36,6 +37,7 @@ from business_game.domain.models import (
     AcceptRentDebtPlanCommand,
     AcceptTradeCommand,
     AddBotRequest,
+    AllPlayersMoveRelativeCardEffect,
     AuctionState,
     BankLoanState,
     BidCommand,
@@ -51,8 +53,11 @@ from business_game.domain.models import (
     CardPaymentState,
     CashCardEffect,
     CashEachCardEffect,
+    ChooseCardCommand,
     CompleteGroupsCashCardEffect,
     ContentPack,
+    ContinueCardChoiceResultCommand,
+    ContinueCardCommand,
     CounterTradeCommand,
     DebtReason,
     DebtState,
@@ -60,6 +65,7 @@ from business_game.domain.models import (
     DeclinePropertyCommand,
     DemandRentDebtCommand,
     EndTurnCommand,
+    EqualizeCashCardEffect,
     ForgiveRentDebtCommand,
     GameCommand,
     GameEvent,
@@ -68,6 +74,7 @@ from business_game.domain.models import (
     GameStatus,
     GetOutOfJailCardEffect,
     GoToJailCardEffect,
+    InteractiveChoiceCardEffect,
     InvestmentInstrumentState,
     MarketOrderSide,
     MarketOrderState,
@@ -81,6 +88,10 @@ from business_game.domain.models import (
     PassAuctionCommand,
     PayDebtCommand,
     PayJailFineCommand,
+    PayRentDebtPlanCommand,
+    PendingCardChoiceResultState,
+    PendingCardChoiceState,
+    PendingCardDrawState,
     PlaceLimitOrderCommand,
     PlayerState,
     ProposeRentDebtPlanCommand,
@@ -93,13 +104,17 @@ from business_game.domain.models import (
     RepairsCardEffect,
     RepayLoanCommand,
     RequestLoanCommand,
+    ResolveCardChoiceCommand,
     RollCommand,
     RuleOptionName,
+    SalaryCashCardEffect,
     SelectAuctionPropertyCommand,
     SellBuildingCommand,
     SellGroupRoundCommand,
     SellSharesCommand,
+    SetPropertyTradeAvailabilityCommand,
     SpectatorState,
+    SwapPositionCardEffect,
     TileDefinition,
     TileKind,
     TradeOffer,
@@ -129,6 +144,7 @@ from business_game.security import (
 DiceRoller = Callable[[], tuple[int, int]]
 CardShuffler = Callable[[list[str]], list[str]]
 Clock = Callable[[], datetime]
+OutcomeRoller = Callable[[int], int]
 AUCTION_BID_WINDOW = timedelta(seconds=5)
 MAX_EFFECTS_PER_COMMAND = 32
 DIVIDEND_SCALE = 10_000
@@ -258,6 +274,7 @@ class GameService:
         dice_roller: DiceRoller | None = None,
         card_shuffler: CardShuffler | None = None,
         clock: Clock | None = None,
+        outcome_roller: OutcomeRoller | None = None,
     ) -> None:
         self._session = session
         self._packs = packs
@@ -271,6 +288,7 @@ class GameService:
             lambda card_ids: secure_random.sample(card_ids, k=len(card_ids))
         )
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._outcome_roller = outcome_roller or secure_random.randrange
         self._remaining_effects = MAX_EFFECTS_PER_COMMAND
 
     def _ensure_economy(self, game: GameState) -> None:
@@ -294,6 +312,7 @@ class GameService:
         pack_id: str,
         actor: User,
         version: str | None = None,
+        deck_collection_ids: dict[str, list[str]] | None = None,
     ) -> GameState:
         async with self._session.begin():
             pack = (
@@ -301,11 +320,20 @@ class GameService:
                 if self._pack_resolver is not None
                 else self._packs.load(pack_id, version=version)
             )
+            pack, selected_collections = select_deck_collections(
+                pack,
+                deck_collection_ids,
+            )
             game = GameState(
                 host_user_id=actor.id,
                 pack_id=pack.manifest.id,
                 pack_version=pack.manifest.version,
-                pack_snapshot=pack if pack.manifest.schema_version == 5 else None,
+                pack_snapshot=(
+                    pack
+                    if pack.manifest.schema_version == 5 or selected_collections
+                    else None
+                ),
+                deck_collection_ids=selected_collections,
                 settings=GameSettings(
                     max_players=pack.manifest.max_players,
                     rules=pack.manifest.default_rules.model_copy(deep=True),
@@ -826,7 +854,26 @@ class GameService:
                 if current_player is None or current_player.user_id != actor_id:
                     raise ConflictError("it is not this player's turn")
 
-            if game.active_auction is not None:
+            if game.pending_card_choice_result is not None:
+                if isinstance(command, ContinueCardChoiceResultCommand):
+                    self._continue_card_choice_result(game, actor_id)
+                else:
+                    raise ConflictError("the card choice result must be continued")
+            elif game.pending_card_draw is not None:
+                if isinstance(command, ChooseCardCommand):
+                    self._choose_card(game, actor_id, command.card_index)
+                elif isinstance(command, ContinueCardCommand):
+                    self._continue_card(game, actor_id)
+                else:
+                    raise ConflictError("the pending card must be continued")
+            elif game.pending_card_choice is not None:
+                if isinstance(command, ResolveCardChoiceCommand):
+                    self._resolve_card_choice(game, actor_id, command.choice_id)
+                else:
+                    raise ConflictError("the pending card choice must be resolved")
+            elif isinstance(command, SetPropertyTradeAvailabilityCommand):
+                self._set_property_trade_availability(game, actor_id, command)
+            elif game.active_auction is not None:
                 if isinstance(command, BidCommand):
                     self._bid(game, actor_id, command.amount)
                 elif isinstance(command, PassAuctionCommand):
@@ -875,6 +922,8 @@ class GameService:
                     self._declare_bankruptcy(game, actor_id)
                 else:
                     raise ConflictError("the debt must be paid or bankruptcy declared")
+            elif isinstance(command, PayRentDebtPlanCommand):
+                self._pay_rent_debt_plan(game, actor_id, command)
             elif isinstance(command, MortgagePropertyCommand):
                 self._mortgage_property(game, actor_id, command.property_id)
             elif isinstance(command, UnmortgagePropertyCommand):
@@ -927,6 +976,12 @@ class GameService:
                 (BidCommand, PassAuctionCommand, SelectAuctionPropertyCommand),
             ):
                 raise ConflictError("there is no active auction")
+            elif isinstance(command, (ChooseCardCommand, ContinueCardCommand)):
+                raise ConflictError("there is no pending card")
+            elif isinstance(command, ResolveCardChoiceCommand):
+                raise ConflictError("there is no pending card choice")
+            elif isinstance(command, ContinueCardChoiceResultCommand):
+                raise ConflictError("there is no pending card choice result")
             else:
                 self._execute_turn_command(game, actor_id, command)
             self._explain_automated_decision(
@@ -1212,6 +1267,7 @@ class GameService:
             raise ConflictError("insufficient balance")
         player.balance -= price
         game.owners[tile.id] = player.user_id
+        self._protect_acquired_properties(game, [tile.id])
         game.pending_tile_id = None
         game.pending_purchase_discount_percent = 0
         game.phase = TurnPhase.WAITING_FOR_END
@@ -1331,31 +1387,123 @@ class GameService:
             order = [card.id for card in deck.cards]
             game.deck_orders[deck_id] = order
             game.deck_cursors[deck_id] = 0
+        candidates = self._draw_candidates(game, deck_id)
+        if not candidates:
+            self._append_event(game, "card.deck_empty", {"deck_id": deck_id})
+            return
+        self._append_event(
+            game,
+            "card.selection_started",
+            {
+                "player_id": str(player.user_id),
+                "deck_id": deck_id,
+                "offer_count": len(candidates),
+            },
+        )
+        game.pending_card_draw = PendingCardDrawState(
+            player_id=player.user_id,
+            deck_id=deck_id,
+            offer_count=len(candidates),
+            draw_sequence=game.event_sequence,
+        )
+
+    @staticmethod
+    def _draw_candidates(
+        game: GameState,
+        deck_id: str,
+    ) -> list[tuple[int, str]]:
+        order = game.deck_orders.get(deck_id) or []
+        if not order:
+            return []
         held_cards = {
             card_id
             for candidate in game.players
             for card_id in candidate.jail_card_ids
         }
         cursor = game.deck_cursors.get(deck_id, 0) % len(order)
-        card_id = None
+        candidates: list[tuple[int, str]] = []
         for offset in range(len(order)):
-            candidate_id = order[(cursor + offset) % len(order)]
-            if candidate_id not in held_cards:
-                card_id = candidate_id
-                game.deck_cursors[deck_id] = (cursor + offset + 1) % len(order)
+            position = (cursor + offset) % len(order)
+            card_id = order[position]
+            if card_id in held_cards:
+                continue
+            candidates.append((position, card_id))
+            if len(candidates) == 7:
                 break
-        if card_id is None:
-            self._append_event(game, "card.deck_empty", {"deck_id": deck_id})
-            return
-        card = next(item for item in deck.cards if item.id == card_id)
-        game.last_card_id = card.id
+        return candidates
+
+    def _choose_card(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        card_index: int,
+    ) -> None:
+        pending = game.pending_card_draw
+        if pending is None:
+            raise ConflictError("there is no pending card")
+        if pending.player_id != actor_id:
+            raise ConflictError("only the selected player can choose this card")
+        if pending.card_id is not None:
+            raise ConflictError("the pending card was already chosen")
+        candidates = self._draw_candidates(game, pending.deck_id)
+        if card_index >= min(pending.offer_count, len(candidates)):
+            raise ConflictError("the selected card position is not available")
+
+        first_position, _ = candidates[0]
+        selected_position, card_id = candidates[card_index]
+        order = game.deck_orders[pending.deck_id]
+        order[first_position], order[selected_position] = (
+            order[selected_position],
+            order[first_position],
+        )
+        game.deck_cursors[pending.deck_id] = (first_position + 1) % len(order)
+        pending.card_id = card_id
+        pending.selected_index = card_index
+        game.last_card_id = card_id
         self._append_event(
             game,
             "card.drawn",
             {
+                "player_id": str(actor_id),
+                "deck_id": pending.deck_id,
+                "card_id": card_id,
+                "selected_index": card_index,
+            },
+        )
+        pending.reveal_sequence = game.event_sequence
+
+    def _continue_card(self, game: GameState, actor_id: UUID) -> None:
+        pending = game.pending_card_draw
+        if pending is None:
+            raise ConflictError("there is no pending card")
+        if pending.player_id != actor_id:
+            raise ConflictError("only the selected player can continue this card")
+        if pending.card_id is None:
+            raise ConflictError("a card must be chosen before continuing")
+        pack = self._pack(game)
+        deck = next(
+            (item for item in pack.board.decks if item.id == pending.deck_id),
+            None,
+        )
+        if deck is None:
+            raise ConflictError("the pending card deck does not exist")
+        card = next(
+            (item for item in deck.cards if item.id == pending.card_id),
+            None,
+        )
+        if card is None:
+            raise ConflictError("the pending card does not exist")
+
+        game.pending_card_draw = None
+        player = self._player(game, actor_id)
+        self._append_event(
+            game,
+            "card.continued",
+            {
                 "player_id": str(player.user_id),
-                "deck_id": deck_id,
+                "deck_id": pending.deck_id,
                 "card_id": card.id,
+                "draw_sequence": pending.draw_sequence,
             },
         )
         for effect in card.resolved_effects():
@@ -1366,6 +1514,11 @@ class GameService:
                 source_id=card.id,
             )
             if game.active_debt is not None or isinstance(effect, GoToJailCardEffect):
+                break
+            if (
+                game.pending_card_draw is not None
+                or game.pending_card_choice is not None
+            ):
                 break
 
     def _apply_effect(
@@ -1385,10 +1538,17 @@ class GameService:
             return False
         if isinstance(effect, MoveToCardEffect):
             from_position = player.position
+            target_id = effect.tile_id
+            if effect.tile_tag is not None:
+                target_id = next(
+                    tile.id
+                    for tile in pack.board.tiles
+                    if effect.tile_tag in tile.card_tags
+                )
             target_position = next(
                 index
                 for index, tile in enumerate(pack.board.tiles)
-                if tile.id == effect.tile_id
+                if tile.id == target_id
             )
             steps = (target_position - from_position) % pack.manifest.tile_count
             if effect.collect_start:
@@ -1619,7 +1779,229 @@ class GameService:
                     },
                 )
             return False
+        if isinstance(effect, SalaryCashCardEffect):
+            amount = (
+                pack.manifest.pass_start_salary * effect.salary_percent // 100
+            )
+            self._apply_card_cash(game, player, amount, source_id)
+            return False
+        if isinstance(effect, EqualizeCashCardEffect):
+            target = self._card_target_player(game, player, effect.target)
+            if target is None:
+                return False
+            player_before = player.balance
+            target_before = target.balance
+            combined = player.balance + target.balance
+            player.balance = combined // 2
+            target.balance = combined - player.balance
+            self._append_event(
+                game,
+                "card.cash_equalized",
+                {
+                    "player_id": str(player.user_id),
+                    "target_player_id": str(target.user_id),
+                    "card_id": source_id,
+                    "player_balance_before": player_before,
+                    "player_balance_after": player.balance,
+                    "target_balance_before": target_before,
+                    "target_balance_after": target.balance,
+                },
+            )
+            return False
+        if isinstance(effect, SwapPositionCardEffect):
+            target = self._card_target_player(game, player, effect.target)
+            if target is None:
+                return False
+            player_from = player.position
+            target_from = target.position
+            player.position, target.position = target_from, player_from
+            self._append_card_movement_event(
+                game,
+                player,
+                source_id,
+                from_position=player_from,
+                steps=0,
+                movement="teleport",
+            )
+            self._append_card_movement_event(
+                game,
+                target,
+                source_id,
+                from_position=target_from,
+                steps=0,
+                movement="teleport",
+            )
+            return True
+        if isinstance(effect, AllPlayersMoveRelativeCardEffect):
+            for candidate in game.players:
+                if candidate.bankrupt:
+                    continue
+                from_position = candidate.position
+                if effect.steps > 0 and effect.collect_start:
+                    self._move_forward(game, candidate, effect.steps)
+                else:
+                    candidate.position = (
+                        candidate.position + effect.steps
+                    ) % pack.manifest.tile_count
+                self._append_card_movement_event(
+                    game,
+                    candidate,
+                    source_id,
+                    from_position=from_position,
+                    steps=effect.steps,
+                    movement="step",
+                )
+            return True
+        if isinstance(effect, InteractiveChoiceCardEffect):
+            if game.pending_card_choice is not None:
+                raise ConflictError("another card choice is already pending")
+            game.pending_card_choice = PendingCardChoiceState(
+                player_id=player.user_id,
+                card_id=source_id,
+                effect=effect,
+            )
+            self._append_event(
+                game,
+                "card.choice_presented",
+                {
+                    "player_id": str(player.user_id),
+                    "card_id": source_id,
+                    "prompt_key": effect.prompt_key,
+                    "category": effect.category,
+                },
+            )
+            return True
         raise ValueError(f"unsupported effect type: {type(effect).__name__}")
+
+    def _resolve_card_choice(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        choice_id: str,
+    ) -> None:
+        pending = game.pending_card_choice
+        if pending is None:
+            raise ConflictError("there is no pending card choice")
+        if pending.player_id != actor_id:
+            raise ConflictError("only the selected player can resolve this card")
+        choice = next(
+            (item for item in pending.effect.choices if item.id == choice_id),
+            None,
+        )
+        if choice is None:
+            raise ConflictError("the selected card choice is not available")
+        roll = self._outcome_roller(100)
+        if roll < 0 or roll >= 100:
+            raise ValueError("outcome roller must return a value from 0 to 99")
+        cumulative = 0
+        outcome = choice.outcomes[-1]
+        for candidate in choice.outcomes:
+            cumulative += candidate.weight
+            if roll < cumulative:
+                outcome = candidate
+                break
+
+        game.pending_card_choice = None
+        player = self._player(game, actor_id)
+        self._append_event(
+            game,
+            "card.choice_resolved",
+            {
+                "player_id": str(player.user_id),
+                "card_id": pending.card_id,
+                "choice_id": choice.id,
+                "choice_label_key": choice.label_key,
+                "result_key": outcome.result_key,
+            },
+        )
+        resolved_sequence = game.event_sequence
+        for effect in outcome.effects:
+            self._apply_effect(game, player, effect, source_id=pending.card_id)
+            if (
+                game.active_debt is not None
+                or game.pending_card_draw is not None
+                or game.pending_card_choice is not None
+                or isinstance(effect, GoToJailCardEffect)
+            ):
+                break
+        game.pending_card_choice_result = PendingCardChoiceResultState(
+            player_id=player.user_id,
+            card_id=pending.card_id,
+            effect=pending.effect,
+            choice_id=choice.id,
+            choice_label_key=choice.label_key,
+            result_key=outcome.result_key,
+            resolved_sequence=resolved_sequence,
+        )
+
+    def _continue_card_choice_result(
+        self,
+        game: GameState,
+        actor_id: UUID,
+    ) -> None:
+        pending = game.pending_card_choice_result
+        if pending is None:
+            raise ConflictError("there is no pending card choice result")
+        if pending.player_id != actor_id:
+            raise ConflictError("only the selected player can continue this result")
+        game.pending_card_choice_result = None
+        self._append_event(
+            game,
+            "card.choice_result_acknowledged",
+            {
+                "player_id": str(actor_id),
+                "card_id": pending.card_id,
+                "choice_id": pending.choice_id,
+            },
+        )
+
+    def _card_target_player(
+        self,
+        game: GameState,
+        player: PlayerState,
+        target: str,
+    ) -> PlayerState | None:
+        candidates = [
+            candidate
+            for candidate in game.players
+            if candidate.user_id != player.user_id and not candidate.bankrupt
+        ]
+        if not candidates:
+            return None
+        ranked = sorted(
+            candidates,
+            key=lambda candidate: (
+                self._player_net_worth(game, candidate),
+                str(candidate.user_id),
+            ),
+        )
+        return ranked[-1] if target == "wealthiest" else ranked[0]
+
+    def _append_card_movement_event(
+        self,
+        game: GameState,
+        player: PlayerState,
+        card_id: str,
+        *,
+        from_position: int,
+        steps: int,
+        movement: str,
+    ) -> None:
+        tile = self._pack(game).board.tiles[player.position]
+        self._append_event(
+            game,
+            "card.player_moved",
+            {
+                "player_id": str(player.user_id),
+                "card_id": card_id,
+                "tile_id": tile.id,
+                "from_position": from_position,
+                "to_position": player.position,
+                "position": player.position,
+                "steps": steps,
+                "movement": movement,
+            },
+        )
 
     def _resolve_card_destination(
         self,
@@ -3719,6 +4101,7 @@ class GameService:
             requested_cash=0,
             offered_property_ids=[],
             requested_property_ids=command.requested_property_ids,
+            require_trade_availability=False,
         )
         debt.plan_proposal = RentDebtPlanProposal(
             installments=command.installments,
@@ -3772,9 +4155,11 @@ class GameService:
             requested_cash=0,
             offered_property_ids=[],
             requested_property_ids=proposal.requested_property_ids,
+            require_trade_availability=False,
         )
         for property_id in proposal.requested_property_ids:
             game.owners[property_id] = debt.creditor_id
+        self._protect_acquired_properties(game, proposal.requested_property_ids)
         if replaced_plan is not None:
             game.rent_debt_plans.remove(replaced_plan)
         total_amount = (
@@ -3913,6 +4298,32 @@ class GameService:
             )
             self._record_rent_installment_payment(game, plan, amount)
 
+    def _pay_rent_debt_plan(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        command: PayRentDebtPlanCommand,
+    ) -> None:
+        plan = self._rent_plan(game, command.plan_id)
+        if plan.debtor_id != actor_id:
+            raise ForbiddenError("only the debtor can pay this rent debt plan")
+        player = self._active_player(game, actor_id)
+        amount = (
+            plan.remaining_amount
+            if command.payment_kind == "full"
+            else self._rent_installment_amount(plan)
+        )
+        if player.balance < amount:
+            raise ConflictError("insufficient balance")
+        player.balance -= amount
+        self._distribute_investment_rent(
+            game,
+            plan.creditor_id,
+            amount,
+            plan.tile_id,
+        )
+        self._record_rent_installment_payment(game, plan, amount)
+
     def _pay_debt(self, game: GameState, actor_id: UUID) -> None:
         debt = game.active_debt
         if debt is None or debt.debtor_id != actor_id:
@@ -3963,12 +4374,18 @@ class GameService:
         if not forced and player.balance >= debt.amount:
             raise ConflictError("the debt can be paid with the available balance")
         pack = self._pack(game)
-        owned_property_ids = [
-            property_id
-            for property_id, owner_id in game.owners.items()
-            if owner_id == actor_id
-        ]
-        liquidation = sum(
+        board_order = {
+            tile.id: index for index, tile in enumerate(pack.board.tiles)
+        }
+        owned_property_ids = sorted(
+            (
+                property_id
+                for property_id, owner_id in game.owners.items()
+                if owner_id == actor_id
+            ),
+            key=lambda item: board_order[item],
+        )
+        building_liquidation = sum(
             (self._tile(game, property_id).build_cost or 0)
             * game.building_levels.get(property_id, 0)
             * pack.manifest.building_sell_percent
@@ -3981,7 +4398,7 @@ class GameService:
                 game.hotels_remaining += 1
             else:
                 game.houses_remaining += level
-        player.balance += liquidation
+        player.balance += building_liquidation
         player_order_ids = [
             order.id
             for order in game.bank.market_orders
@@ -3989,19 +4406,6 @@ class GameService:
         ]
         for order_id in player_order_ids:
             self._cancel_market_order(game, actor_id, order_id)
-        for instrument in game.bank.investments:
-            instrument.pending_dividend_units.pop(actor_id, None)
-        player.pending_dividend_units = 0
-        total_pending_dividend_units = sum(
-            sum(instrument.pending_dividend_units.values())
-            for instrument in game.bank.investments
-        )
-        game.bank.dividend_cash_reserve = (
-            total_pending_dividend_units // DIVIDEND_SCALE
-        )
-        game.bank.dividend_unfunded_units = (
-            total_pending_dividend_units % DIVIDEND_SCALE
-        )
         investment_liquidation = 0
         for instrument in game.bank.investments:
             shares = instrument.holdings.pop(actor_id, 0)
@@ -4021,6 +4425,82 @@ class GameService:
                     "amount": investment_liquidation,
                 },
             )
+        property_liquidation = sum(
+            self._tile(game, property_id).mortgage_value or 0
+            for property_id in owned_property_ids
+            if property_id not in game.mortgaged_property_ids
+        )
+        player.balance += property_liquidation
+        for property_id in owned_property_ids:
+            game.owners.pop(property_id, None)
+            if property_id in game.mortgaged_property_ids:
+                game.mortgaged_property_ids.remove(property_id)
+            game.bank_auction_queue.append(property_id)
+            game.building_levels.pop(property_id, None)
+        owned_property_id_set = set(owned_property_ids)
+        game.trade_unavailable_property_ids = [
+            property_id
+            for property_id in game.trade_unavailable_property_ids
+            if property_id not in owned_property_id_set
+        ]
+
+        transferred_amount = min(player.balance, debt.amount)
+        player.balance -= transferred_amount
+        if transferred_amount:
+            if debt.creditor_id is None:
+                self._deposit_bank_pot(game, transferred_amount, debt.reason)
+            elif debt.reason in {DebtReason.RENT, DebtReason.RENT_INSTALLMENT}:
+                self._distribute_investment_rent(
+                    game,
+                    debt.creditor_id,
+                    transferred_amount,
+                    debt.tile_id,
+                )
+            else:
+                self._active_player(game, debt.creditor_id).balance += transferred_amount
+
+        liquidation_data = {
+            "liquidated_building_amount": building_liquidation,
+            "liquidated_investment_amount": investment_liquidation,
+            "liquidated_property_amount": property_liquidation,
+            "property_ids": owned_property_ids,
+        }
+        debt_fully_paid = transferred_amount == debt.amount
+        if debt_fully_paid and not forced:
+            game.active_debt = None
+            self._append_event(
+                game,
+                "debt.paid",
+                {
+                    "debtor_id": str(actor_id),
+                    "creditor_id": str(debt.creditor_id) if debt.creditor_id else None,
+                    "amount": transferred_amount,
+                    "tile_id": debt.tile_id,
+                    "liquidation": True,
+                    **liquidation_data,
+                },
+            )
+            if debt.installment_plan_id is not None:
+                plan = self._rent_plan(game, debt.installment_plan_id)
+                self._record_rent_installment_payment(game, plan, debt.amount)
+            self._start_next_bank_auction(game)
+            if game.active_auction is None:
+                self._process_card_payments(game)
+            return
+
+        for instrument in game.bank.investments:
+            instrument.pending_dividend_units.pop(actor_id, None)
+        player.pending_dividend_units = 0
+        total_pending_dividend_units = sum(
+            sum(instrument.pending_dividend_units.values())
+            for instrument in game.bank.investments
+        )
+        game.bank.dividend_cash_reserve = (
+            total_pending_dividend_units // DIVIDEND_SCALE
+        )
+        game.bank.dividend_unfunded_units = (
+            total_pending_dividend_units % DIVIDEND_SCALE
+        )
         loan = next(
             (item for item in game.bank.loans if item.player_id == actor_id),
             None,
@@ -4041,26 +4521,6 @@ class GameService:
                     "score_change": -150,
                 },
             )
-        transferred_amount = player.balance
-        if debt.creditor_id is None:
-            board_order = {
-                tile.id: index for index, tile in enumerate(pack.board.tiles)
-            }
-            for property_id in sorted(
-                owned_property_ids,
-                key=lambda item: board_order[item],
-            ):
-                game.owners.pop(property_id, None)
-                if property_id in game.mortgaged_property_ids:
-                    game.mortgaged_property_ids.remove(property_id)
-                game.bank_auction_queue.append(property_id)
-        else:
-            creditor = self._active_player(game, debt.creditor_id)
-            creditor.balance += transferred_amount
-            for property_id in owned_property_ids:
-                game.owners[property_id] = creditor.user_id
-        for property_id in owned_property_ids:
-            game.building_levels.pop(property_id, None)
         player.balance = 0
         player.bankrupt = True
         game.pending_card_payments = [
@@ -4102,7 +4562,8 @@ class GameService:
                 "player_id": str(actor_id),
                 "creditor_id": str(debt.creditor_id) if debt.creditor_id else None,
                 "transferred_amount": transferred_amount,
-                "property_ids": owned_property_ids,
+                "unpaid_amount": max(0, debt.amount - transferred_amount),
+                **liquidation_data,
                 "cancelled_trade_ids": cancelled_trade_ids,
                 "cancelled_plan_ids": cancelled_plan_ids,
             },
@@ -4310,6 +4771,7 @@ class GameService:
                 raise ConflictError("the highest bidder no longer has sufficient balance")
             winner.balance -= auction.current_bid
             game.owners[auction.property_id] = winner.user_id
+            self._protect_acquired_properties(game, [auction.property_id])
             winner_id = str(winner.user_id)
             amount = auction.current_bid
         self._append_event(
@@ -4323,6 +4785,42 @@ class GameService:
         )
         game.active_auction = None
         self._start_next_bank_auction(game)
+
+    @staticmethod
+    def _protect_acquired_properties(
+        game: GameState,
+        property_ids: list[str],
+    ) -> None:
+        unavailable = game.trade_unavailable_property_ids
+        for property_id in property_ids:
+            if property_id not in unavailable:
+                unavailable.append(property_id)
+
+    def _set_property_trade_availability(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        command: SetPropertyTradeAvailabilityCommand,
+    ) -> None:
+        if game.owners.get(command.property_id) != actor_id:
+            raise ForbiddenError(
+                "only the property owner can change its trade availability"
+            )
+        unavailable = game.trade_unavailable_property_ids
+        if command.available:
+            if command.property_id in unavailable:
+                unavailable.remove(command.property_id)
+        elif command.property_id not in unavailable:
+            unavailable.append(command.property_id)
+        self._append_event(
+            game,
+            "property.trade_availability_changed",
+            {
+                "player_id": str(actor_id),
+                "property_id": command.property_id,
+                "available": command.available,
+            },
+        )
 
     def _propose_trade(
         self,
@@ -4473,6 +4971,13 @@ class GameService:
             game.owners[property_id] = recipient.user_id
         for property_id in trade.requested_property_ids:
             game.owners[property_id] = proposer.user_id
+        self._protect_acquired_properties(
+            game,
+            [
+                *trade.offered_property_ids,
+                *trade.requested_property_ids,
+            ],
+        )
         self._resolve_trade(game, trade, TradeStatus.ACCEPTED, actor_id)
 
     def _reject_trade(
@@ -4507,6 +5012,7 @@ class GameService:
         requested_cash: int,
         offered_property_ids: list[str],
         requested_property_ids: list[str],
+        require_trade_availability: bool = True,
     ) -> None:
         proposer = self._player(game, proposer_id)
         recipient = self._player(game, recipient_id)
@@ -4520,6 +5026,7 @@ class GameService:
             for tile in pack.board.tiles
             if tile.is_purchasable
         }
+        unavailable_property_ids = set(game.trade_unavailable_property_ids)
         for property_id in offered_property_ids:
             if property_id not in purchasable_ids:
                 raise ConflictError("the trade contains an unknown property")
@@ -4527,6 +5034,8 @@ class GameService:
                 raise ConflictError("the proposer no longer owns an offered property")
             if game.building_levels.get(property_id, 0) > 0:
                 raise ConflictError("properties with buildings cannot be traded")
+            if require_trade_availability and property_id in unavailable_property_ids:
+                raise ConflictError("the offered property is unavailable for trades")
         for property_id in requested_property_ids:
             if property_id not in purchasable_ids:
                 raise ConflictError("the trade contains an unknown property")
@@ -4534,6 +5043,8 @@ class GameService:
                 raise ConflictError("the recipient no longer owns a requested property")
             if game.building_levels.get(property_id, 0) > 0:
                 raise ConflictError("properties with buildings cannot be traded")
+            if require_trade_availability and property_id in unavailable_property_ids:
+                raise ConflictError("the requested property is unavailable for trades")
 
     @staticmethod
     def _pending_trade(game: GameState, trade_id: UUID) -> TradeOffer:

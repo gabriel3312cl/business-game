@@ -16,7 +16,12 @@ import {
 } from '@mui/material'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { GameEvent, GameState, PlayerState } from '../types'
+import type {
+  GameEvent,
+  GameState,
+  PlayerState,
+  VisualEffectsIntensity,
+} from '../types'
 
 interface Props {
   open: boolean
@@ -25,6 +30,7 @@ interface Props {
   busy: boolean
   onClose: () => void
   onExit: () => void
+  motionIntensity?: VisualEffectsIntensity
 }
 
 interface PlayerResult {
@@ -61,11 +67,13 @@ export function GameFinishedDialog({
   busy,
   onClose,
   onExit,
+  motionIntensity = 'full',
 }: Props) {
   const { t } = useTranslation()
   const theme = useTheme()
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
-  const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+  const systemReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+  const reduceMotion = systemReducedMotion || motionIntensity !== 'full'
   const summary = useMemo(() => buildGameSummary(game), [game])
   const winner = game.players.find(
     (player) => player.user_id === summary.winnerId,
@@ -75,6 +83,7 @@ export function GameFinishedDialog({
   return (
     <Dialog
       open={open}
+      transitionDuration={motionIntensity === 'off' ? 0 : motionIntensity === 'soft' ? 140 : 240}
       fullScreen={fullScreen}
       fullWidth
       maxWidth="md"

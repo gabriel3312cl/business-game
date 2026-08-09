@@ -14,6 +14,7 @@ import type {
   TradeAnalysis,
   User,
   UserPreferences,
+  VisualEffectsPreferenceSettings,
 } from './types'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api/v1'
@@ -211,12 +212,29 @@ export const api = {
       },
       true,
     ),
-  createGame: (packId: string, version?: string) =>
+  updateVisualEffects: (visualEffects: VisualEffectsPreferenceSettings) =>
+    request<UserPreferences>(
+      '/users/me/preferences',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ visual_effects: visualEffects }),
+      },
+      true,
+    ),
+  createGame: (
+    packId: string,
+    version?: string,
+    deckCollectionIds: Record<string, string[]> = {},
+  ) =>
     request<GameState>(
       '/games',
       {
         method: 'POST',
-        body: JSON.stringify({ pack_id: packId, ...(version ? { version } : {}) }),
+        body: JSON.stringify({
+          pack_id: packId,
+          ...(version ? { version } : {}),
+          deck_collection_ids: deckCollectionIds,
+        }),
       },
       true,
     ),

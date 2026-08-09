@@ -21,6 +21,7 @@ import type {
   GameEvent,
   GameState,
   User,
+  VisualEffectsIntensity,
 } from '../types'
 import { playerColors } from './gameColors'
 
@@ -32,6 +33,7 @@ interface Props {
   error: string | null
   onCommand: (command: GameCommand) => Promise<boolean>
   onCountdownWarning?: () => void
+  motionIntensity?: VisualEffectsIntensity
 }
 
 interface AuctionBid {
@@ -51,6 +53,7 @@ export function GameAuctionDialog({
   error,
   onCommand,
   onCountdownWarning,
+  motionIntensity = 'full',
 }: Props) {
   const { t } = useTranslation()
   const theme = useTheme()
@@ -132,6 +135,7 @@ export function GameAuctionDialog({
   return (
     <Dialog
       open
+      transitionDuration={motionIntensity === 'off' ? 0 : motionIntensity === 'soft' ? 140 : 240}
       fullScreen={fullScreen}
       fullWidth
       maxWidth="md"
@@ -143,6 +147,20 @@ export function GameAuctionDialog({
             background:
               'linear-gradient(155deg, rgba(28,23,45,.99), rgba(13,11,23,.99))',
             border: '1px solid rgba(157,140,255,.2)',
+            animation:
+              motionIntensity === 'off'
+                ? undefined
+                : motionIntensity === 'soft'
+                  ? 'auction-dialog-soft 320ms ease-out'
+                  : 'auction-dialog-enter 520ms cubic-bezier(.2,.78,.2,1)',
+            '@keyframes auction-dialog-soft': {
+              from: { opacity: 0 },
+              to: { opacity: 1 },
+            },
+            '@keyframes auction-dialog-enter': {
+              from: { opacity: 0, transform: 'translateY(24px) scale(.95)' },
+              to: { opacity: 1, transform: 'translateY(0) scale(1)' },
+            },
           },
         },
       }}
@@ -204,7 +222,30 @@ export function GameAuctionDialog({
                   >
                     {bidderName}
                   </Typography>
-                  <Typography variant="h3">${auction.current_bid}</Typography>
+                  <Typography
+                    key={auction.current_bid}
+                    variant="h3"
+                    sx={{
+                      fontVariantNumeric: 'tabular-nums',
+                      animation:
+                        motionIntensity === 'off'
+                          ? undefined
+                          : motionIntensity === 'soft'
+                            ? 'bid-soft 280ms ease-out'
+                            : 'bid-pop 460ms cubic-bezier(.18,.9,.25,1.25)',
+                      '@keyframes bid-soft': {
+                        from: { opacity: 0.45 },
+                        to: { opacity: 1 },
+                      },
+                      '@keyframes bid-pop': {
+                        from: { opacity: 0.45, transform: 'scale(.72)' },
+                        '72%': { opacity: 1, transform: 'scale(1.16)' },
+                        to: { opacity: 1, transform: 'scale(1)' },
+                      },
+                    }}
+                  >
+                    ${auction.current_bid}
+                  </Typography>
                 </Box>
               </Stack>
             </Box>
@@ -219,6 +260,18 @@ export function GameAuctionDialog({
                 }
                 fontWeight={750}
                 mb={0.75}
+                sx={{
+                  animation:
+                    remainingSeconds !== null &&
+                    remainingSeconds <= 2 &&
+                    motionIntensity === 'full'
+                      ? 'auction-urgent 620ms ease-in-out infinite'
+                      : undefined,
+                  '@keyframes auction-urgent': {
+                    '0%, 100%': { opacity: 1, transform: 'scale(1)' },
+                    '50%': { opacity: 0.58, transform: 'scale(1.035)' },
+                  },
+                }}
               >
                 {timerLabel}
               </Typography>
@@ -354,6 +407,21 @@ export function GameAuctionDialog({
                           bgcolor: 'rgba(11,9,18,.28)',
                           px: 1,
                           py: 0.75,
+                          animation:
+                            bid.sequence === bids[0]?.sequence &&
+                            motionIntensity !== 'off'
+                              ? motionIntensity === 'soft'
+                                ? 'bid-row-soft 280ms ease-out'
+                                : 'bid-row-enter 420ms ease-out'
+                              : undefined,
+                          '@keyframes bid-row-soft': {
+                            from: { opacity: 0 },
+                            to: { opacity: 1 },
+                          },
+                          '@keyframes bid-row-enter': {
+                            from: { opacity: 0, transform: 'translateX(14px)' },
+                            to: { opacity: 1, transform: 'translateX(0)' },
+                          },
                         }}
                       >
                         <Avatar
