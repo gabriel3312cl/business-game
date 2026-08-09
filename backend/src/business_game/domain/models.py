@@ -640,8 +640,8 @@ class PackManifest(ContentModel):
     tile_count: int = Field(ge=8, le=116)
     default_locale: str
     locales: list[str] = Field(min_length=1)
-    min_players: int = Field(default=2, ge=2, le=12)
-    max_players: int = Field(default=6, ge=2, le=12)
+    min_players: int = Field(default=2, ge=2, le=20)
+    max_players: int = Field(default=6, ge=2, le=20)
     starting_balance: int = Field(default=1500, ge=1)
     pass_start_salary: int = Field(default=200, ge=0)
     mortgage_interest_percent: int = Field(default=10, ge=0, le=100)
@@ -1029,8 +1029,10 @@ class SpectatorState(BaseModel):
 
 
 class GameSettings(BaseModel):
-    max_players: int | None = Field(default=None, ge=2, le=12)
+    max_players: int | None = Field(default=None, ge=2, le=20)
     allow_spectators: bool = True
+    auction_deposit_percent: int = Field(default=10, ge=0, le=100)
+    auction_minimum_bid_percent: int = Field(default=50, ge=0, le=100)
     rules: OptionalRules = Field(default_factory=OptionalRules)
 
 
@@ -1129,8 +1131,10 @@ class AuctionState(BaseModel):
     current_bid: int = Field(default=0, ge=0)
     current_bidder_id: UUID | None = None
     bid_deadline: datetime | None = None
-    eligible_player_ids: list[UUID] = Field(min_length=2, max_length=12)
-    passed_player_ids: list[UUID] = Field(default_factory=list, max_length=12)
+    deposit_amount: int = Field(default=0, ge=0)
+    deposits: dict[UUID, int] = Field(default_factory=dict, max_length=20)
+    eligible_player_ids: list[UUID] = Field(min_length=1, max_length=20)
+    passed_player_ids: list[UUID] = Field(default_factory=list, max_length=20)
 
 
 class TradeOffer(BaseModel):
@@ -1197,6 +1201,27 @@ class TradeAnalysisResponse(BaseModel):
     proposer_analysis: TradeSideAnalysis
     recipient_analysis: TradeSideAnalysis
     snapshot_sequence: int = Field(ge=0)
+
+
+class PropertyHistoricalStats(BaseModel):
+    tile_id: str
+    landings: int = Field(default=0, ge=0)
+    landing_percent: float = Field(default=0, ge=0, le=100)
+    rent_payments: int = Field(default=0, ge=0)
+    total_rent: int = Field(default=0, ge=0)
+    average_rent: int = Field(default=0, ge=0)
+    purchases: int = Field(default=0, ge=0)
+    average_purchase_price: int = Field(default=0, ge=0)
+    auction_sales: int = Field(default=0, ge=0)
+    average_auction_price: int = Field(default=0, ge=0)
+
+
+class BoardHistoricalStats(BaseModel):
+    pack_id: str
+    game_count: int = Field(ge=0)
+    movement_count: int = Field(ge=0)
+    position_landings: list[Annotated[int, Field(ge=0)]]
+    properties: list[PropertyHistoricalStats]
 
 
 class BotRelationshipState(BaseModel):
@@ -1308,7 +1333,7 @@ class BankState(BaseModel):
     dividend_unfunded_units: int = Field(default=0, ge=0, lt=10_000)
     market_round: int = Field(default=0, ge=0)
     minimum_reserve_percent: int = Field(default=20, ge=0, le=90)
-    loans: list[BankLoanState] = Field(default_factory=list, max_length=12)
+    loans: list[BankLoanState] = Field(default_factory=list, max_length=20)
     credit_profiles: dict[UUID, BankCreditProfileState] = Field(
         default_factory=dict,
     )
@@ -1378,7 +1403,7 @@ class GameState(BaseModel):
     )
     pending_card_payments: list[CardPaymentState] = Field(
         default_factory=list,
-        max_length=12,
+        max_length=20,
     )
     pending_card_draw: PendingCardDrawState | None = None
     pending_card_choice: PendingCardChoiceState | None = None
@@ -1398,6 +1423,7 @@ class GameState(BaseModel):
     deck_orders: dict[str, list[str]] = Field(default_factory=dict)
     deck_cursors: dict[str, int] = Field(default_factory=dict)
     bank_auction_queue: list[str] = Field(default_factory=list)
+    bank_auction_excluded_player_ids: dict[str, UUID] = Field(default_factory=dict)
     last_card_id: str | None = None
     trades: list[TradeOffer] = Field(default_factory=list, max_length=100)
     bot_relationships: list[BotRelationshipState] = Field(
@@ -1910,8 +1936,10 @@ class AddBotRequest(BaseModel):
 
 
 class UpdateGameSettingsRequest(BaseModel):
-    max_players: int | None = Field(default=None, ge=2, le=12)
+    max_players: int | None = Field(default=None, ge=2, le=20)
     allow_spectators: bool | None = None
+    auction_deposit_percent: int | None = Field(default=None, ge=0, le=100)
+    auction_minimum_bid_percent: int | None = Field(default=None, ge=0, le=100)
     rules: OptionalRulesUpdate | None = None
 
     @model_validator(mode="after")
@@ -1919,6 +1947,8 @@ class UpdateGameSettingsRequest(BaseModel):
         if (
             self.max_players is None
             and self.allow_spectators is None
+            and self.auction_deposit_percent is None
+            and self.auction_minimum_bid_percent is None
             and self.rules is None
         ):
             raise ValueError("at least one setting must be provided")

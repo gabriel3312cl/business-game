@@ -265,6 +265,8 @@ async def test_declined_property_is_sold_by_authoritative_auction(
     )
     assert game.active_auction is not None
     assert game.active_auction.property_id == "property_03"
+    assert game.active_auction.minimum_bid == 30
+    assert game.active_auction.deposit_amount == 6
 
     game = await games.execute(
         game.id,
@@ -272,6 +274,10 @@ async def test_declined_property_is_sold_by_authoritative_auction(
         BidCommand(action="bid", amount=90),
     )
     assert game.active_auction is not None
+    assert game.active_auction.deposits == {second.id: 6}
+    assert next(
+        player for player in game.players if player.user_id == second.id
+    ).balance == 1494
     deadline = game.active_auction.bid_deadline
     assert deadline == current_time + timedelta(seconds=5)
     game = await games.execute(
@@ -289,6 +295,84 @@ async def test_declined_property_is_sold_by_authoritative_auction(
     assert next(player for player in game.players if player.user_id == second.id).balance == 1410
     assert game.current_player.user_id == first.id
     assert game.phase.value == "waiting_for_end"
+    completed = next(
+        event for event in reversed(game.events) if event.type == "auction.completed"
+    )
+    assert completed.data["deposit_applied"] == 6
+
+
+async def test_auction_refunds_deposit_to_unsuccessful_bidder(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    current_time = datetime(2026, 8, 8, 12, 0, tzinfo=UTC)
+    first = await create_user(session, "deposit-host@example.com", "Host")
+    second = await create_user(session, "deposit-loser@example.com", "Loser")
+    third = await create_user(session, "deposit-winner@example.com", "Winner")
+    games = GameService(
+        session,
+        PackLoader(packs_dir),
+        dice_roller=lambda: (1, 2),
+        clock=lambda: current_time,
+    )
+    game = await games.create("classic-demo", first)
+    await games.join(game.id, second)
+    await games.join(game.id, third)
+    await games.start(game.id, first.id)
+    await games.execute(game.id, first.id, RollCommand(action="roll"))
+    await games.execute(
+        game.id,
+        first.id,
+        DeclinePropertyCommand(action="decline_property"),
+    )
+    game = await games.execute(
+        game.id,
+        second.id,
+        BidCommand(action="bid", amount=40),
+    )
+    assert game.active_auction is not None
+    assert game.active_auction.deposits == {second.id: 6}
+
+    game = await games.execute(
+        game.id,
+        third.id,
+        BidCommand(action="bid", amount=50),
+    )
+    assert game.active_auction is not None
+    deadline = game.active_auction.bid_deadline
+    assert game.active_auction.deposits == {second.id: 6, third.id: 6}
+    game = await games.execute(
+        game.id,
+        second.id,
+        PassAuctionCommand(action="pass_auction"),
+    )
+    assert game.active_auction is not None
+    assert game.active_auction.deposits == {third.id: 6}
+    assert next(
+        player for player in game.players if player.user_id == second.id
+    ).balance == 1500
+    await games.execute(
+        game.id,
+        first.id,
+        PassAuctionCommand(action="pass_auction"),
+    )
+
+    assert deadline is not None
+    current_time += timedelta(seconds=5)
+    game = await games.settle_expired_auction(game.id, deadline)
+    assert game is not None
+    assert game.active_auction is None
+    assert game.owners["property_03"] == third.id
+    assert next(
+        player for player in game.players if player.user_id == third.id
+    ).balance == 1450
+    refunded = next(
+        event
+        for event in game.events
+        if event.type == "auction.deposit_refunded"
+        and event.data["player_id"] == str(second.id)
+    )
+    assert refunded.data["amount"] == 6
 
 
 async def test_new_bid_resets_auction_deadline_and_stale_timer_cannot_settle(
@@ -1444,12 +1528,119 @@ async def test_liquidation_that_covers_debt_keeps_player_active(
     assert game.mortgaged_property_ids == []
     assert game.active_auction is not None
     assert game.active_auction.property_id == "property_03"
+    assert debtor.id not in game.active_auction.eligible_player_ids
+    assert set(game.active_auction.eligible_player_ids) == {creditor.id, bidder.id}
     assert game.bank_auction_queue == ["property_06"]
+    assert game.bank_auction_excluded_player_ids == {"property_06": debtor.id}
+    with pytest.raises(ConflictError, match="cannot participate"):
+        await games.execute(
+            game.id,
+            debtor.id,
+            BidCommand(action="bid", amount=1),
+        )
     payment = next(event for event in game.events if event.type == "debt.paid")
     assert payment.data["liquidation"] is True
     assert payment.data["amount"] == 80
     assert payment.data["liquidated_building_amount"] == 25
     assert payment.data["liquidated_property_amount"] == 50
+
+
+async def test_board_history_aggregates_all_previous_started_games_for_pack(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    host = await create_user(session, "history-host@example.com", "History Host")
+    guest = await create_user(session, "history-guest@example.com", "History Guest")
+    games = GameService(
+        session,
+        PackLoader(packs_dir),
+        dice_roller=lambda: (1, 2),
+    )
+    historical = await games.create("classic-demo", host)
+    await games.join(historical.id, guest)
+    await games.start(historical.id, host.id)
+    historical = await games.execute(
+        historical.id,
+        host.id,
+        RollCommand(action="roll"),
+    )
+    assert historical.pending_tile_id == "property_03"
+    await games.execute(
+        historical.id,
+        host.id,
+        BuyPropertyCommand(action="buy_property"),
+    )
+    await games.execute(
+        historical.id,
+        host.id,
+        EndTurnCommand(action="end_turn"),
+    )
+    await games.execute(
+        historical.id,
+        guest.id,
+        RollCommand(action="roll"),
+    )
+
+    current = await games.create("classic-demo", host)
+    await games.join(current.id, guest)
+    await games.start(current.id, host.id)
+    await games.execute(current.id, host.id, RollCommand(action="roll"))
+    history = await games.board_history(current.id, host.id)
+    property_stats = next(
+        item for item in history.properties if item.tile_id == "property_03"
+    )
+
+    assert history.game_count == 1
+    assert history.movement_count == 2
+    assert history.position_landings[3] == 2
+    assert property_stats.landings == 2
+    assert property_stats.landing_percent == 100
+    assert property_stats.purchases == 1
+    assert property_stats.average_purchase_price == 60
+    assert property_stats.rent_payments == 1
+    assert property_stats.total_rent == 4
+    assert property_stats.average_rent == 4
+
+
+async def test_surviving_debtor_is_excluded_when_only_one_bidder_remains(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    creditor = await create_user(session, "single-creditor@example.com", "Creditor")
+    debtor = await create_user(session, "single-debtor@example.com", "Debtor")
+    games = GameService(session, PackLoader(packs_dir))
+    game = await games.create("classic-demo", creditor)
+    await games.join(game.id, debtor)
+    await games.start(game.id, creditor.id)
+    async with session.begin():
+        persisted = await GameRepository(session).get(game.id, for_update=True)
+        persisted.players[1].balance = 0
+        persisted.owners["property_01"] = debtor.id
+        persisted.active_debt = DebtState(
+            debtor_id=debtor.id,
+            creditor_id=creditor.id,
+            amount=20,
+            reason=DebtReason.RENT,
+            tile_id="property_03",
+        )
+        await GameRepository(session).save(persisted, len(persisted.events))
+
+    game = await games.execute(
+        game.id,
+        debtor.id,
+        DeclareBankruptcyCommand(action="declare_bankruptcy"),
+    )
+
+    assert not game.players[1].bankrupt
+    assert game.active_auction is not None
+    assert game.active_auction.eligible_player_ids == [creditor.id]
+    game = await games.execute(
+        game.id,
+        creditor.id,
+        PassAuctionCommand(action="pass_auction"),
+    )
+    assert game.active_auction is None
+    assert "property_01" not in game.owners
 
 
 async def test_three_consecutive_doubles_send_player_to_jail(
@@ -1734,10 +1925,23 @@ async def test_lobby_settings_control_players_and_spectators(
     game = await games.update_settings(
         game.id,
         host.id,
-        UpdateGameSettingsRequest(max_players=2, allow_spectators=False),
+        UpdateGameSettingsRequest(max_players=20),
+    )
+    assert game.settings.max_players == 20
+    game = await games.update_settings(
+        game.id,
+        host.id,
+        UpdateGameSettingsRequest(
+            max_players=2,
+            allow_spectators=False,
+            auction_deposit_percent=15,
+            auction_minimum_bid_percent=75,
+        ),
     )
     assert game.settings.max_players == 2
     assert not game.settings.allow_spectators
+    assert game.settings.auction_deposit_percent == 15
+    assert game.settings.auction_minimum_bid_percent == 75
 
     await games.join(game.id, guest)
     with pytest.raises(ConflictError, match="full"):
@@ -2190,12 +2394,15 @@ async def test_extended_board_auction_taxes_and_discounted_card_purchase(
     assert game.pending_auction_selector_id == first_id
     games._select_auction_property(game, first_id, "property_07")
     assert game.active_auction is not None
-    assert game.active_auction.minimum_bid == 10
+    assert game.active_auction.minimum_bid == 50
+    assert game.active_auction.deposit_amount == 10
     with pytest.raises(ConflictError, match="below the auction minimum"):
-        games._bid(game, first_id, 9)
-    games._bid(game, first_id, 10)
-    assert game.active_auction.current_bid == 10
+        games._bid(game, first_id, 49)
+    games._bid(game, first_id, 50)
+    assert game.active_auction.current_bid == 50
+    assert first.balance == 2790
 
+    games._refund_all_auction_deposits(game, reason="test_cleanup")
     game.active_auction = None
     game.owners.clear()
     first.balance = 2800

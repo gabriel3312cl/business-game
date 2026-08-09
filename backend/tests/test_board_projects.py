@@ -730,6 +730,19 @@ def test_custom_board_rejects_silently_ignored_landing_effects() -> None:
         EditablePackContent.model_validate(unknown_field)
 
 
+def test_custom_board_supports_up_to_twenty_players() -> None:
+    document = board_document()
+    document["max_players"] = 20
+
+    content = EditablePackContent.model_validate(document)
+
+    assert content.max_players == 20
+
+    document["max_players"] = 21
+    with pytest.raises(ValidationError, match="max_players"):
+        EditablePackContent.model_validate(document)
+
+
 def test_custom_board_preserves_tile_icon_presentation() -> None:
     document = board_document()
     tiles = cast(list[dict[str, object]], document["tiles"])

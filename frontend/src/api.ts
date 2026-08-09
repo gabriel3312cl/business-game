@@ -1,6 +1,7 @@
 import type {
   AutomationPreferenceSettings,
   AudioPreferenceSettings,
+  BoardHistoricalStats,
   BotController,
   BotPersonality,
   ContentPack,
@@ -240,6 +241,8 @@ export const api = {
     ),
   getGame: (gameId: string) =>
     request<GameState>(`/games/${gameId}`, {}, true),
+  getBoardHistory: (gameId: string) =>
+    request<BoardHistoricalStats>(`/games/${gameId}/board-history`, {}, true),
   analyzeTrade: (gameId: string, tradeId: string) =>
     request<TradeAnalysis>(
       `/games/${gameId}/trades/${tradeId}/analysis`,
@@ -280,6 +283,8 @@ export const api = {
     data: {
       max_players?: number
       allow_spectators?: boolean
+      auction_deposit_percent?: number
+      auction_minimum_bid_percent?: number
       rules?: Partial<OptionalRules>
     },
   ) =>

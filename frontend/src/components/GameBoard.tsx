@@ -50,6 +50,7 @@ interface GameBoardProps {
   actionEvents?: GameEvent[]
   motionIntensity?: VisualEffectsIntensity
   highlightedTileId?: string | null
+  highlightedPlayerId?: string | null
 }
 
 interface TileEffect {
@@ -82,6 +83,7 @@ export function GameBoard({
   actionEvents = [],
   motionIntensity = 'full',
   highlightedTileId = null,
+  highlightedPlayerId = null,
 }: GameBoardProps) {
   const { t, i18n } = useTranslation()
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null)
@@ -132,6 +134,7 @@ export function GameBoard({
           : undefined,
       active: index === game.current_player_index,
       currentUser,
+      highlighted: player.user_id === highlightedPlayerId,
     })
     tokensByPosition.set(position, tokens)
   })

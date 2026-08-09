@@ -1,14 +1,16 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.domain.errors import NotFoundError
 from business_game.domain.models import (
+    BoardHistoricalStats,
     ContentPack,
     GameEvent,
     GameState,
+    PropertyHistoricalStats,
     User,
     UserPreferences,
     UserPreferencesUpdate,
@@ -266,6 +268,174 @@ class GameRepository:
             for game in games
             if any(player.is_bot and not player.bankrupt for player in game.players)
         ]
+
+    async def board_history(
+        self,
+        *,
+        pack_id: str,
+        exclude_game_id: UUID,
+        property_ids: list[str],
+        property_positions: dict[int, str],
+        tile_count: int,
+    ) -> BoardHistoricalStats:
+        started_event = GameEventRecord.__table__.alias("started_event")
+        started_game = exists(
+            select(1).where(
+                started_event.c.game_id == GameRecord.id,
+                started_event.c.event_type == "game.started",
+            )
+        )
+        historical_game_conditions = (
+            GameRecord.pack_id == pack_id,
+            GameRecord.id != exclude_game_id,
+            started_game,
+        )
+        game_count = int(
+            await self.session.scalar(
+                select(func.count(GameRecord.id)).where(*historical_game_conditions)
+            )
+            or 0
+        )
+        if not game_count:
+            return BoardHistoricalStats(
+                pack_id=pack_id,
+                game_count=0,
+                movement_count=0,
+                position_landings=[0] * tile_count,
+                properties=[
+                    PropertyHistoricalStats(tile_id=property_id)
+                    for property_id in property_ids
+                ],
+            )
+
+        records = list(
+            (
+                await self.session.scalars(
+                    select(GameEventRecord)
+                    .join(GameRecord, GameEventRecord.game_id == GameRecord.id)
+                    .where(*historical_game_conditions)
+                    .where(
+                        GameEventRecord.event_type.in_(
+                            (
+                                "dice.rolled",
+                                "card.player_moved",
+                                "jail.entered",
+                                "payment.completed",
+                                "debt.installment_paid",
+                                "debt.paid",
+                                "player.bankrupt",
+                                "property.purchased",
+                                "auction.completed",
+                            )
+                        )
+                    )
+                    .order_by(GameEventRecord.game_id, GameEventRecord.sequence)
+                )
+            ).all()
+        )
+        property_id_set = set(property_ids)
+        movement_count = 0
+        position_landings = [0] * tile_count
+        values = {
+            property_id: {
+                "landings": 0,
+                "rent_payments": 0,
+                "total_rent": 0,
+                "purchases": 0,
+                "purchase_total": 0,
+                "auction_sales": 0,
+                "auction_total": 0,
+            }
+            for property_id in property_ids
+        }
+        movement_types = {"dice.rolled", "card.player_moved", "jail.entered"}
+        for record in records:
+            data = record.event_data
+            if record.event_type in movement_types:
+                position = data.get("to_position")
+                valid_position = (
+                    isinstance(position, int)
+                    and not isinstance(position, bool)
+                    and 0 <= position < tile_count
+                )
+                if not valid_position:
+                    continue
+                movement_count += 1
+                position_landings[position] += 1
+                tile_id = data.get("tile_id")
+                if not isinstance(tile_id, str):
+                    tile_id = property_positions.get(position)
+                if isinstance(tile_id, str) and tile_id in property_id_set:
+                    values[tile_id]["landings"] += 1
+                continue
+            tile_id = data.get("tile_id") or data.get("property_id")
+            if not isinstance(tile_id, str) or tile_id not in property_id_set:
+                continue
+            amount = (
+                data.get("price")
+                if record.event_type == "property.purchased"
+                else data.get("amount")
+            )
+            numeric_amount = amount if isinstance(amount, int) and amount >= 0 else 0
+            if record.event_type == "debt.installment_paid" or (
+                record.event_type in {"payment.completed", "debt.paid"}
+                and data.get("reason") == "rent"
+            ):
+                values[tile_id]["rent_payments"] += 1
+                values[tile_id]["total_rent"] += numeric_amount
+            elif record.event_type == "player.bankrupt" and data.get("reason") == "rent":
+                transferred = data.get("transferred_amount")
+                if isinstance(transferred, int) and transferred > 0:
+                    values[tile_id]["rent_payments"] += 1
+                    values[tile_id]["total_rent"] += transferred
+            elif record.event_type == "property.purchased":
+                values[tile_id]["purchases"] += 1
+                values[tile_id]["purchase_total"] += numeric_amount
+            elif record.event_type == "auction.completed" and data.get("winner_id"):
+                values[tile_id]["auction_sales"] += 1
+                values[tile_id]["auction_total"] += numeric_amount
+
+        properties = []
+        for property_id in property_ids:
+            item = values[property_id]
+            rent_payments = item["rent_payments"]
+            purchases = item["purchases"]
+            auction_sales = item["auction_sales"]
+            properties.append(
+                PropertyHistoricalStats(
+                    tile_id=property_id,
+                    landings=item["landings"],
+                    landing_percent=(
+                        round(item["landings"] * 100 / movement_count, 2)
+                        if movement_count
+                        else 0
+                    ),
+                    rent_payments=rent_payments,
+                    total_rent=item["total_rent"],
+                    average_rent=(
+                        round(item["total_rent"] / rent_payments)
+                        if rent_payments
+                        else 0
+                    ),
+                    purchases=purchases,
+                    average_purchase_price=(
+                        round(item["purchase_total"] / purchases) if purchases else 0
+                    ),
+                    auction_sales=auction_sales,
+                    average_auction_price=(
+                        round(item["auction_total"] / auction_sales)
+                        if auction_sales
+                        else 0
+                    ),
+                )
+            )
+        return BoardHistoricalStats(
+            pack_id=pack_id,
+            game_count=game_count,
+            movement_count=movement_count,
+            position_landings=position_landings,
+            properties=properties,
+        )
 
     async def save(
         self,

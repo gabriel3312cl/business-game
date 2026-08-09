@@ -4,6 +4,7 @@ import {
   Avatar,
   Box,
   Button,
+  Chip,
   Dialog,
   DialogContent,
   DialogTitle,
@@ -17,6 +18,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type {
   ContentPack,
+  BoardHistoricalStats,
   GameCommand,
   GameEvent,
   GameState,
@@ -24,6 +26,15 @@ import type {
   VisualEffectsIntensity,
 } from '../types'
 import { playerColors } from './gameColors'
+import {
+  boardPerimeterPosition,
+  compareAuctionPrice,
+} from './auctionPresentation'
+import {
+  assessHistoricalProperty,
+  historicalProperty,
+} from './propertyHistoricalAnalysis'
+import { defaultTileColor } from './tilePresentation'
 
 interface Props {
   game: GameState
@@ -31,6 +42,7 @@ interface Props {
   user: User
   busy: boolean
   error: string | null
+  boardHistory: BoardHistoricalStats | null
   onCommand: (command: GameCommand) => Promise<boolean>
   onCountdownWarning?: () => void
   motionIntensity?: VisualEffectsIntensity
@@ -51,6 +63,7 @@ export function GameAuctionDialog({
   user,
   busy,
   error,
+  boardHistory,
   onCommand,
   onCountdownWarning,
   motionIntensity = 'full',
@@ -103,6 +116,29 @@ export function GameAuctionDialog({
   const tile = pack.board.tiles.find(
     (candidate) => candidate.id === auction.property_id,
   )
+  const tileIndex = pack.board.tiles.findIndex(
+    (candidate) => candidate.id === auction.property_id,
+  )
+  const group = pack.board.groups?.find((item) => item.id === tile?.group)
+  const groupName = group ? (pack.messages[group.name_key] ?? group.id) : t(tile?.kind ?? 'property')
+  const groupColor = group?.color ?? tile?.color ?? defaultTileColor(tile?.kind ?? 'property')
+  const groupTiles = tile?.group
+    ? pack.board.tiles.filter((item) => item.group === tile.group)
+    : []
+  const ownedInGroup = groupTiles.filter(
+    (item) => game.owners[item.id] === user.id,
+  ).length
+  const propertyHistory = historicalProperty(boardHistory, auction.property_id)
+  const consideredPrice = Math.max(auction.minimum_bid, auction.current_bid)
+  const historicalAssessment = tile
+    ? assessHistoricalProperty(
+        tile,
+        propertyHistory,
+        boardHistory,
+        pack.manifest.tile_count,
+        consideredPrice,
+      )
+    : null
   const propertyName = tile
     ? pack.messages[tile.name_key]
     : auction.property_id
@@ -111,6 +147,13 @@ export function GameAuctionDialog({
   )
   const bidder = bidderIndex >= 0 ? game.players[bidderIndex] : undefined
   const bidderName = bidder?.display_name ?? t('auctionNoLeader')
+  const currentUser = game.players.find((player) => player.user_id === user.id)
+  const heldDeposit = auction.deposits[user.id] ?? 0
+  const availableBidCash = (currentUser?.balance ?? 0) + heldDeposit
+  const canPlaceDeposit =
+    heldDeposit > 0 ||
+    auction.deposit_amount === 0 ||
+    (currentUser?.balance ?? 0) >= auction.deposit_amount
   const canBid =
     auction.eligible_player_ids.includes(user.id) &&
     !auction.passed_player_ids.includes(user.id)
@@ -131,6 +174,10 @@ export function GameAuctionDialog({
       ? t('auctionTimerPending')
       : t('auctionTimeRemaining', { seconds: remainingSeconds })
   const bids = currentAuctionBids(game.events, auction.property_id)
+  const priceComparison =
+    auction.current_bidder_id && tile?.price
+      ? compareAuctionPrice(auction.current_bid, tile.price)
+      : null
 
   return (
     <Dialog
@@ -138,7 +185,7 @@ export function GameAuctionDialog({
       transitionDuration={motionIntensity === 'off' ? 0 : motionIntensity === 'soft' ? 140 : 240}
       fullScreen={fullScreen}
       fullWidth
-      maxWidth="md"
+      maxWidth="lg"
       disableEscapeKeyDown
       aria-labelledby="auction-title"
       slotProps={{
@@ -222,30 +269,63 @@ export function GameAuctionDialog({
                   >
                     {bidderName}
                   </Typography>
-                  <Typography
-                    key={auction.current_bid}
-                    variant="h3"
-                    sx={{
-                      fontVariantNumeric: 'tabular-nums',
-                      animation:
-                        motionIntensity === 'off'
-                          ? undefined
-                          : motionIntensity === 'soft'
-                            ? 'bid-soft 280ms ease-out'
-                            : 'bid-pop 460ms cubic-bezier(.18,.9,.25,1.25)',
-                      '@keyframes bid-soft': {
-                        from: { opacity: 0.45 },
-                        to: { opacity: 1 },
-                      },
-                      '@keyframes bid-pop': {
-                        from: { opacity: 0.45, transform: 'scale(.72)' },
-                        '72%': { opacity: 1, transform: 'scale(1.16)' },
-                        to: { opacity: 1, transform: 'scale(1)' },
-                      },
-                    }}
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    alignItems="center"
+                    useFlexGap
+                    flexWrap="wrap"
                   >
-                    ${auction.current_bid}
-                  </Typography>
+                    <Typography
+                      key={auction.current_bid}
+                      variant="h3"
+                      sx={{
+                        fontVariantNumeric: 'tabular-nums',
+                        animation:
+                          motionIntensity === 'off'
+                            ? undefined
+                            : motionIntensity === 'soft'
+                              ? 'bid-soft 280ms ease-out'
+                              : 'bid-pop 460ms cubic-bezier(.18,.9,.25,1.25)',
+                        '@keyframes bid-soft': {
+                          from: { opacity: 0.45 },
+                          to: { opacity: 1 },
+                        },
+                        '@keyframes bid-pop': {
+                          from: { opacity: 0.45, transform: 'scale(.72)' },
+                          '72%': { opacity: 1, transform: 'scale(1.16)' },
+                          to: { opacity: 1, transform: 'scale(1)' },
+                        },
+                      }}
+                    >
+                      ${auction.current_bid}
+                    </Typography>
+                    {priceComparison && (
+                      <Chip
+                        size="small"
+                        color={
+                          priceComparison.direction === 'below'
+                            ? 'success'
+                            : priceComparison.direction === 'above'
+                              ? 'error'
+                              : 'default'
+                        }
+                        variant="outlined"
+                        label={
+                          priceComparison.direction === 'below'
+                            ? t('auctionPriceBelow', {
+                                percent: priceComparison.percent,
+                              })
+                            : priceComparison.direction === 'above'
+                              ? t('auctionPriceAbove', {
+                                  percent: priceComparison.percent,
+                                })
+                              : t('auctionPriceEqual')
+                        }
+                        sx={{ fontWeight: 800 }}
+                      />
+                    )}
+                  </Stack>
                 </Box>
               </Stack>
             </Box>
@@ -289,6 +369,38 @@ export function GameAuctionDialog({
               />
             </Box>
 
+            <Box>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={t('auctionMinimumBid', {
+                    amount: auction.minimum_bid,
+                  })}
+                />
+                {auction.deposit_amount > 0 && (
+                  <Chip
+                    size="small"
+                    color={heldDeposit > 0 ? 'success' : 'info'}
+                    variant="outlined"
+                    label={
+                      heldDeposit > 0
+                        ? t('auctionDepositHeld', { amount: heldDeposit })
+                        : t('auctionDeposit', {
+                            amount: auction.deposit_amount,
+                            percent: game.settings.auction_deposit_percent,
+                          })
+                    }
+                  />
+                )}
+              </Stack>
+              {auction.deposit_amount > 0 && (
+                <Typography variant="caption" color="text.secondary" display="block" mt={0.75}>
+                  {t('auctionDepositHint')}
+                </Typography>
+              )}
+            </Box>
+
             {canBid ? (
               <Box>
                 <Typography fontWeight={750} mb={1}>
@@ -302,7 +414,11 @@ export function GameAuctionDialog({
                         key={amount}
                         variant="contained"
                         color="secondary"
-                        disabled={busy}
+                        disabled={
+                          busy ||
+                          !canPlaceDeposit ||
+                          amount > availableBidCash
+                        }
                         onClick={() =>
                           void onCommand({ action: 'bid', amount })
                         }
@@ -331,9 +447,17 @@ export function GameAuctionDialog({
               </Box>
             ) : (
               <Typography color="text.secondary">
-                {t('waitingForAuction')}
+                {auction.eligible_player_ids.includes(user.id)
+                  ? t('waitingForAuction')
+                  : t('auctionNotEligible')}
               </Typography>
             )}
+
+            <AuctionBidHistory
+              bids={bids}
+              game={game}
+              motionIntensity={motionIntensity}
+            />
           </Stack>
 
           <Box
@@ -352,6 +476,32 @@ export function GameAuctionDialog({
               <Typography color="text.secondary" mt={1}>
                 {t(tile?.kind ?? 'property')}
               </Typography>
+              <Stack
+                direction="row"
+                spacing={1}
+                justifyContent="center"
+                useFlexGap
+                flexWrap="wrap"
+                mt={1.25}
+              >
+                <Chip
+                  size="small"
+                  label={groupName}
+                  sx={{
+                    borderLeft: `5px solid ${groupColor}`,
+                    bgcolor: `${groupColor}1f`,
+                    fontWeight: 800,
+                  }}
+                />
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={t('auctionBoardPosition', {
+                    position: tileIndex + 1,
+                    total: pack.manifest.tile_count,
+                  })}
+                />
+              </Stack>
               <Typography color="text.secondary" mt={2}>
                 {t('price')}
               </Typography>
@@ -360,106 +510,307 @@ export function GameAuctionDialog({
 
             <Box
               sx={{
-                mt: 3,
-                pt: 2,
-                borderTop: '1px solid rgba(255,255,255,.1)',
+                mt: 2.5,
+                display: 'grid',
+                gridTemplateColumns: {
+                  xs: '1fr',
+                  sm: 'minmax(150px,.75fr) minmax(0,1.25fr)',
+                },
+                gap: 1.5,
               }}
             >
-              <Typography fontWeight={850} mb={1}>
-                {t('auctionBidHistory')}
-              </Typography>
-              {bids.length === 0 ? (
-                <Typography color="text.secondary" variant="body2">
-                  {t('auctionNoBids')}
+              <AuctionBoardMap
+                tileCount={pack.manifest.tile_count}
+                tileIndex={tileIndex}
+                propertyName={propertyName}
+                accent={groupColor}
+              />
+              <Box
+                sx={{
+                  p: 1.5,
+                  borderRadius: 2,
+                  bgcolor: 'rgba(11,9,18,.28)',
+                }}
+              >
+                <Typography fontWeight={850}>{t('propertyHistory.title')}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {t('propertyHistory.sample', { count: boardHistory?.game_count ?? 0 })}
                 </Typography>
-              ) : (
-                <Stack
-                  component="ol"
-                  spacing={0.75}
-                  sx={{
-                    listStyle: 'none',
-                    p: 0,
-                    m: 0,
-                    maxHeight: 190,
-                    overflowY: 'auto',
-                  }}
-                >
-                  {bids.map((bid) => {
-                    const playerIndex = game.players.findIndex(
-                      (player) => player.user_id === bid.playerId,
-                    )
-                    const player =
-                      playerIndex >= 0 ? game.players[playerIndex] : undefined
-                    const name = player?.display_name ?? t('bank')
-                    return (
-                      <Stack
-                        component="li"
-                        key={bid.sequence}
-                        direction="row"
-                        spacing={1}
-                        alignItems="center"
-                        aria-label={t('auctionBidHistoryItem', {
-                          player: name,
-                          amount: bid.amount,
-                        })}
-                        sx={{
-                          borderRadius: 2,
-                          bgcolor: 'rgba(11,9,18,.28)',
-                          px: 1,
-                          py: 0.75,
-                          animation:
-                            bid.sequence === bids[0]?.sequence &&
-                            motionIntensity !== 'off'
-                              ? motionIntensity === 'soft'
-                                ? 'bid-row-soft 280ms ease-out'
-                                : 'bid-row-enter 420ms ease-out'
-                              : undefined,
-                          '@keyframes bid-row-soft': {
-                            from: { opacity: 0 },
-                            to: { opacity: 1 },
-                          },
-                          '@keyframes bid-row-enter': {
-                            from: { opacity: 0, transform: 'translateX(14px)' },
-                            to: { opacity: 1, transform: 'translateX(0)' },
-                          },
-                        }}
+                {groupTiles.length > 0 && (
+                  <Typography variant="caption" color="secondary.light" display="block">
+                    {t('propertyHistory.groupProgress', {
+                      owned: ownedInGroup,
+                      total: groupTiles.length,
+                    })}
+                  </Typography>
+                )}
+                {groupTiles.length > 1 && ownedInGroup === groupTiles.length - 1 && (
+                  <Alert severity="success" variant="outlined" sx={{ mt: 1 }}>
+                    {t('propertyHistory.completesGroup')}
+                  </Alert>
+                )}
+                {propertyHistory && boardHistory && boardHistory.game_count > 0 ? (
+                  <>
+                    <Box
+                      sx={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                        gap: 1,
+                        mt: 1.25,
+                      }}
+                    >
+                      <HistoricalValue
+                        label={t('propertyHistory.landings')}
+                        value={`${propertyHistory.landings} · ${propertyHistory.landing_percent}%`}
+                      />
+                      <HistoricalValue
+                        label={t('propertyHistory.rent')}
+                        value={`$${propertyHistory.total_rent}`}
+                      />
+                      <HistoricalValue
+                        label={t('propertyHistory.averageRent')}
+                        value={`$${propertyHistory.average_rent}`}
+                      />
+                      <HistoricalValue
+                        label={t('propertyHistory.averageAuction')}
+                        value={
+                          propertyHistory.auction_sales > 0
+                            ? `$${propertyHistory.average_auction_price}`
+                            : t('propertyHistory.noData')
+                        }
+                      />
+                    </Box>
+                    {historicalAssessment && (
+                      <Alert
+                        severity={
+                          historicalAssessment.level === 'positive'
+                            ? 'success'
+                            : historicalAssessment.level === 'negative'
+                              ? 'warning'
+                              : 'info'
+                        }
+                        sx={{ mt: 1.25, textAlign: 'left' }}
                       >
-                        <Avatar
-                          sx={{
-                            width: 28,
-                            height: 28,
-                            bgcolor:
-                              playerIndex >= 0
-                                ? playerColors[
-                                    playerIndex % playerColors.length
-                                  ]
-                                : 'secondary.main',
-                            color: '#0b0912',
-                            fontSize: 12,
-                            fontWeight: 900,
-                          }}
-                        >
-                          {player?.display_name.slice(0, 1).toUpperCase() ?? '$'}
-                        </Avatar>
-                        <Typography
-                          variant="body2"
-                          fontWeight={700}
-                          noWrap
-                          sx={{ minWidth: 0, flexGrow: 1 }}
-                        >
-                          {name}
-                        </Typography>
-                        <Typography fontWeight={850}>${bid.amount}</Typography>
-                      </Stack>
-                    )
-                  })}
-                </Stack>
-              )}
+                        {t(`propertyHistory.assessment.${historicalAssessment.reason}`)}
+                      </Alert>
+                    )}
+                  </>
+                ) : (
+                  <Typography variant="body2" color="text.secondary" mt={1}>
+                    {t('propertyHistory.noHistory')}
+                  </Typography>
+                )}
+              </Box>
             </Box>
+
           </Box>
         </Box>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function AuctionBidHistory({
+  bids,
+  game,
+  motionIntensity,
+}: {
+  bids: AuctionBid[]
+  game: GameState
+  motionIntensity: VisualEffectsIntensity
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <Box>
+      <Typography fontWeight={850} mb={1}>
+        {t('auctionBidHistory')}
+      </Typography>
+      {bids.length === 0 ? (
+        <Typography color="text.secondary" variant="body2">
+          {t('auctionNoBids')}
+        </Typography>
+      ) : (
+        <Box
+          component="ol"
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))',
+            gap: 0.75,
+            listStyle: 'none',
+            p: 0,
+            m: 0,
+          }}
+        >
+          {bids.map((bid) => {
+            const playerIndex = game.players.findIndex(
+              (player) => player.user_id === bid.playerId,
+            )
+            const player =
+              playerIndex >= 0 ? game.players[playerIndex] : undefined
+            const name = player?.display_name ?? t('bank')
+            return (
+              <Stack
+                component="li"
+                key={bid.sequence}
+                direction="row"
+                spacing={0.75}
+                alignItems="center"
+                aria-label={t('auctionBidHistoryItem', {
+                  player: name,
+                  amount: bid.amount,
+                })}
+                sx={{
+                  minWidth: 0,
+                  borderRadius: 2,
+                  bgcolor: 'rgba(75,81,133,.3)',
+                  border: '1px solid rgba(255,255,255,.07)',
+                  px: 1,
+                  py: 0.75,
+                  animation:
+                    bid.sequence === bids[0]?.sequence &&
+                    motionIntensity !== 'off'
+                      ? motionIntensity === 'soft'
+                        ? 'bid-row-soft 280ms ease-out'
+                        : 'bid-row-enter 420ms ease-out'
+                      : undefined,
+                  '@keyframes bid-row-soft': {
+                    from: { opacity: 0 },
+                    to: { opacity: 1 },
+                  },
+                  '@keyframes bid-row-enter': {
+                    from: { opacity: 0, transform: 'translateY(8px)' },
+                    to: { opacity: 1, transform: 'translateY(0)' },
+                  },
+                }}
+              >
+                <Avatar
+                  sx={{
+                    width: 28,
+                    height: 28,
+                    flexShrink: 0,
+                    bgcolor:
+                      playerIndex >= 0
+                        ? playerColors[playerIndex % playerColors.length]
+                        : 'secondary.main',
+                    color: '#0b0912',
+                    fontSize: 12,
+                    fontWeight: 900,
+                  }}
+                >
+                  {player?.display_name.slice(0, 1).toUpperCase() ?? '$'}
+                </Avatar>
+                <Box minWidth={0} flex={1}>
+                  <Typography variant="caption" fontWeight={700} noWrap display="block">
+                    {name}
+                  </Typography>
+                  <Typography fontWeight={900}>${bid.amount}</Typography>
+                </Box>
+              </Stack>
+            )
+          })}
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+function AuctionBoardMap({
+  tileCount,
+  tileIndex,
+  propertyName,
+  accent,
+}: {
+  tileCount: number
+  tileIndex: number
+  propertyName: string
+  accent: string
+}) {
+  const { t } = useTranslation()
+  if (tileCount < 4 || tileIndex < 0) return null
+  const side = Math.ceil(tileCount / 4) + 1
+
+  return (
+    <Box
+      sx={{
+        p: 1.25,
+        borderRadius: 2,
+        bgcolor: 'rgba(11,9,18,.28)',
+      }}
+    >
+      <Typography fontWeight={850} mb={1}>
+        {t('auctionBoardMap')}
+      </Typography>
+      <Box
+        role="img"
+        aria-label={t('auctionBoardMapTarget', {
+          property: propertyName,
+          position: tileIndex + 1,
+        })}
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${side}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${side}, minmax(0, 1fr))`,
+          gap: '2px',
+          width: '100%',
+          maxWidth: 220,
+          aspectRatio: '1',
+          mx: 'auto',
+        }}
+      >
+        <Box
+          sx={{
+            gridColumn: `3 / ${Math.max(4, side - 1)}`,
+            gridRow: `3 / ${Math.max(4, side - 1)}`,
+            alignSelf: 'center',
+            justifySelf: 'center',
+            textAlign: 'center',
+            minWidth: 0,
+          }}
+        >
+          <Typography color="secondary.light" fontWeight={900}>
+            {tileIndex + 1}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" display="block" noWrap>
+            {propertyName}
+          </Typography>
+        </Box>
+        {Array.from({ length: tileCount }, (_, index) => {
+          const position = boardPerimeterPosition(index, tileCount)
+          const selected = index === tileIndex
+          return (
+            <Box
+              key={index}
+              sx={{
+                gridColumn: position.column,
+                gridRow: position.row,
+                alignSelf: 'center',
+                justifySelf: 'center',
+                width: selected ? '100%' : '72%',
+                aspectRatio: '1',
+                borderRadius: selected ? '35%' : '28%',
+                bgcolor: selected ? accent : 'rgba(255,255,255,.17)',
+                border: selected ? '2px solid white' : 'none',
+                boxShadow: selected ? `0 0 0 2px ${accent}66, 0 0 14px ${accent}` : 'none',
+                transform: selected ? 'scale(1.6)' : undefined,
+                zIndex: selected ? 2 : 1,
+              }}
+            />
+          )
+        })}
+      </Box>
+    </Box>
+  )
+}
+
+function HistoricalValue({ label, value }: { label: string; value: string }) {
+  return (
+    <Box minWidth={0}>
+      <Typography variant="caption" color="text.secondary" display="block">
+        {label}
+      </Typography>
+      <Typography fontWeight={850}>{value}</Typography>
+    </Box>
   )
 }
 

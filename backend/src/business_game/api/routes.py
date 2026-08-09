@@ -27,6 +27,7 @@ from business_game.domain.errors import (
 )
 from business_game.domain.models import (
     AddBotRequest,
+    BoardHistoricalStats,
     ContentPack,
     CreateGameRequest,
     GameCommandRequest,
@@ -273,6 +274,18 @@ async def get_game(
 ) -> GameStateView:
     game = await games.get(game_id, current_user.id)
     return game_state_view(game, current_user.id)
+
+
+@router.get(
+    "/games/{game_id}/board-history",
+    response_model=BoardHistoricalStats,
+)
+async def get_board_history(
+    game_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    games: Annotated[GameService, Depends(get_game_service)],
+) -> BoardHistoricalStats:
+    return await games.board_history(game_id, current_user.id)
 
 
 @router.get(

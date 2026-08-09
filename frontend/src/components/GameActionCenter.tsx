@@ -25,6 +25,7 @@ import type {
 } from '../types'
 import { Dice3D } from './Dice3D'
 import { GameActivityFeed } from './GameActivityFeed'
+import { PlayerStatusSummary } from './PlayerStatusSummary'
 
 interface Props {
   game: GameState
@@ -115,6 +116,7 @@ export function GameActionCenter({
             })
           : ''}
       </Typography>
+      <PlayerStatusSummary game={game} pack={pack} playerId={user.id} />
       <Dice3D
         key={latestDice.sequence ?? 'decorative'}
         values={latestDice.values}

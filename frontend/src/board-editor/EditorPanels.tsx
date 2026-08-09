@@ -278,14 +278,14 @@ function InformationPanel({
           label="Jugadores mínimos"
           value={info.min_players}
           min={2}
-          max={12}
+          max={20}
           onChange={(min_players) => changeInfo({ min_players })}
         />
         <NumberField
           label="Jugadores máximos"
           value={info.max_players}
           min={2}
-          max={12}
+          max={20}
           onChange={(max_players) => changeInfo({ max_players })}
         />
       </Stack>

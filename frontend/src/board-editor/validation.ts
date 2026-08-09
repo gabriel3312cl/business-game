@@ -26,12 +26,12 @@ export function validateBoardLocally(
   }
   if (
     document.information.min_players < 2 ||
-    document.information.max_players > 12 ||
+    document.information.max_players > 20 ||
     document.information.min_players > document.information.max_players
   ) {
     issues.push({
       path: 'information.players',
-      message: 'El rango de jugadores debe estar entre 2 y 12 y ser coherente.',
+      message: 'El rango de jugadores debe estar entre 2 y 20 y ser coherente.',
     })
   }
   for (const locale of document.information.locales) {

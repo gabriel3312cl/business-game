@@ -37,6 +37,7 @@ import { advisorApi } from '../advisor/api'
 import type { AdvisorResponse } from '../advisor/types'
 import { api } from '../api'
 import type {
+  BoardHistoricalStats,
   ContentPack,
   GameCommand,
   GameState,
@@ -49,6 +50,7 @@ import type {
 import { perimeterPosition } from './boardGeometry'
 import { playerColors } from './gameColors'
 import { groupPropertyIds } from './propertyGrouping'
+import { summarizeHistoricalProperties } from './propertyHistoricalAnalysis'
 import { defaultTileColor } from './tilePresentation'
 
 const AdvisorMarkdown = lazy(() => import('../advisor/AdvisorMarkdown'))
@@ -59,6 +61,7 @@ interface Props {
   user: User
   busy: boolean
   error: string | null
+  boardHistory: BoardHistoricalStats | null
   onCommand: (command: GameCommand) => Promise<boolean>
 }
 
@@ -68,6 +71,7 @@ export function GameTradePanel({
   user,
   busy,
   error,
+  boardHistory,
   onCommand,
 }: Props) {
   const { t } = useTranslation()
@@ -152,6 +156,14 @@ export function GameTradePanel({
     if (!detailTrade || !systemAnalysis || aiAnalysisLoading) return
     const proposerAnalysis = systemAnalysis.proposer_analysis
     const recipientAnalysis = systemAnalysis.recipient_analysis
+    const offeredHistory = summarizeHistoricalProperties(
+      boardHistory,
+      detailTrade.offered_property_ids,
+    )
+    const requestedHistory = summarizeHistoricalProperties(
+      boardHistory,
+      detailTrade.requested_property_ids,
+    )
     setAiAnalysisLoading(true)
     setAiAnalysisError(false)
     try {
@@ -197,6 +209,11 @@ export function GameTradePanel({
               recipientAnalysis.expected_payments_after,
             recipientIncomeBefore: recipientAnalysis.expected_rent_income_before,
             recipientIncomeAfter: recipientAnalysis.expected_rent_income_after,
+            historicalGames: boardHistory?.game_count ?? 0,
+            offeredHistoricalLanding: offeredHistory.landingPercent,
+            offeredHistoricalRent: offeredHistory.totalRent,
+            requestedHistoricalLanding: requestedHistory.landingPercent,
+            requestedHistoricalRent: requestedHistory.totalRent,
           }),
         }),
       )
@@ -397,6 +414,7 @@ export function GameTradePanel({
                   game={game}
                   trade={detailTrade}
                   userId={user.id}
+                  boardHistory={boardHistory}
                 />
                 <Paper
                   variant="outlined"
@@ -872,6 +890,7 @@ interface SystemTradeAnalysisProps {
   game: GameState
   trade: TradeOffer
   userId: string
+  boardHistory: BoardHistoricalStats | null
 }
 
 function SystemTradeAnalysis({
@@ -881,6 +900,7 @@ function SystemTradeAnalysis({
   game,
   trade,
   userId,
+  boardHistory,
 }: SystemTradeAnalysisProps) {
   const { t } = useTranslation()
   if (loading || (!analysis && !failed)) {
@@ -921,8 +941,96 @@ function SystemTradeAnalysis({
           isUser={trade.recipient_id === userId}
         />
       </Box>
+      <TradeHistoricalAnalysis
+        game={game}
+        trade={trade}
+        boardHistory={boardHistory}
+      />
       <Typography variant="caption" color="text.secondary" display="block" mt={1}>
         {t('tradeSystemDisclaimer')}
+      </Typography>
+    </Paper>
+  )
+}
+
+function TradeHistoricalAnalysis({
+  game,
+  trade,
+  boardHistory,
+}: {
+  game: GameState
+  trade: TradeOffer
+  boardHistory: BoardHistoricalStats | null
+}) {
+  const { t } = useTranslation()
+  if (!boardHistory || boardHistory.game_count === 0) {
+    return (
+      <Alert severity="info" variant="outlined" sx={{ mt: 1.5 }}>
+        {t('propertyHistory.noHistory')}
+      </Alert>
+    )
+  }
+  const offered = summarizeHistoricalProperties(
+    boardHistory,
+    trade.offered_property_ids,
+  )
+  const requested = summarizeHistoricalProperties(
+    boardHistory,
+    trade.requested_property_ids,
+  )
+  return (
+    <Box sx={{ mt: 1.5 }}>
+      <Typography fontWeight={850}>{t('tradeHistoricalAnalysis')}</Typography>
+      <Typography variant="caption" color="text.secondary">
+        {t('propertyHistory.sample', { count: boardHistory.game_count })}
+      </Typography>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' },
+          gap: 1,
+          mt: 1,
+        }}
+      >
+        <TradeHistoricalSide
+          name={playerName(game, trade.proposer_id)}
+          receives={requested}
+          gives={offered}
+        />
+        <TradeHistoricalSide
+          name={playerName(game, trade.recipient_id)}
+          receives={offered}
+          gives={requested}
+        />
+      </Box>
+    </Box>
+  )
+}
+
+function TradeHistoricalSide({
+  name,
+  receives,
+  gives,
+}: {
+  name: string
+  receives: ReturnType<typeof summarizeHistoricalProperties>
+  gives: ReturnType<typeof summarizeHistoricalProperties>
+}) {
+  const { t } = useTranslation()
+  return (
+    <Paper variant="outlined" sx={{ p: 1.25, borderColor: 'rgba(255,255,255,.12)' }}>
+      <Typography fontWeight={800}>{name}</Typography>
+      <Typography variant="caption" color="text.secondary" display="block" mt={0.5}>
+        {t('tradeHistoricalReceives', {
+          percent: receives.landingPercent,
+          rent: receives.totalRent,
+        })}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" display="block">
+        {t('tradeHistoricalGives', {
+          percent: gives.landingPercent,
+          rent: gives.totalRent,
+        })}
       </Typography>
     </Paper>
   )

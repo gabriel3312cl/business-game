@@ -1,4 +1,10 @@
-import type { ContentPack, GameEvent, GameState, PlayerState } from '../types'
+import type {
+  BoardHistoricalStats,
+  ContentPack,
+  GameEvent,
+  GameState,
+  PlayerState,
+} from '../types'
 
 export type BoardHeatmapMode = 'off' | 'history' | 'probability'
 
@@ -90,6 +96,17 @@ export function buildProbabilityHeatmap(
   }
 
   return normalizedHeatmap('probability', outcomes)
+}
+
+export function buildBoardHistoricalHeatmap(
+  history: BoardHistoricalStats,
+  tileCount: number,
+): BoardHeatmap {
+  const visits = new Map<number, number>()
+  history.position_landings.slice(0, tileCount).forEach((value, position) => {
+    if (value > 0) visits.set(position, value)
+  })
+  return normalizedHeatmap('history', visits)
 }
 
 function normalizedHeatmap(

@@ -212,8 +212,11 @@ def build_advisor_context(
     if game.active_auction is not None:
         auction = {
             "property": tile_name(game.active_auction.property_id),
+            "minimum_bid": game.active_auction.minimum_bid,
             "current_bid": game.active_auction.current_bid,
             "current_bidder": alias(game.active_auction.current_bidder_id),
+            "refundable_deposit": game.active_auction.deposit_amount,
+            "your_deposit_held": game.active_auction.deposits.get(actor_id, 0),
             "eligible_players": [
                 alias(player_id) for player_id in game.active_auction.eligible_player_ids
             ],

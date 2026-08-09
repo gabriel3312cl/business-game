@@ -27,7 +27,8 @@ import type {
 
 const FAN_CARD_COUNT = 7
 const HUMAN_AUTO_CONTINUE_SECONDS = 10
-const BOT_AUTO_CONTINUE_SECONDS = 3
+const BOT_AUTO_CONTINUE_SECONDS = 1.5
+const BOT_COUNTDOWN_STEP = 0.5
 
 interface Props {
   game: GameState
@@ -60,6 +61,7 @@ export function GameCardDrawDialog({
   const autoContinueSeconds = drawer?.is_bot
     ? BOT_AUTO_CONTINUE_SECONDS
     : HUMAN_AUTO_CONTINUE_SECONDS
+  const countdownStep = drawer?.is_bot ? BOT_COUNTDOWN_STEP : 1
   const [fanReady, setFanReady] = useState(false)
   const [seconds, setSeconds] = useState(autoContinueSeconds)
   const choiceSubmittedRef = useRef(false)
@@ -113,11 +115,12 @@ export function GameCardDrawDialog({
   useEffect(() => {
     if (drawSequence === undefined || !revealed || seconds <= 0) return
     const countdown = window.setTimeout(
-      () => setSeconds((current) => Math.max(0, current - 1)),
-      1000,
+      () =>
+        setSeconds((current) => Math.max(0, current - countdownStep)),
+      countdownStep * 1000,
     )
     return () => window.clearTimeout(countdown)
-  }, [drawSequence, revealed, seconds])
+  }, [countdownStep, drawSequence, revealed, seconds])
 
   useEffect(() => {
     if (pending && revealed && seconds === 0 && canContinue && !busy) {

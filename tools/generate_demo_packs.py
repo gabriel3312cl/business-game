@@ -202,7 +202,7 @@ def generate(
         "default_locale": "es",
         "locales": ["es", "en"],
         "min_players": 2,
-        "max_players": 8 if mode == "extended" else 6,
+        "max_players": 20,
         "starting_balance": 1500,
         "pass_start_salary": 200,
         "mortgage_interest_percent": 10,

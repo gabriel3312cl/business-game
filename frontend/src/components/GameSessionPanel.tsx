@@ -71,6 +71,7 @@ import type { ChatMessage } from '../chat/types'
 import { useGameChat } from '../chat/useGameChat'
 import type {
   AutomationPreferenceSettings,
+  BoardHistoricalStats,
   BotController,
   BotPersonality,
   ContentPack,
@@ -99,9 +100,13 @@ import { GameCardChoiceDialog } from './GameCardChoiceDialog'
 import { GameCardDrawDialog } from './GameCardDrawDialog'
 import { GameFinishedDialog } from './GameFinishedDialog'
 import { GameVisualEffects } from './GameVisualEffects'
-import { BoardHeatmapControls } from './BoardHeatmapControls'
+import {
+  BoardHeatmapControls,
+  type BoardHeatmapSource,
+} from './BoardHeatmapControls'
 import { DebtAccountsPanel } from './DebtAccountsPanel'
 import {
+  buildBoardHistoricalHeatmap,
   buildHistoryHeatmap,
   buildProbabilityHeatmap,
   type BoardHeatmapMode,
@@ -406,6 +411,9 @@ export function GameSessionPanel({
   const [highlightedPropertyId, setHighlightedPropertyId] = useState<
     string | null
   >(null)
+  const [highlightedPlayerId, setHighlightedPlayerId] = useState<string | null>(
+    null,
+  )
   const panelLayoutRef = useRef(panelLayout)
   const panelLayoutChangeRef = useRef(0)
   const preferenceSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
@@ -434,13 +442,35 @@ export function GameSessionPanel({
     [receiveChatMessage, user.display_name, user.id],
   )
   const [heatmapMode, setHeatmapMode] = useState<BoardHeatmapMode>('off')
+  const [heatmapSource, setHeatmapSource] = useState<BoardHeatmapSource>('current')
   const [heatmapPlayerId, setHeatmapPlayerId] = useState<string | null>(null)
+  const [boardHistory, setBoardHistory] = useState<BoardHistoricalStats | null>(null)
+  const [boardHistoryLoading, setBoardHistoryLoading] = useState(true)
   const [heatmapRange, setHeatmapRange] = useState<{
     gameId: string
     from: number
     to: number | null
   }>(() => ({ gameId: game.id, from: 1, to: null }))
   const [motionSyncKey, setMotionSyncKey] = useState(0)
+  useEffect(() => {
+    let active = true
+    setBoardHistory(null)
+    setBoardHistoryLoading(true)
+    void api
+      .getBoardHistory(game.id)
+      .then((history) => {
+        if (active) setBoardHistory(history)
+      })
+      .catch(() => {
+        if (active) setBoardHistory(null)
+      })
+      .finally(() => {
+        if (active) setBoardHistoryLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [game.id])
   const prefersReducedMotion = useMediaQuery(
     '(prefers-reduced-motion: reduce)',
   )
@@ -506,6 +536,12 @@ export function GameSessionPanel({
   )
   const boardHeatmap = useMemo(() => {
     if (heatmapMode === 'history') {
+      if (heatmapSource === 'historical' && boardHistory) {
+        return buildBoardHistoricalHeatmap(
+          boardHistory,
+          pack.manifest.tile_count,
+        )
+      }
       return buildHistoryHeatmap(
         visibleEvents,
         pack.manifest.tile_count,
@@ -523,9 +559,11 @@ export function GameSessionPanel({
     }
     return null
   }, [
+    boardHistory,
     currentPlayer,
     game,
     heatmapMode,
+    heatmapSource,
     pack,
     probabilityHeatmapAvailable,
     resolvedHeatmapRange,
@@ -1629,6 +1667,9 @@ export function GameSessionPanel({
               />
               <BotManagementPanel
                 game={game}
+                maximumPlayers={
+                  game.settings.max_players ?? pack.manifest.max_players
+                }
                 isHost={isHost}
                 busy={busy}
                 onAdd={(
@@ -1655,8 +1696,13 @@ export function GameSessionPanel({
       range={resolvedHeatmapRange}
       maximumSequence={maximumHeatmapSequence}
       probabilityAvailable={probabilityHeatmapAvailable}
+      source={heatmapSource}
+      historicalAvailable={boardHistory !== null}
+      historicalGameCount={boardHistory?.game_count ?? 0}
+      historicalLoading={boardHistoryLoading}
       showTitle={false}
       onModeChange={setHeatmapMode}
+      onSourceChange={setHeatmapSource}
       onPlayerChange={setHeatmapPlayerId}
       onRangeChange={([from, to]) =>
         setHeatmapRange({
@@ -1674,11 +1720,13 @@ export function GameSessionPanel({
   const playersContent = (
     <GamePlayersPanel
       game={game}
+      pack={pack}
       user={user}
       useAssetTokens={pack.board.tiles.some((tile) => tile.asset_path)}
       currentUserTokenAppearance={tokenAppearance}
       showTitle={false}
       motionIntensity={motionIntensity}
+      onHoveredPlayerChange={setHighlightedPlayerId}
     />
   )
 
@@ -1701,6 +1749,7 @@ export function GameSessionPanel({
       user={user}
       busy={busy}
       error={error}
+      boardHistory={boardHistory}
       onCommand={sendCommand}
     />
   )
@@ -2251,6 +2300,7 @@ export function GameSessionPanel({
               actionEvents={visibleEvents}
               motionIntensity={motionIntensity}
               highlightedTileId={highlightedPropertyId}
+              highlightedPlayerId={highlightedPlayerId}
               centerContent={
                 <GameActionCenter
                   game={game}
@@ -2501,6 +2551,7 @@ export function GameSessionPanel({
           user={user}
           busy={busy}
           error={error}
+          boardHistory={boardHistory}
           onCommand={sendCommand}
           onCountdownWarning={handleAuctionCountdown}
           motionIntensity={motionIntensity}

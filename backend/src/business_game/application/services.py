@@ -41,6 +41,7 @@ from business_game.domain.models import (
     AuctionState,
     BankLoanState,
     BidCommand,
+    BoardHistoricalStats,
     BotController,
     BotPersonality,
     BotRelationshipState,
@@ -365,6 +366,26 @@ class GameService:
     async def list_scheduled_auctions(self) -> list[GameState]:
         return await self._games.list_with_scheduled_auctions()
 
+    async def board_history(
+        self,
+        game_id: UUID,
+        actor_id: UUID,
+    ) -> BoardHistoricalStats:
+        game = await self.get(game_id, actor_id)
+        pack = self._pack(game)
+        property_ids = [tile.id for tile in pack.board.tiles if tile.is_purchasable]
+        return await self._games.board_history(
+            pack_id=game.pack_id,
+            exclude_game_id=game.id,
+            property_ids=property_ids,
+            property_positions={
+                position: tile.id
+                for position, tile in enumerate(pack.board.tiles)
+                if tile.is_purchasable
+            },
+            tile_count=pack.manifest.tile_count,
+        )
+
     async def join(self, game_id: UUID, actor: User) -> GameState:
         async with self._session.begin():
             game = await self._games.get(game_id, for_update=True)
@@ -563,6 +584,20 @@ class GameService:
                     )
                 game.settings.allow_spectators = data.allow_spectators
                 changes["allow_spectators"] = data.allow_spectators
+            if data.auction_deposit_percent is not None:
+                game.settings.auction_deposit_percent = (
+                    data.auction_deposit_percent
+                )
+                changes["auction_deposit_percent"] = (
+                    data.auction_deposit_percent
+                )
+            if data.auction_minimum_bid_percent is not None:
+                game.settings.auction_minimum_bid_percent = (
+                    data.auction_minimum_bid_percent
+                )
+                changes["auction_minimum_bid_percent"] = (
+                    data.auction_minimum_bid_percent
+                )
             if data.rules is not None:
                 allowed_rules = {
                     rule.value for rule in pack.manifest.configurable_rules
@@ -742,6 +777,12 @@ class GameService:
                 )
             if game.active_auction is not None:
                 auction = game.active_auction
+                self._refund_auction_deposit(
+                    game,
+                    auction,
+                    actor_id,
+                    reason="player_left",
+                )
                 if actor_id not in auction.passed_player_ids:
                     auction.passed_player_ids.append(actor_id)
                 if auction.current_bidder_id == actor_id:
@@ -1106,6 +1147,7 @@ class GameService:
                     "steps": 0,
                     "movement": "step",
                     "consecutive_doubles": game.consecutive_doubles,
+                    "tile_id": pack.board.tiles[position].id,
                 },
             )
             self._send_to_jail(game, player, "consecutive_doubles")
@@ -1167,6 +1209,7 @@ class GameService:
                 "movement": "step",
                 "jail_attempt": True,
                 "is_double": is_double,
+                "tile_id": pack.board.tiles[to_position].id,
             },
         )
         if not is_double:
@@ -4052,6 +4095,7 @@ class GameService:
                 "creditor_id": str(actor_id),
                 "amount": debt.amount,
                 "tile_id": debt.tile_id,
+                "reason": debt.reason.value,
             },
         )
 
@@ -4436,6 +4480,7 @@ class GameService:
             if property_id in game.mortgaged_property_ids:
                 game.mortgaged_property_ids.remove(property_id)
             game.bank_auction_queue.append(property_id)
+            game.bank_auction_excluded_player_ids[property_id] = actor_id
             game.building_levels.pop(property_id, None)
         owned_property_id_set = set(owned_property_ids)
         game.trade_unavailable_property_ids = [
@@ -4476,6 +4521,7 @@ class GameService:
                     "creditor_id": str(debt.creditor_id) if debt.creditor_id else None,
                     "amount": transferred_amount,
                     "tile_id": debt.tile_id,
+                    "reason": debt.reason.value,
                     "liquidation": True,
                     **liquidation_data,
                 },
@@ -4566,13 +4612,16 @@ class GameService:
                 **liquidation_data,
                 "cancelled_trade_ids": cancelled_trade_ids,
                 "cancelled_plan_ids": cancelled_plan_ids,
+                "reason": debt.reason.value,
             },
         )
         active_players = [candidate for candidate in game.players if not candidate.bankrupt]
         if len(active_players) == 1:
             game.status = GameStatus.FINISHED
+            self._refund_all_auction_deposits(game, reason="game_finished")
             game.active_auction = None
             game.bank_auction_queue.clear()
+            game.bank_auction_excluded_player_ids.clear()
             game.pending_card_payments.clear()
             self._append_event(
                 game,
@@ -4642,6 +4691,11 @@ class GameService:
         minimum_bid: int,
         source: str | None = None,
     ) -> None:
+        minimum_bid, deposit_amount = self._auction_terms(
+            game,
+            property_id,
+            requested_minimum_bid=minimum_bid,
+        )
         eligible_player_ids = [
             player.user_id for player in game.players if not player.bankrupt
         ]
@@ -4650,6 +4704,7 @@ class GameService:
         game.active_auction = AuctionState(
             property_id=property_id,
             minimum_bid=minimum_bid,
+            deposit_amount=deposit_amount,
             eligible_player_ids=eligible_player_ids,
         )
         self._append_event(
@@ -4658,6 +4713,7 @@ class GameService:
             {
                 "property_id": property_id,
                 "minimum_bid": minimum_bid,
+                "deposit_amount": deposit_amount,
                 "eligible_player_ids": [
                     str(player_id) for player_id in eligible_player_ids
                 ],
@@ -4668,15 +4724,28 @@ class GameService:
     def _start_next_bank_auction(self, game: GameState) -> None:
         if game.active_auction is not None or not game.bank_auction_queue:
             return
-        eligible_player_ids = [
-            player.user_id for player in game.players if not player.bankrupt
-        ]
-        if len(eligible_player_ids) < 2:
-            game.bank_auction_queue.clear()
-            return
         property_id = game.bank_auction_queue.pop(0)
+        excluded_player_id = self._bank_auction_excluded_player_id(
+            game,
+            property_id,
+        )
+        eligible_player_ids = [
+            player.user_id
+            for player in game.players
+            if not player.bankrupt and player.user_id != excluded_player_id
+        ]
+        if not eligible_player_ids:
+            self._start_next_bank_auction(game)
+            return
+        minimum_bid, deposit_amount = self._auction_terms(
+            game,
+            property_id,
+            requested_minimum_bid=1,
+        )
         game.active_auction = AuctionState(
             property_id=property_id,
+            minimum_bid=minimum_bid,
+            deposit_amount=deposit_amount,
             eligible_player_ids=eligible_player_ids,
         )
         self._append_event(
@@ -4684,12 +4753,41 @@ class GameService:
             "auction.started",
             {
                 "property_id": property_id,
+                "minimum_bid": minimum_bid,
+                "deposit_amount": deposit_amount,
                 "eligible_player_ids": [
                     str(player_id) for player_id in eligible_player_ids
                 ],
                 "source": "bankruptcy",
+                "excluded_player_id": (
+                    str(excluded_player_id) if excluded_player_id is not None else None
+                ),
             },
         )
+
+    @staticmethod
+    def _bank_auction_excluded_player_id(
+        game: GameState,
+        property_id: str,
+    ) -> UUID | None:
+        excluded_player_id = game.bank_auction_excluded_player_ids.pop(
+            property_id,
+            None,
+        )
+        if excluded_player_id is not None:
+            return excluded_player_id
+        for event in reversed(game.events):
+            property_ids = event.data.get("property_ids")
+            if (
+                event.type not in {"debt.paid", "player.bankrupt"}
+                or not isinstance(property_ids, list)
+                or property_id not in property_ids
+            ):
+                continue
+            debtor_id = event.data.get("debtor_id") or event.data.get("player_id")
+            if isinstance(debtor_id, str):
+                return UUID(debtor_id)
+        return None
 
     def _bid(self, game: GameState, actor_id: UUID, amount: int) -> None:
         auction = game.active_auction
@@ -4709,8 +4807,27 @@ class GameService:
         if amount < auction.minimum_bid:
             raise ConflictError("the bid is below the auction minimum")
         player = self._player(game, actor_id)
-        if player.balance < amount:
+        held_deposit = auction.deposits.get(actor_id, 0)
+        required_cash = (
+            max(amount, auction.deposit_amount)
+            if held_deposit == 0
+            else amount - held_deposit
+        )
+        if player.balance < required_cash:
             raise ConflictError("insufficient balance")
+        if held_deposit == 0 and auction.deposit_amount > 0:
+            player.balance -= auction.deposit_amount
+            held_deposit = auction.deposit_amount
+            auction.deposits[actor_id] = held_deposit
+            self._append_event(
+                game,
+                "auction.deposit_placed",
+                {
+                    "property_id": auction.property_id,
+                    "player_id": str(actor_id),
+                    "amount": held_deposit,
+                },
+            )
         auction.current_bid = amount
         auction.current_bidder_id = actor_id
         auction.bid_deadline = self._clock() + AUCTION_BID_WINDOW
@@ -4736,6 +4853,12 @@ class GameService:
             raise ConflictError("the highest bidder cannot pass")
         if actor_id in auction.passed_player_ids:
             raise ConflictError("the player already passed")
+        self._refund_auction_deposit(
+            game,
+            auction,
+            actor_id,
+            reason="player_passed",
+        )
         auction.passed_player_ids.append(actor_id)
         self._append_event(
             game,
@@ -4765,15 +4888,22 @@ class GameService:
             return
         winner_id: str | None = None
         amount = 0
+        deposit_applied = 0
         if auction.current_bidder_id is not None:
             winner = self._player(game, auction.current_bidder_id)
-            if winner.balance < auction.current_bid:
+            winner_deposit = auction.deposits.pop(winner.user_id, 0)
+            deposit_applied = min(winner_deposit, auction.current_bid)
+            remaining_payment = auction.current_bid - deposit_applied
+            if winner.balance < remaining_payment:
                 raise ConflictError("the highest bidder no longer has sufficient balance")
-            winner.balance -= auction.current_bid
+            winner.balance -= remaining_payment
+            if winner_deposit > deposit_applied:
+                winner.balance += winner_deposit - deposit_applied
             game.owners[auction.property_id] = winner.user_id
             self._protect_acquired_properties(game, [auction.property_id])
             winner_id = str(winner.user_id)
             amount = auction.current_bid
+        self._refund_all_auction_deposits(game, reason="auction_completed")
         self._append_event(
             game,
             "auction.completed",
@@ -4781,10 +4911,67 @@ class GameService:
                 "property_id": auction.property_id,
                 "winner_id": winner_id,
                 "amount": amount,
+                "deposit_applied": deposit_applied,
             },
         )
         game.active_auction = None
         self._start_next_bank_auction(game)
+
+    def _auction_terms(
+        self,
+        game: GameState,
+        property_id: str,
+        *,
+        requested_minimum_bid: int,
+    ) -> tuple[int, int]:
+        price = self._tile(game, property_id).price or 0
+        configured_minimum = (
+            price * game.settings.auction_minimum_bid_percent + 99
+        ) // 100
+        deposit_amount = (
+            price * game.settings.auction_deposit_percent + 99
+        ) // 100
+        return max(1, requested_minimum_bid, configured_minimum), deposit_amount
+
+    def _refund_auction_deposit(
+        self,
+        game: GameState,
+        auction: AuctionState,
+        player_id: UUID,
+        *,
+        reason: str,
+    ) -> None:
+        amount = auction.deposits.pop(player_id, 0)
+        if amount <= 0:
+            return
+        self._player(game, player_id).balance += amount
+        self._append_event(
+            game,
+            "auction.deposit_refunded",
+            {
+                "property_id": auction.property_id,
+                "player_id": str(player_id),
+                "amount": amount,
+                "reason": reason,
+            },
+        )
+
+    def _refund_all_auction_deposits(
+        self,
+        game: GameState,
+        *,
+        reason: str,
+    ) -> None:
+        auction = game.active_auction
+        if auction is None:
+            return
+        for player_id in list(auction.deposits):
+            self._refund_auction_deposit(
+                game,
+                auction,
+                player_id,
+                reason=reason,
+            )
 
     @staticmethod
     def _protect_acquired_properties(

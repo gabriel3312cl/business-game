@@ -17,6 +17,8 @@ from business_game.domain.models import (
     AcceptTradeCommand,
     AddBotRequest,
     AuctionState,
+    BankLoanState,
+    BankState,
     BidCommand,
     BotController,
     BotPersonality,
@@ -24,8 +26,10 @@ from business_game.domain.models import (
     BuyPropertyCommand,
     BuySharesCommand,
     CancelTradeCommand,
+    CardPaymentState,
     DebtReason,
     DebtState,
+    DeclinePropertyCommand,
     GameEvent,
     GameSettings,
     GameState,
@@ -144,6 +148,41 @@ async def test_host_can_add_and_remove_personality_bots(
     assert game.events[-1].type == "player.left"
 
 
+async def test_lobby_accepts_twenty_players_and_rejects_twenty_first(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    host = await create_user(session, "twenty-players@example.com", "Host")
+    games = GameService(
+        session,
+        PackLoader(packs_dir),
+        dice_roller=lambda: (1, 2),
+    )
+    game = await games.create("classic-demo", host)
+
+    for index in range(19):
+        game = await games.add_bot(
+            game.id,
+            host.id,
+            AddBotRequest(display_name=f"Bot {index + 1}"),
+        )
+
+    assert len(game.players) == 20
+    with pytest.raises(ConflictError, match="full"):
+        await games.add_bot(game.id, host.id, AddBotRequest(display_name="Bot 20"))
+
+    await games.start(game.id, host.id)
+    await games.execute(game.id, host.id, RollCommand(action="roll"))
+    game = await games.execute(
+        game.id,
+        host.id,
+        DeclinePropertyCommand(action="decline_property"),
+    )
+
+    assert game.active_auction is not None
+    assert len(game.active_auction.eligible_player_ids) == 20
+
+
 def test_old_bot_snapshots_default_to_standard_controller() -> None:
     bot = PlayerState.model_validate(
         {
@@ -155,6 +194,51 @@ def test_old_bot_snapshots_default_to_standard_controller() -> None:
     )
 
     assert bot.bot_controller is BotController.STANDARD
+
+
+def test_twenty_player_snapshots_accept_player_scaled_collections() -> None:
+    player_ids = [uuid4() for _ in range(20)]
+    game = GameState(
+        host_user_id=player_ids[0],
+        pack_id="classic-demo",
+        pack_version="2.0.0",
+        players=[
+            PlayerState(user_id=player_id, display_name=f"Player {index + 1}")
+            for index, player_id in enumerate(player_ids)
+        ],
+        active_auction=AuctionState(
+            property_id="property_03",
+            eligible_player_ids=player_ids,
+            passed_player_ids=player_ids,
+        ),
+        pending_card_payments=[
+            CardPaymentState(
+                payer_id=player_id,
+                recipient_id=player_ids[(index + 1) % len(player_ids)],
+                amount=1,
+                card_id="player_scaled_payment",
+            )
+            for index, player_id in enumerate(player_ids)
+        ],
+        bank=BankState(
+            loans=[
+                BankLoanState(
+                    player_id=player_id,
+                    principal=1,
+                    interest_amount=0,
+                    remaining_balance=1,
+                    installment_amount=1,
+                    installments_remaining=1,
+                    issued_at_sequence=0,
+                )
+                for player_id in player_ids
+            ]
+        ),
+    )
+
+    assert len(game.active_auction.eligible_player_ids) == 20
+    assert len(game.pending_card_payments) == 20
+    assert len(game.bank.loans) == 20
 
 
 @pytest.mark.parametrize("pack_id", ["classic-demo", "extended-demo"])

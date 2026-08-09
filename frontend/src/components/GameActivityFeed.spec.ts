@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import type { GameEvent, GameEventType } from '../types'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import '../i18n'
+import type {
+  ContentPack,
+  GameEvent,
+  GameEventType,
+  PlayerState,
+} from '../types'
+import { GameActivityFeed } from './GameActivityFeed'
 import { activityTone } from './gameActivityFeedPresentation'
 import { institutionRevenueSourceKey } from './institutionRevenue'
 
@@ -56,5 +65,102 @@ describe('institutionRevenueSourceKey', () => {
     ['unknown', 'other'],
   ])('maps %s to %s', (revenueType, expected) => {
     expect(institutionRevenueSourceKey(revenueType)).toBe(expected)
+  })
+})
+
+describe('GameActivityFeed', () => {
+  it('uses the purchase price emitted by property.purchased', () => {
+    const player: PlayerState = {
+      user_id: 'player-1',
+      display_name: 'Bot Equilibrado',
+      is_bot: true,
+      bot_personality: 'balanced',
+      bot_controller: 'standard',
+      position: 5,
+      balance: 1000,
+      pending_dividend_units: 0,
+      bankrupt: false,
+      in_jail: false,
+      jail_failed_rolls: 0,
+      jail_card_ids: [],
+    }
+    const pack = {
+      manifest: { tile_count: 40 },
+      board: {
+        tiles: [
+          {
+            id: 'reading_railroad',
+            kind: 'transport',
+            name_key: 'tile.reading',
+          },
+        ],
+        decks: [],
+      },
+      messages: { 'tile.reading': 'Reading Railroad' },
+    } as unknown as ContentPack
+
+    const html = renderToStaticMarkup(
+      createElement(GameActivityFeed, {
+        events: [
+          event('property.purchased', {
+            player_id: player.user_id,
+            tile_id: 'reading_railroad',
+            price: 200,
+          }),
+        ],
+        players: [player],
+        spectators: [],
+        pack,
+      }),
+    )
+
+    expect(html).toContain('compró Reading Railroad por')
+    expect(html).toContain('$200')
+    expect(html).not.toContain('por $.')
+  })
+
+  it('shows auction deposit reservations and refunds with their amount', () => {
+    const player: PlayerState = {
+      user_id: 'player-1',
+      display_name: 'Batman',
+      is_bot: false,
+      bot_personality: null,
+      bot_controller: null,
+      position: 0,
+      balance: 1500,
+      pending_dividend_units: 0,
+      bankrupt: false,
+      in_jail: false,
+      jail_failed_rolls: 0,
+      jail_card_ids: [],
+    }
+    const pack = {
+      manifest: { tile_count: 40 },
+      board: { tiles: [], decks: [] },
+      messages: {},
+    } as unknown as ContentPack
+
+    const html = renderToStaticMarkup(
+      createElement(GameActivityFeed, {
+        events: [
+          event('auction.deposit_placed', {
+            player_id: player.user_id,
+            amount: 6,
+          }),
+          event('auction.deposit_refunded', {
+            player_id: player.user_id,
+            amount: 6,
+          }),
+        ],
+        players: [player],
+        spectators: [],
+        pack,
+      }),
+    )
+
+    const text = html.replace(/<[^>]*>/g, '')
+    expect(text).toContain('garantía reembolsable de $6')
+    expect(text).toContain('Se devolvió la garantía de')
+    expect(text.match(/\$6/g)).toHaveLength(2)
   })
 })

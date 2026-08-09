@@ -13,20 +13,25 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
   IconButton,
+  InputLabel,
   List,
   ListItem,
   ListItemAvatar,
   ListItemText,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Tooltip,
   Typography,
 } from '@mui/material'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { santiagoTokenAssets } from '../assets/monopolySantiago'
 import type {
+  ContentPack,
   GameEvent,
   GameState,
   TokenAppearanceSettings,
@@ -36,6 +41,10 @@ import type {
 import { AssetGlyph } from './AssetVisual'
 import { playerColors } from './gameColors'
 import {
+  buildPlayerListEntries,
+  type PlayerSortOption,
+} from './playerOrdering'
+import {
   tokenAssetPath,
   tokenFillStyle,
   tokenShapeStyle,
@@ -43,23 +52,32 @@ import {
 
 interface Props {
   game: GameState
+  pack: ContentPack
   user: User
   useAssetTokens?: boolean
   currentUserTokenAppearance?: TokenAppearanceSettings | null
   showTitle?: boolean
   motionIntensity?: VisualEffectsIntensity
+  onHoveredPlayerChange?: (playerId: string | null) => void
 }
 
 export function GamePlayersPanel({
   game,
+  pack,
   user,
   useAssetTokens = false,
   currentUserTokenAppearance = null,
   showTitle = true,
   motionIntensity = 'full',
+  onHoveredPlayerChange,
 }: Props) {
   const { t, i18n } = useTranslation()
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null)
+  const [sortOption, setSortOption] = useState<PlayerSortOption>('turnOrder')
+  const players = useMemo(
+    () => buildPlayerListEntries(game, pack, sortOption, i18n.language),
+    [game, pack, sortOption, i18n.language],
+  )
   const selectedBot = game.players.find(
     (player) => player.is_bot && player.user_id === selectedBotId,
   )
@@ -76,24 +94,54 @@ export function GamePlayersPanel({
     : []
   const adviceKeys = relationshipAdviceKeys(selectedInteractions)
 
+  useEffect(
+    () => () => onHoveredPlayerChange?.(null),
+    [onHoveredPlayerChange],
+  )
+
   return (
     <Box>
-      {showTitle && (
-        <Typography fontWeight={850} sx={{ px: 1, pt: 0.5 }}>
-          {t('playersPanel')}
-        </Typography>
-      )}
+      <Stack
+        direction="row"
+        alignItems="center"
+        justifyContent="space-between"
+        spacing={1}
+        sx={{ px: 1, pt: 0.5 }}
+      >
+        {showTitle && (
+          <Typography fontWeight={850}>{t('playersPanel')}</Typography>
+        )}
+        <FormControl size="small" sx={{ minWidth: 170, ml: 'auto' }}>
+          <InputLabel id="player-sort-label">{t('playerSort.label')}</InputLabel>
+          <Select
+            labelId="player-sort-label"
+            value={sortOption}
+            label={t('playerSort.label')}
+            onChange={(event) =>
+              setSortOption(event.target.value as PlayerSortOption)
+            }
+          >
+            <MenuItem value="turnOrder">{t('playerSort.turnOrder')}</MenuItem>
+            <MenuItem value="netWorth">{t('playerSort.netWorth')}</MenuItem>
+            <MenuItem value="cash">{t('playerSort.cash')}</MenuItem>
+            <MenuItem value="name">{t('playerSort.name')}</MenuItem>
+          </Select>
+        </FormControl>
+      </Stack>
       <List dense disablePadding sx={{ mt: 0.5 }}>
-        {game.players.map((player, index) => {
-          const active = index === game.current_player_index
+        {players.map(({ player, playerIndex, estimatedNetWorth }) => {
+          const active = playerIndex === game.current_player_index
           const customAppearance =
             player.user_id === user.id ? currentUserTokenAppearance : null
           const color =
-            customAppearance?.color ?? playerColors[index % playerColors.length]
+            customAppearance?.color ??
+            playerColors[playerIndex % playerColors.length]
           const assetPath = customAppearance
             ? tokenAssetPath(customAppearance.icon)
             : useAssetTokens
-              ? santiagoTokenAssets[index % santiagoTokenAssets.length].path
+              ? santiagoTokenAssets[
+                  playerIndex % santiagoTokenAssets.length
+                ].path
               : undefined
           const relationship = player.is_bot
             ? game.bot_relationships.find(
@@ -108,6 +156,8 @@ export function GamePlayersPanel({
             <ListItem
               key={player.user_id}
               data-player-effect-id={player.user_id}
+              onMouseEnter={() => onHoveredPlayerChange?.(player.user_id)}
+              onMouseLeave={() => onHoveredPlayerChange?.(null)}
               sx={{
                 borderRadius: 2,
                 mb: 0.5,
@@ -157,7 +207,7 @@ export function GamePlayersPanel({
                   ) : assetPath ? (
                     <AssetGlyph path={assetPath} size="72%" />
                   ) : (
-                    index + 1
+                    playerIndex + 1
                   )}
                 </Avatar>
               </ListItemAvatar>
@@ -260,9 +310,16 @@ export function GamePlayersPanel({
                     : (
                         <Box component="span">
                           <AnimatedBalance
-                            value={player.balance}
+                            value={
+                              sortOption === 'netWorth'
+                                ? estimatedNetWorth
+                                : player.balance
+                            }
                             intensity={motionIntensity}
                           />
+                          {sortOption === 'netWorth'
+                            ? ` ${t('playerSort.netWorthValue')}`
+                            : ''}
                           {player.in_jail ? ` · ${t('detained')}` : ''}
                           {player.is_bot
                             ? ` · ${t(

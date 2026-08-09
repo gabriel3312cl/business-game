@@ -24,7 +24,8 @@ import type {
   VisualEffectsIntensity,
 } from '../types'
 
-const BOT_RESULT_SECONDS = 3
+const BOT_RESULT_SECONDS = 1.5
+const BOT_RESULT_COUNTDOWN_STEP = 0.5
 
 interface Props {
   game: GameState
@@ -69,8 +70,11 @@ export function GameCardChoiceDialog({
   useEffect(() => {
     if (!resultIsBot || resultSeconds <= 0) return
     const timer = window.setTimeout(
-      () => setResultSeconds((current) => Math.max(0, current - 1)),
-      1000,
+      () =>
+        setResultSeconds((current) =>
+          Math.max(0, current - BOT_RESULT_COUNTDOWN_STEP),
+        ),
+      BOT_RESULT_COUNTDOWN_STEP * 1000,
     )
     return () => window.clearTimeout(timer)
   }, [resultIsBot, resultSeconds])

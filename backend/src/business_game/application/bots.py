@@ -522,8 +522,10 @@ class BotPolicy:
             if bot.bot_personality is BotPersonality.AGGRESSIVE:
                 reserve //= 2
             strategic_value = engine.marginal_value(bot.user_id, [tile.id])
+            held_deposit = auction.deposits.get(bot.user_id, 0)
+            available_cash = bot.balance + held_deposit
             max_bid = min(
-                max(bot.balance - reserve, 0),
+                max(available_cash - reserve, 0),
                 strategic_value * profile.auction_value_percent // 100,
             )
             increment = max(1, (tile.price or strategic_value or 20) // 20)
@@ -532,7 +534,10 @@ class BotPolicy:
                 auction.current_bid + 1,
                 auction.current_bid + increment,
             )
-            if amount <= max_bid:
+            can_place_deposit = (
+                held_deposit > 0 or bot.balance >= auction.deposit_amount
+            )
+            if can_place_deposit and amount <= max_bid:
                 return BotAction(
                     bot.user_id,
                     BidCommand(action="bid", amount=amount),

@@ -18,6 +18,7 @@ import type { BotController, BotPersonality, GameState } from '../types'
 
 interface Props {
   game: GameState
+  maximumPlayers: number
   isHost: boolean
   busy: boolean
   onAdd: (
@@ -37,6 +38,7 @@ const personalities: BotPersonality[] = [
 
 export function BotManagementPanel({
   game,
+  maximumPlayers,
   isHost,
   busy,
   onAdd,
@@ -47,8 +49,7 @@ export function BotManagementPanel({
   const [personality, setPersonality] = useState<BotPersonality>('balanced')
   const [displayName, setDisplayName] = useState('')
   const bots = game.players.filter((player) => player.is_bot)
-  const maximum = game.settings.max_players ?? 12
-  const roomIsFull = game.players.length >= maximum
+  const roomIsFull = game.players.length >= maximumPlayers
 
   return (
     <Box>

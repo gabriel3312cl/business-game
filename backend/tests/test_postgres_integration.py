@@ -128,7 +128,7 @@ async def test_postgres_persists_an_authoritative_auction(packs_dir: Path) -> No
             assert persisted.owners["property_03"] == second.id
             assert persisted.mortgaged_property_ids == ["property_03"]
             assert persisted.active_auction is None
-            assert persisted.settings.max_players == 6
+            assert persisted.settings.max_players == 20
             assert persisted.settings.allow_spectators is True
             assert persisted.settings.rules.auction_unpurchased_properties
             assert persisted.pack_version == "2.0.0"

@@ -230,10 +230,15 @@ def build_ai_bot_choices(
         auction = game.active_auction
         add(PassAuctionCommand(action="pass_auction"))
         tile = _tile(pack, auction.property_id)
+        held_deposit = auction.deposits.get(player.user_id, 0)
+        available_cash = player.balance + held_deposit
+        can_place_deposit = (
+            held_deposit > 0 or player.balance >= auction.deposit_amount
+        )
         increments = {1, max((tile.price or 50) // 10, 5)}
         for increment in sorted(increments):
             amount = max(auction.minimum_bid, auction.current_bid + increment)
-            if amount <= player.balance:
+            if can_place_deposit and amount <= available_cash:
                 add(BidCommand(action="bid", amount=amount))
         return choices
 
@@ -409,8 +414,11 @@ def build_ai_bot_context(
     if game.active_auction is not None:
         auction = {
             "property": _tile_name(pack, game.active_auction.property_id),
+            "minimum_bid": game.active_auction.minimum_bid,
             "current_bid": game.active_auction.current_bid,
             "current_bidder": alias(game.active_auction.current_bidder_id),
+            "refundable_deposit": game.active_auction.deposit_amount,
+            "your_deposit_held": game.active_auction.deposits.get(actor_id, 0),
         }
     debt = None
     if game.active_debt is not None and game.active_debt.debtor_id == actor_id:

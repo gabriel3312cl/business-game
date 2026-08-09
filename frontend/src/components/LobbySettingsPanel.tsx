@@ -22,6 +22,8 @@ const FINANCIAL_RULES: RuleOptionName[] = [
   'stock_market_enabled',
   'custom_rent_debts_enabled',
 ]
+const AUCTION_DEPOSIT_OPTIONS = [0, 5, 10, 15, 20, 25]
+const AUCTION_MINIMUM_OPTIONS = [0, 25, 50, 75, 100]
 
 interface Props {
   game: GameState
@@ -31,6 +33,8 @@ interface Props {
   onUpdate: (data: {
     max_players?: number
     allow_spectators?: boolean
+    auction_deposit_percent?: number
+    auction_minimum_bid_percent?: number
     rules?: Partial<OptionalRules>
   }) => void
 }
@@ -80,6 +84,48 @@ export function LobbySettingsPanel({
                 disabled={count < game.players.length}
               >
                 {count}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ width: '100%', minWidth: 0 }}>
+          <InputLabel>{t('auctionDepositSetting')}</InputLabel>
+          <Select
+            value={game.settings.auction_deposit_percent}
+            label={t('auctionDepositSetting')}
+            disabled={!isHost || busy}
+            onChange={(event) =>
+              onUpdate({
+                auction_deposit_percent: Number(event.target.value),
+              })
+            }
+          >
+            {AUCTION_DEPOSIT_OPTIONS.map((percent) => (
+              <MenuItem key={percent} value={percent}>
+                {percent === 0
+                  ? t('auctionDepositDisabled')
+                  : t('percentOfOriginalPrice', { percent })}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ width: '100%', minWidth: 0 }}>
+          <InputLabel>{t('auctionMinimumSetting')}</InputLabel>
+          <Select
+            value={game.settings.auction_minimum_bid_percent}
+            label={t('auctionMinimumSetting')}
+            disabled={!isHost || busy}
+            onChange={(event) =>
+              onUpdate({
+                auction_minimum_bid_percent: Number(event.target.value),
+              })
+            }
+          >
+            {AUCTION_MINIMUM_OPTIONS.map((percent) => (
+              <MenuItem key={percent} value={percent}>
+                {percent === 0
+                  ? t('auctionMinimumNoReserve')
+                  : t('percentOfOriginalPrice', { percent })}
               </MenuItem>
             ))}
           </Select>

@@ -525,6 +525,41 @@ async def test_game_creation_uses_authenticated_identity(client: AsyncClient) ->
     assert game["events"][1]["type"] == "player.joined"
 
 
+async def test_board_history_requires_membership_and_returns_aggregate_contract(
+    client: AsyncClient,
+) -> None:
+    member_headers = await register_and_login(
+        client,
+        email="history-member@example.com",
+    )
+    outsider_headers = await register_and_login(
+        client,
+        email="history-outsider@example.com",
+    )
+    created = await client.post(
+        "/api/v1/games",
+        headers=member_headers,
+        json={"pack_id": "classic-demo"},
+    )
+    game_id = created.json()["id"]
+
+    response = await client.get(
+        f"/api/v1/games/{game_id}/board-history",
+        headers=member_headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["pack_id"] == "classic-demo"
+    assert response.json()["game_count"] == 0
+    assert len(response.json()["position_landings"]) == 40
+    assert response.json()["properties"]
+
+    forbidden = await client.get(
+        f"/api/v1/games/{game_id}/board-history",
+        headers=outsider_headers,
+    )
+    assert forbidden.status_code == 403
+
+
 async def test_trade_analysis_uses_authenticated_participant_perspective(
     client: AsyncClient,
     session: AsyncSession,
@@ -707,6 +742,8 @@ async def test_room_settings_and_spectator_permissions(
         json={
             "max_players": 3,
             "allow_spectators": False,
+            "auction_deposit_percent": 15,
+            "auction_minimum_bid_percent": 75,
             "rules": {"free_parking_jackpot": True},
         },
     )
@@ -714,6 +751,8 @@ async def test_room_settings_and_spectator_permissions(
     assert settings.json()["settings"] == {
         "max_players": 3,
         "allow_spectators": False,
+        "auction_deposit_percent": 15,
+        "auction_minimum_bid_percent": 75,
         "rules": {
             "auction_unpurchased_properties": True,
             "free_parking_jackpot": True,

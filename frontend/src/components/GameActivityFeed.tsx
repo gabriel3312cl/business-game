@@ -94,6 +94,9 @@ export function GameActivityFeed({
           <Stack direction="row" spacing={1} alignItems="center">
             <HistoryRoundedIcon fontSize="small" color="secondary" />
             <Typography fontWeight={800}>{t('activity.title')}</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {t('activity.newestFirst')}
+            </Typography>
           </Stack>
         </>
       )}
@@ -124,6 +127,10 @@ export function GameActivityFeed({
               propertyName,
               cardMessage,
               deckName,
+              (position) => {
+                const tile = pack.board.tiles[position]
+                return tile ? (pack.messages[tile.name_key] ?? tile.id) : ''
+              },
               (key) => pack.messages[key] ?? key,
               i18n.language,
             )
@@ -294,6 +301,7 @@ function eventMessage(
   propertyName: (tileId?: string) => string,
   cardMessage: (cardId?: string) => string,
   deckName: (deckId?: string) => string,
+  propertyAtPosition: (position: number) => string,
   contentMessage: (key: string) => string,
   locale: string,
 ): string {
@@ -304,9 +312,12 @@ function eventMessage(
       textValue(event, 'player_id') ?? textValue(event, 'spectator_id'),
     )
   const amount = numberValue(event, 'amount')
-  const property = propertyName(
+  const propertyById = propertyName(
     textValue(event, 'property_id') ?? textValue(event, 'tile_id'),
   )
+  const position = numberValue(event, 'to_position')
+  const property =
+    propertyById || (position === undefined ? '' : propertyAtPosition(position))
   const instrumentKind =
     textValue(event, 'instrument_kind') ??
     (textValue(event, 'tile_id')?.startsWith('institution:')
@@ -348,7 +359,11 @@ function eventMessage(
       return t('activity.diceRolled', { player, dice: diceText, property })
     }
     case 'property.purchased':
-      return t('activity.propertyPurchased', { player, property, amount })
+      return t('activity.propertyPurchased', {
+        player,
+        property,
+        amount: numberValue(event, 'price') ?? amount,
+      })
     case 'property.declined':
       return t('activity.propertyDeclined', { player, property })
     case 'property.mortgaged':
@@ -378,6 +393,10 @@ function eventMessage(
       return t('activity.auctionStarted', { property })
     case 'auction.bid_placed':
       return t('activity.auctionBid', { player, property, amount })
+    case 'auction.deposit_placed':
+      return t('activity.auctionDepositPlaced', { player, amount })
+    case 'auction.deposit_refunded':
+      return t('activity.auctionDepositRefunded', { player, amount })
     case 'auction.player_passed':
       return t('activity.auctionPassed', { player })
     case 'auction.completed': {
@@ -453,12 +472,15 @@ function eventMessage(
       return t('activity.debtPlanRejected', {
         player: playerName(textValue(event, 'debtor_id')),
       })
-    case 'debt.installment_paid':
+    case 'debt.installment_paid': {
+      const remaining = numberValue(event, 'remaining_amount')
       return t('activity.debtInstallmentPaid', {
         player: playerName(textValue(event, 'debtor_id')),
         amount,
-        remaining: numberValue(event, 'remaining_amount'),
+        remaining:
+          remaining === undefined ? t('activity.notAvailable') : `$${remaining}`,
       })
+    }
     case 'debt.plan_completed':
       return t('activity.debtPlanCompleted', {
         player: playerName(textValue(event, 'debtor_id')),

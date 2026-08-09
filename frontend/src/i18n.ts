@@ -73,6 +73,22 @@ void i18n.use(initReactI18next).init({
         yourTurn: 'Tu turno',
         dice: 'Dado',
         playersPanel: 'Jugadores',
+        playerSort: {
+          label: 'Ordenar por',
+          turnOrder: 'Orden de turno',
+          netWorth: 'Patrimonio neto',
+          cash: 'Efectivo',
+          name: 'Nombre',
+          netWorthValue: '· patrimonio neto',
+        },
+        playerStatus: {
+          title: 'Mi estado',
+          cash: 'Dinero',
+          netWorth: 'Patrimonio neto',
+          debt: 'Deudas totales',
+          portfolioReturn: 'Rendimiento bolsa',
+          noInvestments: 'Sin inversiones',
+        },
         host: 'Anfitrión',
         bankrupt: 'En bancarrota',
         turn: 'Turno',
@@ -857,6 +873,11 @@ void i18n.use(initReactI18next).init({
           negotiator: 'Negociador',
         },
         maximumPlayers: 'Máximo de jugadores',
+        auctionDepositSetting: 'Garantía para ofertar',
+        auctionMinimumSetting: 'Precio mínimo de subasta',
+        auctionDepositDisabled: 'Sin garantía',
+        auctionMinimumNoReserve: 'Sin precio de reserva',
+        percentOfOriginalPrice: '{{percent}}% del precio original',
         allowSpectators: 'Permitir espectadores',
         hostControlsSettings: 'Solo el anfitrión puede cambiar estos ajustes.',
         spectator: 'Espectador',
@@ -898,7 +919,45 @@ void i18n.use(initReactI18next).init({
         auctionBidHistory: 'Ofertas recientes',
         auctionNoBids: 'Aún no hay ofertas en esta subasta.',
         auctionBidHistoryItem: '{{player}} ofreció ${{amount}}',
+        auctionDeposit: 'Garantía reembolsable: ${{amount}} ({{percent}}%)',
+        auctionDepositHeld: 'Tu garantía de ${{amount}} está reservada',
+        auctionDepositHint:
+          'Se devuelve si pierdes o pasas, y se descuenta del pago si ganas.',
+        auctionMinimumBid: 'Precio mínimo: ${{amount}}',
+        auctionPriceBelow: '{{percent}}% bajo el precio original',
+        auctionPriceAbove: '{{percent}}% sobre el precio original',
+        auctionPriceEqual: 'Igual al precio original',
         waitingForAuction: 'Esperando las ofertas de otros jugadores…',
+        auctionNotEligible:
+          'No puedes ofertar en esta subasta. El dueño liquidado queda excluido.',
+        auctionBoardPosition: 'Casilla {{position}} de {{total}}',
+        auctionBoardMap: 'Ubicación en el tablero',
+        auctionBoardMapTarget: '{{property}}, casilla {{position}}',
+        propertyHistory: {
+          title: 'Desempeño histórico',
+          sample: '{{count}} partidas anteriores de este tablero',
+          groupProgress: 'Actualmente tienes {{owned}} de {{total}} en este grupo.',
+          completesGroup:
+            'Si ganas, completas el grupo. Ese beneficio estratégico no aparece en los promedios históricos.',
+          landings: 'Caídas · % del tablero',
+          rent: 'Rentas cobradas',
+          averageRent: 'Renta media cobrada',
+          averageAuction: 'Precio medio en subasta',
+          noData: 'Sin ventas',
+          noHistory: 'Aún no hay una muestra histórica comparable.',
+          assessment: {
+            frequent_and_fair:
+              'Conviene según el histórico: recibe más caídas que una casilla promedio y el precio no supera su referencia histórica.',
+            expensive:
+              'El precio ya supera en más de 10% su referencia histórica. Conviene ofertar con cautela.',
+            infrequent:
+              'Ha recibido menos caídas que una casilla promedio. Su retorno histórico es débil.',
+            mixed:
+              'El histórico es mixto. Revisa el grupo que completarías y conserva liquidez para rentas.',
+            insufficient:
+              'La muestra aún es pequeña para recomendar comprar o pasar con confianza.',
+          },
+        },
         price: 'Precio',
         bid: 'Oferta',
         placeBid: 'Ofertar',
@@ -920,6 +979,11 @@ void i18n.use(initReactI18next).init({
         tradeBoardMapLabel: '{{property}}, ubicada en la casilla {{position}} del tablero',
         tradePropertyMeta: '{{group}} · Casilla {{position}} de {{total}}',
         tradeSystemAnalysis: 'Análisis del sistema',
+        tradeHistoricalAnalysis: 'Análisis histórico del tablero',
+        tradeHistoricalReceives:
+          'Recibe: {{percent}}% de las caídas históricas y ${{rent}} en rentas cobradas.',
+        tradeHistoricalGives:
+          'Entrega: {{percent}}% de las caídas históricas y ${{rent}} en rentas cobradas.',
         tradeSystemAnalyzing: 'Calculando el valor estratégico del trato…',
         tradeSystemUnavailable: 'No fue posible calcular este trato.',
         tradeSystemComparisonHelp:
@@ -962,7 +1026,7 @@ void i18n.use(initReactI18next).init({
         tradeRegenerateAi: 'Analizar de nuevo',
         tradeAiUnavailable: 'El análisis IA no está disponible en este momento.',
         tradeAiQuestion:
-          'Analiza el trato para ambos. Yo soy {{myRole}}. Flujo exacto: OFERTANTE da ${{offeredCash}} y {{offeredPropertyCount}} propiedades; recibe ${{requestedCash}} y {{requestedPropertyCount}}. Usa las propiedades del trato pendiente en el contexto. O: {{proposerLevel}}, {{proposerVerdict}}, balance {{proposerSurplus}}, ajustado {{proposerRiskSurplus}}, caja ${{proposerCashAfter}}, prob. pago {{proposerPaymentProbabilityBefore}}→{{proposerPaymentProbabilityAfter}}%, pagos ${{proposerExpectedPaymentsBefore}}→${{proposerExpectedPaymentsAfter}}, rentas ${{proposerIncomeBefore}}→${{proposerIncomeAfter}}. R: {{recipientLevel}}, {{recipientVerdict}}, balance {{recipientSurplus}}, ajustado {{recipientRiskSurplus}}, caja ${{recipientCashAfter}}, prob. pago {{recipientPaymentProbabilityBefore}}→{{recipientPaymentProbabilityAfter}}%, pagos ${{recipientExpectedPaymentsBefore}}→${{recipientExpectedPaymentsAfter}}, rentas ${{recipientIncomeBefore}}→${{recipientIncomeAfter}}. Di si conviene a cada uno, quién gana más y el principal riesgo de caídas, pagos y liquidez. No contradigas datos ni decidas por mí. Sé breve.',
+          'Analiza el trato para ambos. Yo soy {{myRole}}. Flujo exacto: OFERTANTE da ${{offeredCash}} y {{offeredPropertyCount}} propiedades; recibe ${{requestedCash}} y {{requestedPropertyCount}}. Usa las propiedades del trato pendiente en el contexto. O: {{proposerLevel}}, {{proposerVerdict}}, balance {{proposerSurplus}}, ajustado {{proposerRiskSurplus}}, caja ${{proposerCashAfter}}, prob. pago {{proposerPaymentProbabilityBefore}}→{{proposerPaymentProbabilityAfter}}%, pagos ${{proposerExpectedPaymentsBefore}}→${{proposerExpectedPaymentsAfter}}, rentas ${{proposerIncomeBefore}}→${{proposerIncomeAfter}}. R: {{recipientLevel}}, {{recipientVerdict}}, balance {{recipientSurplus}}, ajustado {{recipientRiskSurplus}}, caja ${{recipientCashAfter}}, prob. pago {{recipientPaymentProbabilityBefore}}→{{recipientPaymentProbabilityAfter}}%, pagos ${{recipientExpectedPaymentsBefore}}→${{recipientExpectedPaymentsAfter}}, rentas ${{recipientIncomeBefore}}→${{recipientIncomeAfter}}. Histórico de {{historicalGames}} partidas del tablero: lo ofrecido representa {{offeredHistoricalLanding}}% de las caídas y ${{offeredHistoricalRent}} en rentas cobradas; lo solicitado representa {{requestedHistoricalLanding}}% y ${{requestedHistoricalRent}}. Di si conviene a cada uno, quién gana más y el principal riesgo de caídas, pagos y liquidez. No contradigas datos ni decidas por mí. Sé breve.',
         selectTradePlayer: 'Selecciona con quién quieres intercambiar',
         cash: 'Dinero',
         properties: 'Propiedades',
@@ -1184,6 +1248,11 @@ void i18n.use(initReactI18next).init({
           layer: 'Capa visible',
           off: 'Sin capa',
           history: 'Histórico',
+          dataSource: 'Fuente de datos',
+          currentGame: 'Partida actual',
+          allBoardGames: 'Todas las partidas',
+          loadingHistorical: 'Cargando histórico…',
+          historicalSample: '{{count}} partidas anteriores de este tablero.',
           probability: 'Probabilidad',
           playerFilter: 'Jugador del mapa de calor',
           allPlayers: 'Todos los jugadores',
@@ -1217,6 +1286,7 @@ void i18n.use(initReactI18next).init({
         },
         activity: {
           title: 'Actividad de la partida',
+          newestFirst: 'Más reciente primero',
           short: 'Actividad',
           empty: 'Aún no hay actividad.',
           gameCreated: 'Se creó la partida.',
@@ -1238,6 +1308,10 @@ void i18n.use(initReactI18next).init({
           buildingSold: '{{player}} redujo {{property}} al nivel {{level}}.',
           auctionStarted: 'Comenzó la subasta de {{property}}.',
           auctionBid: '{{player}} ofreció ${{amount}} por {{property}}.',
+          auctionDepositPlaced:
+            '{{player}} dejó una garantía reembolsable de ${{amount}}.',
+          auctionDepositRefunded:
+            'Se devolvió la garantía de ${{amount}} a {{player}}.',
           auctionPassed: '{{player}} se retiró de la subasta.',
           auctionWon: '{{player}} ganó {{property}} por ${{amount}}.',
           auctionNoWinner: '{{property}} quedó sin comprador.',
@@ -1257,7 +1331,8 @@ void i18n.use(initReactI18next).init({
           debtPlanAccepted: '{{player}} aceptó el acuerdo de pago.',
           debtPlanRejected: '{{player}} rechazó el acuerdo de pago.',
           debtInstallmentPaid:
-            '{{player}} pagó una cuota de ${{amount}}. Saldo: ${{remaining}}.',
+            '{{player}} pagó una cuota de ${{amount}}. Saldo: {{remaining}}.',
+          notAvailable: 'sin dato',
           debtPlanCompleted: '{{player}} completó el plan de cuotas.',
           debtPlanCancelled: 'El plan de cuotas fue cancelado.',
           cardDrawn: '{{player}} obtuvo: {{card}}',
@@ -1525,6 +1600,22 @@ void i18n.use(initReactI18next).init({
         yourTurn: 'Your turn',
         dice: 'Die',
         playersPanel: 'Players',
+        playerSort: {
+          label: 'Sort by',
+          turnOrder: 'Turn order',
+          netWorth: 'Net worth',
+          cash: 'Cash',
+          name: 'Name',
+          netWorthValue: '· net worth',
+        },
+        playerStatus: {
+          title: 'My status',
+          cash: 'Cash',
+          netWorth: 'Net worth',
+          debt: 'Total debt',
+          portfolioReturn: 'Market return',
+          noInvestments: 'No investments',
+        },
         host: 'Host',
         bankrupt: 'Bankrupt',
         turn: 'Turn',
@@ -2300,6 +2391,11 @@ void i18n.use(initReactI18next).init({
           negotiator: 'Negotiator',
         },
         maximumPlayers: 'Maximum players',
+        auctionDepositSetting: 'Bid deposit',
+        auctionMinimumSetting: 'Minimum auction price',
+        auctionDepositDisabled: 'No deposit',
+        auctionMinimumNoReserve: 'No reserve price',
+        percentOfOriginalPrice: '{{percent}}% of original price',
         allowSpectators: 'Allow spectators',
         hostControlsSettings: 'Only the host can change these settings.',
         spectator: 'Spectator',
@@ -2338,7 +2434,45 @@ void i18n.use(initReactI18next).init({
         auctionBidHistory: 'Recent bids',
         auctionNoBids: 'There are no bids in this auction yet.',
         auctionBidHistoryItem: '{{player}} bid ${{amount}}',
+        auctionDeposit: 'Refundable deposit: ${{amount}} ({{percent}}%)',
+        auctionDepositHeld: 'Your ${{amount}} deposit is reserved',
+        auctionDepositHint:
+          'It is refunded if you lose or pass, and applied to your payment if you win.',
+        auctionMinimumBid: 'Minimum price: ${{amount}}',
+        auctionPriceBelow: '{{percent}}% below original price',
+        auctionPriceAbove: '{{percent}}% above original price',
+        auctionPriceEqual: 'At the original price',
         waitingForAuction: 'Waiting for the other players…',
+        auctionNotEligible:
+          'You cannot bid in this auction. The liquidated owner is excluded.',
+        auctionBoardPosition: 'Space {{position}} of {{total}}',
+        auctionBoardMap: 'Board location',
+        auctionBoardMapTarget: '{{property}}, space {{position}}',
+        propertyHistory: {
+          title: 'Historical performance',
+          sample: '{{count}} previous games on this board',
+          groupProgress: 'You currently own {{owned}} of {{total}} in this group.',
+          completesGroup:
+            'Winning completes the group. That strategic benefit is not captured by historical averages.',
+          landings: 'Landings · board share',
+          rent: 'Rent collected',
+          averageRent: 'Average collected rent',
+          averageAuction: 'Average auction price',
+          noData: 'No sales',
+          noHistory: 'There is no comparable historical sample yet.',
+          assessment: {
+            frequent_and_fair:
+              'Historical data supports buying: it is landed on more than an average space and the price is not above its historical reference.',
+            expensive:
+              'The price is already more than 10% above its historical reference. Bid cautiously.',
+            infrequent:
+              'It has been landed on less often than an average space. Its historical return is weak.',
+            mixed:
+              'The historical signal is mixed. Check whether it completes a group and preserve cash for rent.',
+            insufficient:
+              'The sample is still too small to confidently recommend buying or passing.',
+          },
+        },
         price: 'Price',
         bid: 'Bid',
         placeBid: 'Place bid',
@@ -2360,6 +2494,11 @@ void i18n.use(initReactI18next).init({
         tradeBoardMapLabel: '{{property}}, located on board space {{position}}',
         tradePropertyMeta: '{{group}} · Space {{position}} of {{total}}',
         tradeSystemAnalysis: 'System analysis',
+        tradeHistoricalAnalysis: 'Historical board analysis',
+        tradeHistoricalReceives:
+          'Receives: {{percent}}% of historical landings and ${{rent}} in collected rent.',
+        tradeHistoricalGives:
+          'Gives: {{percent}}% of historical landings and ${{rent}} in collected rent.',
         tradeSystemAnalyzing: 'Calculating the strategic value of this trade…',
         tradeSystemUnavailable: 'This trade could not be analyzed.',
         tradeSystemComparisonHelp:
@@ -2402,7 +2541,7 @@ void i18n.use(initReactI18next).init({
         tradeRegenerateAi: 'Analyze again',
         tradeAiUnavailable: 'AI analysis is currently unavailable.',
         tradeAiQuestion:
-          'Analyze the trade for both sides. I am the {{myRole}}. Exact flow: PROPOSER gives ${{offeredCash}} and {{offeredPropertyCount}} properties; receives ${{requestedCash}} and {{requestedPropertyCount}}. Use the pending trade properties in context. P: {{proposerLevel}}, {{proposerVerdict}}, surplus {{proposerSurplus}}, adjusted {{proposerRiskSurplus}}, cash ${{proposerCashAfter}}, payment chance {{proposerPaymentProbabilityBefore}}→{{proposerPaymentProbabilityAfter}}%, payments ${{proposerExpectedPaymentsBefore}}→${{proposerExpectedPaymentsAfter}}, rent ${{proposerIncomeBefore}}→${{proposerIncomeAfter}}. R: {{recipientLevel}}, {{recipientVerdict}}, surplus {{recipientSurplus}}, adjusted {{recipientRiskSurplus}}, cash ${{recipientCashAfter}}, payment chance {{recipientPaymentProbabilityBefore}}→{{recipientPaymentProbabilityAfter}}%, payments ${{recipientExpectedPaymentsBefore}}→${{recipientExpectedPaymentsAfter}}, rent ${{recipientIncomeBefore}}→${{recipientIncomeAfter}}. Say whether each side benefits, who gains more, and the main landing, payment, and liquidity risk. Do not contradict the data or decide for me. Be brief.',
+          'Analyze the trade for both sides. I am the {{myRole}}. Exact flow: PROPOSER gives ${{offeredCash}} and {{offeredPropertyCount}} properties; receives ${{requestedCash}} and {{requestedPropertyCount}}. Use the pending trade properties in context. P: {{proposerLevel}}, {{proposerVerdict}}, surplus {{proposerSurplus}}, adjusted {{proposerRiskSurplus}}, cash ${{proposerCashAfter}}, payment chance {{proposerPaymentProbabilityBefore}}→{{proposerPaymentProbabilityAfter}}%, payments ${{proposerExpectedPaymentsBefore}}→${{proposerExpectedPaymentsAfter}}, rent ${{proposerIncomeBefore}}→${{proposerIncomeAfter}}. R: {{recipientLevel}}, {{recipientVerdict}}, surplus {{recipientSurplus}}, adjusted {{recipientRiskSurplus}}, cash ${{recipientCashAfter}}, payment chance {{recipientPaymentProbabilityBefore}}→{{recipientPaymentProbabilityAfter}}%, payments ${{recipientExpectedPaymentsBefore}}→${{recipientExpectedPaymentsAfter}}, rent ${{recipientIncomeBefore}}→${{recipientIncomeAfter}}. Board history across {{historicalGames}} games: offered properties represent {{offeredHistoricalLanding}}% of landings and ${{offeredHistoricalRent}} in collected rent; requested properties represent {{requestedHistoricalLanding}}% and ${{requestedHistoricalRent}}. Say whether each side benefits, who gains more, and the main landing, payment, and liquidity risk. Do not contradict the data or decide for me. Be brief.',
         selectTradePlayer: 'Select a player to trade with',
         cash: 'Cash',
         properties: 'Properties',
@@ -2620,6 +2759,11 @@ void i18n.use(initReactI18next).init({
           layer: 'Visible layer',
           off: 'No layer',
           history: 'History',
+          dataSource: 'Data source',
+          currentGame: 'Current game',
+          allBoardGames: 'All games',
+          loadingHistorical: 'Loading history…',
+          historicalSample: '{{count}} previous games on this board.',
           probability: 'Probability',
           playerFilter: 'Heatmap player',
           allPlayers: 'All players',
@@ -2653,6 +2797,7 @@ void i18n.use(initReactI18next).init({
         },
         activity: {
           title: 'Game activity',
+          newestFirst: 'Newest first',
           short: 'Activity',
           empty: 'No activity yet.',
           gameCreated: 'The game was created.',
@@ -2674,6 +2819,10 @@ void i18n.use(initReactI18next).init({
           buildingSold: '{{player}} reduced {{property}} to level {{level}}.',
           auctionStarted: 'The auction for {{property}} started.',
           auctionBid: '{{player}} bid ${{amount}} for {{property}}.',
+          auctionDepositPlaced:
+            '{{player}} placed a refundable ${{amount}} deposit.',
+          auctionDepositRefunded:
+            '{{player}} received the ${{amount}} deposit back.',
           auctionPassed: '{{player}} left the auction.',
           auctionWon: '{{player}} won {{property}} for ${{amount}}.',
           auctionNoWinner: '{{property}} remained unsold.',
@@ -2693,7 +2842,8 @@ void i18n.use(initReactI18next).init({
           debtPlanAccepted: '{{player}} accepted the payment settlement.',
           debtPlanRejected: '{{player}} rejected the payment settlement.',
           debtInstallmentPaid:
-            '{{player}} paid a ${{amount}} installment. Remaining: ${{remaining}}.',
+            '{{player}} paid a ${{amount}} installment. Remaining: {{remaining}}.',
+          notAvailable: 'unavailable',
           debtPlanCompleted: '{{player}} completed the installment plan.',
           debtPlanCancelled: 'The installment plan was cancelled.',
           cardDrawn: '{{player}} drew: {{card}}',

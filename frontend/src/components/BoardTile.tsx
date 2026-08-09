@@ -48,6 +48,7 @@ export interface BoardToken {
   assetPath?: string
   active: boolean
   currentUser: boolean
+  highlighted: boolean
 }
 
 export interface BoardOwner {
@@ -515,11 +516,15 @@ export function BoardTile({
               role="img"
               aria-label={token.displayName}
               title={token.displayName}
+              data-board-token-player-id={token.playerId}
+              data-highlighted={token.highlighted || undefined}
               sx={{
                 width: { xs: 9, sm: compact ? 11 : 14, md: compact ? 13 : 17 },
                 height: { xs: 9, sm: compact ? 11 : 14, md: compact ? 13 : 17 },
                 display: 'grid',
                 placeItems: 'center',
+                position: 'relative',
+                zIndex: token.highlighted ? 10 : undefined,
                 ...(token.appearance
                   ? tokenFillStyle(token.appearance)
                   : { bgcolor: token.color }),
@@ -528,9 +533,23 @@ export function BoardTile({
                 border: token.currentUser
                   ? '2px solid #fff'
                   : '1px solid rgba(255,255,255,.75)',
-                boxShadow: token.active
-                  ? '0 0 0 2px #b8ff3d, 0 2px 8px rgba(0,0,0,.55)'
-                  : '0 2px 6px rgba(0,0,0,.5)',
+                boxShadow: token.highlighted
+                  ? '0 0 0 2px #fff, 0 0 0 5px #b8ff3d, 0 0 22px 10px rgba(184,255,61,.72)'
+                  : token.active
+                    ? '0 0 0 2px #b8ff3d, 0 2px 8px rgba(0,0,0,.55)'
+                    : '0 2px 6px rgba(0,0,0,.5)',
+                filter: token.highlighted
+                  ? 'brightness(1.35) saturate(1.2)'
+                  : undefined,
+                transform:
+                  token.highlighted && motionIntensity !== 'off'
+                    ? 'scale(1.55)'
+                    : undefined,
+                transformOrigin: 'center',
+                transition:
+                  motionIntensity === 'off'
+                    ? 'none'
+                    : 'transform 140ms ease, box-shadow 140ms ease, filter 140ms ease',
                 fontSize: { xs: 0, sm: compact ? 6 : 7, md: compact ? 7 : 9 },
                 lineHeight: 1,
                 fontWeight: 900,

@@ -363,6 +363,8 @@ export type RuleOptionName = keyof OptionalRules
 export interface GameSettings {
   max_players: number | null
   allow_spectators: boolean
+  auction_deposit_percent: number
+  auction_minimum_bid_percent: number
   rules: OptionalRules
 }
 
@@ -402,6 +404,8 @@ export interface AuctionState {
   current_bid: number
   current_bidder_id: string | null
   bid_deadline: string | null
+  deposit_amount: number
+  deposits: Record<string, number>
   eligible_player_ids: string[]
   passed_player_ids: string[]
 }
@@ -604,9 +608,32 @@ export interface TradeAnalysis {
   snapshot_sequence: number
 }
 
+export interface PropertyHistoricalStats {
+  tile_id: string
+  landings: number
+  landing_percent: number
+  rent_payments: number
+  total_rent: number
+  average_rent: number
+  purchases: number
+  average_purchase_price: number
+  auction_sales: number
+  average_auction_price: number
+}
+
+export interface BoardHistoricalStats {
+  pack_id: string
+  game_count: number
+  movement_count: number
+  position_landings: number[]
+  properties: PropertyHistoricalStats[]
+}
+
 export type GameEventType =
   | 'auction.bid_placed'
   | 'auction.completed'
+  | 'auction.deposit_placed'
+  | 'auction.deposit_refunded'
   | 'auction.player_passed'
   | 'auction.started'
   | 'bank_pot.increased'
