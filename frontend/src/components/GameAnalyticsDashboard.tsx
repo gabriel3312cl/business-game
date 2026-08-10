@@ -41,6 +41,9 @@ import type {
   ContentPack,
   GameEvent,
   GameState,
+  AnalyticsDashboardTab,
+  AnalyticsDashboardView,
+  AnalyticsDashboardSource,
 } from '../types'
 import { playerColor } from './gameColors'
 import {
@@ -64,18 +67,13 @@ interface Props {
   boardHistory: BoardHistoricalStats | null
   boardHistoryLoading: boolean
   onClose: () => void
+  tab?: AnalyticsDashboardTab
+  view?: AnalyticsDashboardView
+  onTabChange?: (tab: AnalyticsDashboardTab) => void
+  onViewChange?: (view: AnalyticsDashboardView) => void
+  source?: AnalyticsDashboardSource
+  onSourceChange?: (source: AnalyticsDashboardSource) => void
 }
-
-type DashboardTab =
-  | 'overview'
-  | 'players'
-  | 'economy'
-  | 'activity'
-  | 'dice'
-  | 'technical'
-
-type DashboardView = 'fullscreen' | 'window'
-type AnalyticsSource = 'current' | 'historical'
 
 const CATEGORY_COLORS: Record<ActivityCategory, string> = {
   movement: '#6ea8fe',
@@ -99,12 +97,35 @@ export function GameAnalyticsDashboard({
   boardHistory,
   boardHistoryLoading,
   onClose,
+  tab: controlledTab,
+  view: controlledView,
+  onTabChange,
+  onViewChange,
+  source: controlledSource,
+  onSourceChange,
 }: Props) {
   const { t, i18n } = useTranslation()
-  const [tab, setTab] = useState<DashboardTab>('overview')
+  const [internalTab, setInternalTab] = useState<AnalyticsDashboardTab>('overview')
+  const tab = controlledTab ?? internalTab
+  const setTab = (nextTab: AnalyticsDashboardTab) => {
+    if (controlledTab === undefined) setInternalTab(nextTab)
+    onTabChange?.(nextTab)
+  }
   const [scope, setScope] = useState('global')
-  const [view, setView] = useState<DashboardView>('fullscreen')
-  const [source, setSource] = useState<AnalyticsSource>('current')
+  const [internalView, setInternalView] =
+    useState<AnalyticsDashboardView>('fullscreen')
+  const view = controlledView ?? internalView
+  const setView = (nextView: AnalyticsDashboardView) => {
+    if (controlledView === undefined) setInternalView(nextView)
+    onViewChange?.(nextView)
+  }
+  const [internalSource, setInternalSource] =
+    useState<AnalyticsDashboardSource>('current')
+  const source = controlledSource ?? internalSource
+  const setSource = (nextSource: AnalyticsDashboardSource) => {
+    if (controlledSource === undefined) setInternalSource(nextSource)
+    onSourceChange?.(nextSource)
+  }
   const analytics = useMemo(() => buildGameAnalytics(game, pack), [game, pack])
   const selectedPlayer =
     scope === 'global'
@@ -254,7 +275,7 @@ export function GameAnalyticsDashboard({
             exclusive
             size="small"
             value={view}
-            onChange={(_, nextView: DashboardView | null) => {
+            onChange={(_, nextView: AnalyticsDashboardView | null) => {
               if (nextView) setView(nextView)
             }}
             aria-label={t('analytics.view.label')}
@@ -298,7 +319,7 @@ export function GameAnalyticsDashboard({
             exclusive
             size="small"
             value={source}
-            onChange={(_, nextSource: AnalyticsSource | null) => {
+            onChange={(_, nextSource: AnalyticsDashboardSource | null) => {
               if (nextSource) setSource(nextSource)
             }}
             aria-label={t('analytics.sourceLabel')}
@@ -324,7 +345,7 @@ export function GameAnalyticsDashboard({
         {source === 'current' && (
           <Tabs
             value={tab}
-            onChange={(_, value: DashboardTab) => setTab(value)}
+            onChange={(_, value: AnalyticsDashboardTab) => setTab(value)}
             variant="scrollable"
             scrollButtons="auto"
             sx={{ mt: 1, minHeight: 38, '& .MuiTab-root': { minHeight: 38 } }}

@@ -36,6 +36,7 @@ import {
   historicalProperty,
 } from './propertyHistoricalAnalysis'
 import { defaultTileColor } from './tilePresentation'
+import { auctionInteractionState } from './auctionInteraction'
 
 interface Props {
   game: GameState
@@ -56,6 +57,7 @@ interface AuctionBid {
 }
 
 const BID_WINDOW_MS = 5_000
+const READINESS_WINDOW_MS = 30_000
 const VISIBLE_BIDS = 5
 
 export function GameAuctionDialog({
@@ -73,8 +75,13 @@ export function GameAuctionDialog({
   const theme = useTheme()
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const deadline = game.active_auction?.bid_deadline ?? null
+  const readinessIdle = game.active_auction?.phase === 'idle'
   const [now, setNow] = useState(() => Date.now())
   const [quickLoanAmount, setQuickLoanAmount] = useState('')
+  const [auctionActionLocked, setAuctionActionLocked] = useState(false)
+  const [pendingBidAmount, setPendingBidAmount] = useState<number | null>(null)
+  const auctionActionLockRef = useRef(false)
+  const auctionActionTimerRef = useRef<number | null>(null)
   const warnedDeadlineRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -97,27 +104,69 @@ export function GameAuctionDialog({
     setQuickLoanAmount('')
   }, [game.id, game.active_auction?.property_id])
 
+  useEffect(() => {
+    auctionActionLockRef.current = false
+    setAuctionActionLocked(false)
+    setPendingBidAmount(null)
+    if (auctionActionTimerRef.current !== null) {
+      window.clearTimeout(auctionActionTimerRef.current)
+      auctionActionTimerRef.current = null
+    }
+  }, [game.active_auction?.id])
+
+  useEffect(
+    () => () => {
+      if (auctionActionTimerRef.current !== null) {
+        window.clearTimeout(auctionActionTimerRef.current)
+      }
+    },
+    [],
+  )
+
   const deadlineMs = parseDeadline(deadline)
   const remainingMs =
     deadlineMs === null ? null : Math.max(0, deadlineMs - now)
   const remainingSeconds =
     remainingMs === null ? null : Math.ceil(remainingMs / 1_000)
+  const urgentSeconds = readinessIdle ? 5 : 2
 
   useEffect(() => {
     if (
       deadline &&
       remainingSeconds !== null &&
       remainingSeconds > 0 &&
-      remainingSeconds <= 2 &&
+      remainingSeconds <= urgentSeconds &&
       warnedDeadlineRef.current !== deadline
     ) {
       warnedDeadlineRef.current = deadline
       onCountdownWarning?.()
     }
-  }, [deadline, onCountdownWarning, remainingSeconds])
+  }, [deadline, onCountdownWarning, remainingSeconds, urgentSeconds])
 
   const auction = game.active_auction
   if (!auction) return null
+
+  const submitAuctionCommand = async (
+    command: GameCommand,
+    bidAmount: number | null = null,
+  ): Promise<boolean> => {
+    if (auctionActionLockRef.current || busy) return false
+    const lockedAt = Date.now()
+    auctionActionLockRef.current = true
+    setAuctionActionLocked(true)
+    setPendingBidAmount(bidAmount)
+    try {
+      return await onCommand(command)
+    } finally {
+      const remainingCooldown = Math.max(0, 1_000 - (Date.now() - lockedAt))
+      auctionActionTimerRef.current = window.setTimeout(() => {
+        auctionActionLockRef.current = false
+        auctionActionTimerRef.current = null
+        setAuctionActionLocked(false)
+        setPendingBidAmount(null)
+      }, remainingCooldown)
+    }
+  }
 
   const tile = pack.board.tiles.find(
     (candidate) => candidate.id === auction.property_id,
@@ -167,9 +216,22 @@ export function GameAuctionDialog({
     heldDeposit > 0 ||
     auction.deposit_amount === 0 ||
     (currentUser?.balance ?? 0) >= auction.deposit_amount
-  const canBid =
-    auction.eligible_player_ids.includes(user.id) &&
-    !auction.passed_player_ids.includes(user.id)
+  const {
+    isIdle: isAuctionIdle,
+    isLeader: isCurrentLeader,
+    isReady,
+    hasPassed,
+    isEligible,
+    canBid,
+  } = auctionInteractionState(auction, user.id)
+  const readinessResponses = new Set([
+    ...auction.ready_player_ids,
+    ...auction.passed_player_ids,
+  ]).size
+  const readinessPending = Math.max(
+    0,
+    auction.eligible_player_ids.length - readinessResponses,
+  )
   const showQuickLoan =
     game.settings.rules.loans_enabled &&
     canBid &&
@@ -187,11 +249,18 @@ export function GameAuctionDialog({
   const timerProgress =
     remainingMs === null
       ? 0
-      : Math.min(100, (remainingMs / BID_WINDOW_MS) * 100)
+      : Math.min(
+          100,
+          (remainingMs /
+            (isAuctionIdle ? READINESS_WINDOW_MS : BID_WINDOW_MS)) *
+            100,
+        )
   const timerLabel =
     remainingSeconds === null
       ? t('auctionTimerPending')
-      : t('auctionTimeRemaining', { seconds: remainingSeconds })
+      : isAuctionIdle
+        ? t('auctionReadyTimeRemaining', { seconds: remainingSeconds })
+        : t('auctionTimeRemaining', { seconds: remainingSeconds })
   const bids = currentAuctionBids(game.events, auction.property_id)
   const priceComparison =
     auction.current_bidder_id && tile?.price
@@ -391,7 +460,7 @@ export function GameAuctionDialog({
               <Typography
                 role="timer"
                 color={
-                  remainingSeconds !== null && remainingSeconds <= 2
+                  remainingSeconds !== null && remainingSeconds <= urgentSeconds
                     ? 'warning.main'
                     : 'text.secondary'
                 }
@@ -400,7 +469,7 @@ export function GameAuctionDialog({
                 sx={{
                   animation:
                     remainingSeconds !== null &&
-                    remainingSeconds <= 2 &&
+                    remainingSeconds <= urgentSeconds &&
                     motionIntensity === 'full'
                       ? 'auction-urgent 620ms ease-in-out infinite'
                       : undefined,
@@ -416,15 +485,70 @@ export function GameAuctionDialog({
                 variant="determinate"
                 value={timerProgress}
                 color={
-                  remainingSeconds !== null && remainingSeconds <= 2
+                  remainingSeconds !== null && remainingSeconds <= urgentSeconds
                     ? 'warning'
                     : 'secondary'
                 }
-                aria-label={t('auctionTimerProgress')}
+                aria-label={t(
+                  isAuctionIdle
+                    ? 'auctionReadinessTimerProgress'
+                    : 'auctionTimerProgress',
+                )}
                 aria-valuetext={timerLabel}
                 sx={{ height: 8, borderRadius: 99 }}
               />
             </Box>
+
+            {isAuctionIdle && (
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 1.5,
+                  borderRadius: 2.5,
+                  bgcolor: 'rgba(157,140,255,.08)',
+                  borderColor: 'rgba(157,140,255,.28)',
+                }}
+              >
+                <Typography fontWeight={850}>
+                  {t('auctionReadyTitle')}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" mt={0.5}>
+                  {t('auctionReadyHelp')}
+                </Typography>
+                <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" mt={1.25}>
+                  {auction.eligible_player_ids.map((playerId) => {
+                    const player = game.players.find(
+                      (candidate) => candidate.user_id === playerId,
+                    )
+                    const status = auction.ready_player_ids.includes(playerId)
+                      ? 'ready'
+                      : auction.passed_player_ids.includes(playerId)
+                        ? 'out'
+                        : 'pending'
+                    return (
+                      <Chip
+                        key={playerId}
+                        size="small"
+                        color={
+                          status === 'ready'
+                            ? 'success'
+                            : status === 'out'
+                              ? 'default'
+                              : 'warning'
+                        }
+                        variant={status === 'pending' ? 'outlined' : 'filled'}
+                        label={t(`auctionReadyStatus.${status}`, {
+                          player: player?.display_name ?? playerId,
+                        })}
+                      />
+                    )
+                  })}
+                </Stack>
+                <Typography variant="caption" color="text.secondary" display="block" mt={1}>
+                  {t('auctionReadyPending', { count: readinessPending })}
+                </Typography>
+              </Paper>
+            )}
 
             <Paper
               variant="outlined"
@@ -526,14 +650,16 @@ export function GameAuctionDialog({
                     variant="contained"
                     disabled={
                       busy ||
+                      auctionActionLocked ||
                       !Number.isInteger(parsedQuickLoanAmount) ||
                       parsedQuickLoanAmount <= 0 ||
                       parsedQuickLoanAmount > maximumLoan
                     }
                     onClick={() =>
-                      void onCommand({
+                      void submitAuctionCommand({
                         action: 'request_loan',
                         amount: parsedQuickLoanAmount,
+                        auction_id: auction.id,
                       }).then((success) => {
                         if (success) setQuickLoanAmount('')
                       })
@@ -545,10 +671,60 @@ export function GameAuctionDialog({
               </Box>
             )}
 
-            {canBid ? (
+            {isAuctionIdle ? (
+              isEligible ? (
+                isReady ? (
+                  <Alert severity="success">
+                    {t('auctionYouAreReady')}
+                  </Alert>
+                ) : hasPassed ? (
+                  <Alert severity="info">
+                    {t('auctionYouDeclined')}
+                  </Alert>
+                ) : (
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                    <Button
+                      variant="contained"
+                      color="success"
+                      disabled={
+                        busy || auctionActionLocked || remainingMs === 0
+                      }
+                      onClick={() =>
+                        void submitAuctionCommand({
+                          action: 'ready_auction',
+                          auction_id: auction.id,
+                        })
+                      }
+                    >
+                      {t('auctionReadyAction')}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      disabled={
+                        busy || auctionActionLocked || remainingMs === 0
+                      }
+                      onClick={() =>
+                        void submitAuctionCommand({
+                          action: 'pass_auction',
+                          auction_id: auction.id,
+                        })
+                      }
+                    >
+                      {t('auctionDeclineAction')}
+                    </Button>
+                  </Stack>
+                )
+              ) : (
+                <Typography color="text.secondary">
+                  {t('auctionNotEligible')}
+                </Typography>
+              )
+            ) : canBid ? (
               <Box>
                 <Typography fontWeight={750} mb={1}>
-                  {t('placeBid')}
+                  {pendingBidAmount === null
+                    ? t('placeBid')
+                    : t('auctionBidSending', { amount: pendingBidAmount })}
                 </Typography>
                 <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                   {bidAmounts.map((amount) => {
@@ -560,11 +736,15 @@ export function GameAuctionDialog({
                         color="secondary"
                         disabled={
                           busy ||
+                          auctionActionLocked ||
                           !canPlaceDeposit ||
                           amount > availableBidCash
                         }
                         onClick={() =>
-                          void onCommand({ action: 'bid', amount })
+                          void submitAuctionCommand(
+                            { action: 'bid', auction_id: auction.id, amount },
+                            amount,
+                          )
                         }
                         sx={{ minWidth: 112, minHeight: 56 }}
                       >
@@ -578,9 +758,12 @@ export function GameAuctionDialog({
                   {auction.current_bidder_id !== user.id && (
                     <Button
                       variant="outlined"
-                      disabled={busy}
+                      disabled={busy || auctionActionLocked}
                       onClick={() =>
-                        void onCommand({ action: 'pass_auction' })
+                        void submitAuctionCommand({
+                          action: 'pass_auction',
+                          auction_id: auction.id,
+                        })
                       }
                       sx={{ minHeight: 56 }}
                     >
@@ -589,6 +772,8 @@ export function GameAuctionDialog({
                   )}
                 </Stack>
               </Box>
+            ) : isCurrentLeader ? (
+              <Alert severity="success">{t('auctionYouLead')}</Alert>
             ) : (
               <Typography color="text.secondary">
                 {auction.eligible_player_ids.includes(user.id)

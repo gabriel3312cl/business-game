@@ -310,6 +310,49 @@ export interface VisualEffectsPreferenceSettings {
 
 export type PlayerSortOption = 'turnOrder' | 'netWorth' | 'cash' | 'name'
 
+export type BoardTileViewMode = 'detailed' | 'visual'
+export type BoardWorkspaceMode = 'normal' | 'focus'
+export type BoardCameraMode = 'fit' | 'detail'
+export type BoardMovementPreviewMode = 'steps' | 'landing' | 'off'
+export type MobileWorkspacePanel =
+  | 'room'
+  | 'players'
+  | 'manage'
+  | 'heatmap'
+  | 'chat'
+  | null
+export type PropertyFilter = 'all' | 'available' | 'mine' | 'mortgaged'
+export type AnalyticsDashboardTab =
+  | 'overview'
+  | 'players'
+  | 'economy'
+  | 'activity'
+  | 'dice'
+  | 'technical'
+export type AnalyticsDashboardView = 'fullscreen' | 'window'
+export type AnalyticsDashboardSource = 'current' | 'historical'
+
+export interface GameViewPreferenceSettings {
+  tile_mode: BoardTileViewMode
+  workspace_mode: BoardWorkspaceMode
+  camera_mode: BoardCameraMode
+  movement_preview: BoardMovementPreviewMode
+  show_other_player_modals: boolean
+  omit_bot_presentations: boolean
+  omit_other_human_presentations: boolean
+  omit_own_presentations: boolean
+  mobile_panel: MobileWorkspacePanel
+  mobile_management_panel: ManagementPanelId
+  tablet_workspace_panel: WorkspacePanelId
+  bank_tab: 0 | 1 | 2
+  market_tab: 'market' | 'performance'
+  property_filter: PropertyFilter
+  analytics_open: boolean
+  analytics_tab: AnalyticsDashboardTab
+  analytics_view: AnalyticsDashboardView
+  analytics_source: AnalyticsDashboardSource
+}
+
 export interface UserPreferences {
   panel_layout: PanelLayoutPreferences | null
   audio_settings: AudioPreferenceSettings | null
@@ -317,6 +360,7 @@ export interface UserPreferences {
   automation_settings: AutomationPreferenceSettings | null
   visual_effects: VisualEffectsPreferenceSettings | null
   player_sort: PlayerSortOption | null
+  game_view: GameViewPreferenceSettings | null
 }
 
 export interface TokenResponse {
@@ -461,7 +505,9 @@ export interface PendingCardDrawState {
 }
 
 export interface AuctionState {
+  id: string
   property_id: string
+  phase: 'idle' | 'bidding'
   minimum_bid: number
   current_bid: number
   current_bidder_id: string | null
@@ -469,6 +515,7 @@ export interface AuctionState {
   deposit_amount: number
   deposits: Record<string, number>
   eligible_player_ids: string[]
+  ready_player_ids: string[]
   passed_player_ids: string[]
 }
 
@@ -694,10 +741,12 @@ export interface BoardHistoricalStats {
 
 export type GameEventType =
   | 'auction.bid_placed'
+  | 'auction.bidding_started'
   | 'auction.completed'
   | 'auction.deposit_placed'
   | 'auction.deposit_refunded'
   | 'auction.player_passed'
+  | 'auction.player_ready'
   | 'auction.started'
   | 'bank_pot.increased'
   | 'bank.emergency_issued'
@@ -787,8 +836,9 @@ export type GameCommand =
   | { action: 'buy_property' }
   | { action: 'decline_property' }
   | { action: 'end_turn' }
-  | { action: 'bid'; amount: number }
-  | { action: 'pass_auction' }
+  | { action: 'bid'; auction_id: string; amount: number }
+  | { action: 'pass_auction'; auction_id: string }
+  | { action: 'ready_auction'; auction_id: string }
   | { action: 'select_auction_property'; property_id: string }
   | { action: 'pay_jail_fine' }
   | { action: 'use_jail_card' }
@@ -798,7 +848,7 @@ export type GameCommand =
   | { action: 'build_group_round'; group_id: string }
   | { action: 'sell_building'; property_id: string }
   | { action: 'sell_group_round'; group_id: string }
-  | { action: 'request_loan'; amount: number }
+  | { action: 'request_loan'; amount: number; auction_id?: string }
   | { action: 'repay_loan'; amount?: number | null }
   | { action: 'buy_shares'; instrument_id: string; quantity: number }
   | { action: 'sell_shares'; instrument_id: string; quantity: number }

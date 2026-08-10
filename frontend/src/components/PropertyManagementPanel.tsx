@@ -21,6 +21,7 @@ import type {
   GameState,
   TileDefinition,
   User,
+  PropertyFilter,
 } from '../types'
 import { BoardTileDialog } from './BoardTileDialog'
 import { playerColor } from './gameColors'
@@ -39,9 +40,9 @@ interface Props {
   onTrade?: (ownerId: string, propertyId: string) => void
   onHoveredPropertyChange?: (propertyId: string | null) => void
   embedded?: boolean
+  filter?: PropertyFilter
+  onFilterChange?: (filter: PropertyFilter) => void
 }
-
-type PropertyFilter = 'all' | 'available' | 'mine' | 'mortgaged'
 
 interface PropertyAlbumGroup {
   id: string
@@ -60,9 +61,16 @@ export function PropertyManagementPanel({
   onTrade,
   onHoveredPropertyChange,
   embedded = false,
+  filter: controlledFilter,
+  onFilterChange,
 }: Props) {
   const { t } = useTranslation()
-  const [filter, setFilter] = useState<PropertyFilter>('all')
+  const [internalFilter, setInternalFilter] = useState<PropertyFilter>('all')
+  const filter = controlledFilter ?? internalFilter
+  const setFilter = (nextFilter: PropertyFilter) => {
+    if (controlledFilter === undefined) setInternalFilter(nextFilter)
+    onFilterChange?.(nextFilter)
+  }
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null)
   const assetTiles = pack.board.tiles.filter(
     (tile) =>

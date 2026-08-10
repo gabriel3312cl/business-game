@@ -4,7 +4,7 @@ import re
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Annotated, Literal
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import (
     BaseModel,
@@ -955,6 +955,29 @@ class VisualEffectsPreferences(ContentModel):
 PlayerSortPreference = Literal["turnOrder", "netWorth", "cash", "name"]
 
 
+class GameViewPreferences(ContentModel):
+    tile_mode: Literal["detailed", "visual"] = "detailed"
+    workspace_mode: Literal["normal", "focus"] = "normal"
+    camera_mode: Literal["fit", "detail"] = "fit"
+    movement_preview: Literal["steps", "landing", "off"] = "steps"
+    show_other_player_modals: bool = True
+    omit_bot_presentations: bool = False
+    omit_other_human_presentations: bool = False
+    omit_own_presentations: bool = False
+    mobile_panel: Literal["room", "players", "manage", "heatmap", "chat"] | None = None
+    mobile_management_panel: ManagementPanelId = "properties"
+    tablet_workspace_panel: WorkspacePanelId = "properties"
+    bank_tab: Literal[0, 1, 2] = 0
+    market_tab: Literal["market", "performance"] = "market"
+    property_filter: Literal["all", "available", "mine", "mortgaged"] = "all"
+    analytics_open: bool = False
+    analytics_tab: Literal[
+        "overview", "players", "economy", "activity", "dice", "technical"
+    ] = "overview"
+    analytics_view: Literal["fullscreen", "window"] = "fullscreen"
+    analytics_source: Literal["current", "historical"] = "current"
+
+
 class UserPreferences(ContentModel):
     panel_layout: PanelLayoutPreferences | None = None
     audio_settings: AudioPreferences | None = None
@@ -962,6 +985,7 @@ class UserPreferences(ContentModel):
     automation_settings: AutomationPreferences | None = None
     visual_effects: VisualEffectsPreferences | None = None
     player_sort: PlayerSortPreference | None = None
+    game_view: GameViewPreferences | None = None
 
 
 class UserPreferencesUpdate(ContentModel):
@@ -971,6 +995,7 @@ class UserPreferencesUpdate(ContentModel):
     automation_settings: AutomationPreferences | None = None
     visual_effects: VisualEffectsPreferences | None = None
     player_sort: PlayerSortPreference | None = None
+    game_view: GameViewPreferences | None = None
 
     @model_validator(mode="after")
     def validate_non_empty_update(self) -> UserPreferencesUpdate:
@@ -981,6 +1006,7 @@ class UserPreferencesUpdate(ContentModel):
             and self.automation_settings is None
             and self.visual_effects is None
             and self.player_sort is None
+            and self.game_view is None
         ):
             raise ValueError("at least one preference must be provided")
         return self
@@ -1211,7 +1237,9 @@ class CardPaymentState(BaseModel):
 
 
 class AuctionState(BaseModel):
+    id: UUID | None = None
     property_id: str
+    phase: Literal["idle", "bidding"] = "idle"
     minimum_bid: int = Field(default=1, ge=1)
     current_bid: int = Field(default=0, ge=0)
     current_bidder_id: UUID | None = None
@@ -1219,6 +1247,7 @@ class AuctionState(BaseModel):
     deposit_amount: int = Field(default=0, ge=0)
     deposits: dict[UUID, int] = Field(default_factory=dict, max_length=20)
     eligible_player_ids: list[UUID] = Field(min_length=1, max_length=20)
+    ready_player_ids: list[UUID] = Field(default_factory=list, max_length=20)
     passed_player_ids: list[UUID] = Field(default_factory=list, max_length=20)
 
 
@@ -1566,6 +1595,35 @@ class GameState(BaseModel):
             raise ValueError("spectators cannot be repeated")
         if player_ids & spectator_ids:
             raise ValueError("a user cannot be a player and spectator")
+        if self.active_auction is not None:
+            auction = self.active_auction
+            if auction.id is None:
+                auction.id = uuid5(
+                    NAMESPACE_URL,
+                    f"business-game:{self.id}:auction:{auction.property_id}",
+                )
+            eligible_ids = set(auction.eligible_player_ids)
+            if len(eligible_ids) != len(auction.eligible_player_ids):
+                raise ValueError("auction participants cannot be repeated")
+            if not set(auction.ready_player_ids).issubset(eligible_ids):
+                raise ValueError("only eligible auction players can be ready")
+            if not set(auction.passed_player_ids).issubset(eligible_ids):
+                raise ValueError("only eligible auction players can pass")
+            if (
+                auction.phase == "idle"
+                and set(auction.ready_player_ids) & set(auction.passed_player_ids)
+            ):
+                raise ValueError("an auction player cannot be ready and passed")
+            if auction.phase == "idle" and (
+                auction.current_bidder_id is not None or auction.current_bid > 0
+            ):
+                auction.phase = "bidding"
+            if auction.phase == "bidding" and not auction.ready_player_ids:
+                auction.ready_player_ids = [
+                    player_id
+                    for player_id in auction.eligible_player_ids
+                    if player_id not in auction.passed_player_ids
+                ]
         if self.bank.initialized:
             expected_cash = (
                 self.bank.monetary_base
@@ -1718,11 +1776,18 @@ class DeclinePropertyCommand(BaseModel):
 
 class BidCommand(BaseModel):
     action: Literal["bid"]
+    auction_id: UUID | None = None
     amount: int = Field(gt=0)
 
 
 class PassAuctionCommand(BaseModel):
     action: Literal["pass_auction"]
+    auction_id: UUID | None = None
+
+
+class ReadyAuctionCommand(BaseModel):
+    action: Literal["ready_auction"]
+    auction_id: UUID | None = None
 
 
 class SelectAuctionPropertyCommand(BaseModel):
@@ -1771,6 +1836,7 @@ class SellGroupRoundCommand(BaseModel):
 class RequestLoanCommand(BaseModel):
     action: Literal["request_loan"]
     amount: int = Field(gt=0)
+    auction_id: UUID | None = None
 
 
 class RepayLoanCommand(BaseModel):
@@ -1955,6 +2021,7 @@ GameCommand = Annotated[
     | DeclinePropertyCommand
     | BidCommand
     | PassAuctionCommand
+    | ReadyAuctionCommand
     | SelectAuctionPropertyCommand
     | PayJailFineCommand
     | UseJailCardCommand
@@ -1996,6 +2063,15 @@ class GameCommandRequest(BaseModel):
     command: GameCommand
     expected_sequence: int = Field(ge=0)
     command_id: UUID
+
+    @model_validator(mode="after")
+    def require_auction_identity(self) -> GameCommandRequest:
+        if isinstance(
+            self.command,
+            (BidCommand, PassAuctionCommand, ReadyAuctionCommand),
+        ) and self.command.auction_id is None:
+            raise ValueError("auction commands require auction_id")
+        return self
 
 
 class GameStateView(GameState):

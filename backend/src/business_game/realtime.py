@@ -53,7 +53,7 @@ sio = socketio.AsyncServer(
 )
 command_adapter = TypeAdapter(GameCommandRequest)
 logger = logging.getLogger(__name__)
-auction_timer_tasks: dict[UUID, tuple[datetime, asyncio.Task[None]]] = {}
+auction_timer_tasks: dict[UUID, tuple[datetime, str, asyncio.Task[None]]] = {}
 bot_runner_tasks: dict[UUID, asyncio.Task[None]] = {}
 BOT_ACTION_DELAY_SECONDS = 0.8
 BOT_CARD_SELECTION_SECONDS = 2.0
@@ -927,20 +927,28 @@ async def broadcast_game_state(
 
 
 def sync_auction_timer(game: GameState) -> None:
-    deadline = (
-        game.active_auction.bid_deadline
-        if game.active_auction is not None
-        else None
-    )
     existing = auction_timer_tasks.get(game.id)
+    if game.active_auction is None:
+        if existing is not None:
+            if existing[2] is not asyncio.current_task():
+                existing[2].cancel()
+            auction_timer_tasks.pop(game.id, None)
+        return
+    deadline = game.active_auction.bid_deadline
+    phase = game.active_auction.phase
     if deadline is None:
         return
     if existing is not None:
-        if existing[0] >= deadline and not existing[1].done():
+        if (
+            existing[1] == phase
+            and existing[0] >= deadline
+            and not existing[2].done()
+        ):
             return
-        existing[1].cancel()
+        if existing[2] is not asyncio.current_task():
+            existing[2].cancel()
     task = asyncio.create_task(_run_auction_timer(game.id, deadline))
-    auction_timer_tasks[game.id] = (deadline, task)
+    auction_timer_tasks[game.id] = (deadline, phase, task)
 
 
 async def resume_auction_timers() -> None:
@@ -951,7 +959,7 @@ async def resume_auction_timers() -> None:
 
 
 async def shutdown_auction_timers() -> None:
-    tasks = [task for _, task in auction_timer_tasks.values()]
+    tasks = [task for _, _, task in auction_timer_tasks.values()]
     auction_timer_tasks.clear()
     for task in tasks:
         task.cancel()
@@ -995,5 +1003,5 @@ async def _run_auction_timer(game_id: UUID, deadline: datetime) -> None:
         raise
     finally:
         existing = auction_timer_tasks.get(game_id)
-        if existing is not None and existing[1] is task:
+        if existing is not None and existing[2] is task:
             auction_timer_tasks.pop(game_id, None)

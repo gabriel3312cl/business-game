@@ -36,6 +36,7 @@ interface Props {
   pack: ContentPack
   intensity: VisualEffectsIntensity
   synchronized: boolean
+  presentationSyncKey?: string | number
 }
 
 export function GameVisualEffects({
@@ -44,6 +45,7 @@ export function GameVisualEffects({
   pack,
   intensity,
   synchronized,
+  presentationSyncKey,
 }: Props) {
   const [playback, setPlayback] = useState<VisualEffectPlayback>({
     active: null,
@@ -55,8 +57,19 @@ export function GameVisualEffects({
     sequence: latestSequence(game.events),
     armed: false,
   })
+  const presentationSyncKeyRef = useRef(presentationSyncKey)
 
   useEffect(() => {
+    if (!Object.is(presentationSyncKeyRef.current, presentationSyncKey)) {
+      presentationSyncKeyRef.current = presentationSyncKey
+      cursor.current = {
+        gameId: game.id,
+        sequence: latestSequence(game.events),
+        armed: synchronized,
+      }
+      setPlayback({ active: null, queue: [] })
+      return
+    }
     const selection = collectNewVisualEffectEvents(
       cursor.current,
       game.id,
@@ -76,7 +89,7 @@ export function GameVisualEffects({
     if (effects.length > 0) {
       setPlayback((current) => enqueueVisualEffects(current, effects))
     }
-  }, [events, game, intensity, synchronized])
+  }, [events, game, intensity, presentationSyncKey, synchronized])
 
   useEffect(() => {
     if (intensity === 'off') {

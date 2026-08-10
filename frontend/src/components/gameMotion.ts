@@ -16,6 +16,8 @@ export interface MotionAudioCue {
   sequence: number
   step: number
   playerId: string
+  position: number
+  final: boolean
 }
 
 interface PlayerMovement {
@@ -169,6 +171,8 @@ export function useVisualPlayerPositions(
             sequence: movement.sequence,
             step: 0,
             playerId: movement.playerId,
+            position: toPosition,
+            final: true,
           })
           continue
         }
@@ -186,14 +190,17 @@ export function useVisualPlayerPositions(
 
         for (let step = 1; step <= stepCount; step += 1) {
           if (generation !== generationRef.current) break
-          setPlayerPosition(
-            movement.playerId,
-            normalizePosition(fromPosition + direction * step, count),
+          const position = normalizePosition(
+            fromPosition + direction * step,
+            count,
           )
+          setPlayerPosition(movement.playerId, position)
           onTokenStepRef.current?.({
             sequence: movement.sequence,
             step,
             playerId: movement.playerId,
+            position,
+            final: step === stepCount,
           })
           if (!(await wait(stepDuration, generation))) break
         }

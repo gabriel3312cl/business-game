@@ -22,6 +22,7 @@ from business_game.domain.models import (
     EndTurnCommand,
     MortgagePropertyCommand,
     PassAuctionCommand,
+    ReadyAuctionCommand,
     RollCommand,
     UserCreate,
 )
@@ -85,11 +86,23 @@ async def test_postgres_persists_an_authoritative_auction(packs_dir: Path) -> No
             await games.join(game.id, second)
             await games.start(game.id, first.id)
             await games.execute(game.id, first.id, RollCommand(action="roll"))
-            await games.execute(
+            game = await games.execute(
                 game.id,
                 first.id,
                 DeclinePropertyCommand(action="decline_property"),
             )
+            assert game.active_auction is not None
+            assert game.active_auction.id is not None
+            auction_id = game.active_auction.id
+            for player_id in game.active_auction.eligible_player_ids:
+                game = await games.execute(
+                    game.id,
+                    player_id,
+                    ReadyAuctionCommand(
+                        action="ready_auction",
+                        auction_id=auction_id,
+                    ),
+                )
             await games.execute(
                 game.id,
                 second.id,

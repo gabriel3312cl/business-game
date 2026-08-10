@@ -92,6 +92,7 @@ describe('workspace panel layout', () => {
   it('docks panels on either side and creates floating window geometry', () => {
     const layout = normalizeWorkspacePanelLayout(
       {
+        compact: true,
         order: ['room', 'heatmap', 'players', 'properties', 'trades', 'debts', 'bank', 'market', 'chat'],
         visible: ['properties', 'chat'],
         heights: {},
@@ -112,6 +113,10 @@ describe('workspace panel layout', () => {
       width: 380,
       height: 520,
     })
+
+    const redocked = placeWorkspacePanel(floating, 'chat', 'right')
+    expect(redocked.placements.chat).toBe('right')
+    expect(redocked.compact).toBe(true)
   })
 
   it('redistributes only selected panel heights', () => {

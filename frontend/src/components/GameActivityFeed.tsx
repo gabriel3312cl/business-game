@@ -407,6 +407,10 @@ function eventMessage(
       })
     case 'auction.started':
       return t('activity.auctionStarted', { property })
+    case 'auction.player_ready':
+      return t('activity.auctionReady', { player })
+    case 'auction.bidding_started':
+      return t('activity.auctionBiddingStarted', { property })
     case 'auction.bid_placed':
       return t('activity.auctionBid', { player, property, amount })
     case 'auction.deposit_placed':
@@ -414,7 +418,9 @@ function eventMessage(
     case 'auction.deposit_refunded':
       return t('activity.auctionDepositRefunded', { player, amount })
     case 'auction.player_passed':
-      return t('activity.auctionPassed', { player })
+      return event.data.reason === 'readiness_timeout'
+        ? t('activity.auctionReadinessExpired', { player })
+        : t('activity.auctionPassed', { player })
     case 'auction.completed': {
       const winnerId = textValue(event, 'winner_id')
       return winnerId

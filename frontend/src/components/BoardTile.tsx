@@ -1,6 +1,7 @@
 import { Box, Tooltip, Typography } from '@mui/material'
-import type { KeyboardEvent, ReactNode } from 'react'
+import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import type {
+  BoardTileViewMode,
   TileDefinition,
   TokenAppearanceSettings,
   TokenShape,
@@ -36,7 +37,8 @@ interface BoardTileProps {
   tabIndex?: number
   onFocus?: () => void
   onKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void
-  onClick: () => void
+  viewMode?: BoardTileViewMode
+  onClick: (target: 'tile' | 'group') => void
 }
 
 export type BoardEdge = 'top' | 'right' | 'bottom' | 'left' | 'corner'
@@ -95,6 +97,7 @@ export function BoardTile({
   tabIndex,
   onFocus,
   onKeyDown,
+  viewMode = 'detailed',
   onClick,
 }: BoardTileProps) {
   const accent = tile.color ?? defaultTileColor(tile.kind)
@@ -106,6 +109,11 @@ export function BoardTile({
   const buildingsLabel = buildingLabel ? `, ${buildingLabel}` : ''
   const mortgagedLabel = mortgaged && mortgageLabel ? `, ${mortgageLabel}` : ''
   const heatmapLabel = heatmap ? `, ${heatmap.ariaLabel}` : ''
+  const visualMode = viewMode === 'visual'
+  const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
+    const target = event.target as HTMLElement
+    onClick(target.closest('[data-color-group-preview]') ? 'group' : 'tile')
+  }
 
   return (
     <Tooltip
@@ -124,7 +132,8 @@ export function BoardTile({
       aria-label={`${name}${priceLabel}${ownerLabel}${buildingsLabel}${mortgagedLabel}${heatmapLabel}`}
       onFocus={onFocus}
       onKeyDown={onKeyDown}
-      onClick={onClick}
+      onClick={handleClick}
+      data-view-mode={viewMode}
       sx={{
         gridColumn,
         gridRow,
@@ -351,6 +360,7 @@ export function BoardTile({
       >
         <Box
           aria-hidden
+          data-color-group-preview={propertyColorBand ? true : undefined}
           sx={{
             flex: '0 0 auto',
             width: propertyColorBand
@@ -361,7 +371,9 @@ export function BoardTile({
                   md: compact ? 23 : 30,
                 },
             height: propertyColorBand
-              ? { xs: 5, sm: compact ? 7 : 9, md: compact ? 9 : 12 }
+              ? visualMode
+                ? { xs: 12, sm: compact ? 16 : 20, md: compact ? 20 : 26 }
+                : { xs: 5, sm: compact ? 7 : 9, md: compact ? 9 : 12 }
               : {
                   xs: compact ? 12 : 14,
                   sm: compact ? 18 : 23,
@@ -427,7 +439,9 @@ export function BoardTile({
         </Box>
 
         <Typography
+          aria-hidden={visualMode || undefined}
           sx={{
+            display: visualMode ? 'none' : '-webkit-box',
             width: '100%',
             minHeight: 0,
             fontWeight: 850,
@@ -441,14 +455,13 @@ export function BoardTile({
             overflow: 'hidden',
             WebkitLineClamp: corner ? 3 : 2,
             WebkitBoxOrient: 'vertical',
-            display: '-webkit-box',
             textShadow: '0 1px 3px rgba(0,0,0,.8)',
           }}
         >
           {name}
         </Typography>
 
-        {mortgaged && mortgageLabel ? (
+        {!visualMode && mortgaged && mortgageLabel ? (
           <Typography
             component="span"
             sx={{
@@ -476,7 +489,7 @@ export function BoardTile({
           >
             {mortgageLabel}
           </Typography>
-        ) : tile.price != null ? (
+        ) : !visualMode && tile.price != null ? (
           <Typography
             component="span"
             sx={{

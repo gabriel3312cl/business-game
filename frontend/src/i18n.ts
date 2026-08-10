@@ -9,9 +9,40 @@ void i18n.use(initReactI18next).init({
     es: {
       translation: {
         subtitle: 'Partidas modulares, reglas claras',
+        notifications: {
+          unread_one: '{{panel}}: {{count}} notificación nueva',
+          unread_other: '{{panel}}: {{count}} notificaciones nuevas',
+        },
         board: 'Tablero',
         boardKeyboardInstructions:
           'Usa las flechas para recorrer las casillas, Inicio para ir a la primera y Fin para ir a la última. Presiona Enter o Espacio para abrir una casilla.',
+        boardView: {
+          controls: 'Controles de vista del tablero',
+          tileMode: 'Contenido de las casillas',
+          detailed: 'Casillas con texto',
+          visual: 'Casillas visuales con colores e iconos',
+          fit: 'Ajustar tablero al espacio disponible',
+          focus: 'Activar modo foco',
+          exitFocus: 'Salir del modo foco',
+          hideOtherPlayerModals: 'Ocultar ventanas de otros jugadores',
+          showOtherPlayerModals: 'Mostrar ventanas de otros jugadores',
+          transitionSettings: 'Omitir transiciones',
+          omitAllPresentations: 'Todos los participantes',
+          omitBotPresentations: 'Bots',
+          omitOtherHumanPresentations: 'Otros jugadores',
+          omitOwnPresentations: 'Mis acciones',
+          participantsResolving:
+            'Participantes jugando… Se mostrará tu próximo resultado.',
+          movementPreview: 'Previsualización durante el movimiento',
+          previewSteps: 'Cada paso',
+          previewLanding: 'Solo llegada',
+          previewOff: 'Sin vista previa',
+          previewLabel: 'Vista previa de casilla',
+          playerPassing: '{{player}} pasa por esta casilla',
+          playerLanded: '{{player}} llegó a esta casilla',
+          groupSummary: '{{owned}} de {{count}} casillas del grupo tienen dueño',
+          openDetails: 'Ver detalle completo',
+        },
         classic: 'Clásico',
         extended: 'Extendido',
         zoom: 'Zoom',
@@ -28,7 +59,7 @@ void i18n.use(initReactI18next).init({
         economy: {
           title: 'Calendario y entorno económico',
           week: 'Semana {{count}}',
-          summary: '{{season}} · dificultad {{difficulty}} · ver indicadores',
+          summary: '{{season}} · dificultad {{difficulty}}',
           difficultyLabel: 'Dificultad económica',
           difficulty: {
             novice: 'Novato',
@@ -70,6 +101,9 @@ void i18n.use(initReactI18next).init({
           unemployment: 'Desempleo',
           confidence: 'Confianza',
           sentiment: 'Ánimo bursátil',
+          indicators: 'Indicadores económicos',
+          activeEvents: 'Eventos activos',
+          companyNews: 'Noticias de empresas',
           marketPulse: 'Movimiento semanal de la bolsa',
           companyAction: '{{company}}: {{action}}.',
           companyActions: {
@@ -1103,8 +1137,27 @@ void i18n.use(initReactI18next).init({
         auctionLeader: 'Líder actual',
         auctionNoLeader: 'Aún no hay líder',
         auctionTimeRemaining: '{{seconds}} s restantes',
+        auctionReadyTimeRemaining: '{{seconds}} s para confirmar participación',
         auctionTimerPending: 'Esperando el inicio del contador',
         auctionTimerProgress: 'Tiempo restante para ofertar',
+        auctionReadinessTimerProgress:
+          'Tiempo restante para confirmar participación',
+        auctionReadyTitle: 'Confirmación de participantes',
+        auctionReadyHelp:
+          'Tienes 30 segundos para leer el análisis y confirmar. Si no respondes, quedarás fuera de esta subasta.',
+        auctionReadyAction: 'Estoy listo',
+        auctionDeclineAction: 'No participar',
+        auctionYouAreReady: 'Estás listo. Esperando a los demás participantes.',
+        auctionYouDeclined: 'Elegiste no participar en esta subasta.',
+        auctionReadyPending_one: 'Falta 1 jugador por responder.',
+        auctionReadyPending_other: 'Faltan {{count}} jugadores por responder.',
+        auctionReadyStatus: {
+          ready: '{{player}}: listo',
+          out: '{{player}}: no participa',
+          pending: '{{player}}: pendiente',
+        },
+        auctionBidSending: 'Enviando oferta de ${{amount}}…',
+        auctionYouLead: 'Tu oferta va a la cabeza. Espera otra oferta para volver a pujar.',
         auctionBidHistory: 'Ofertas recientes',
         auctionNoBids: 'Aún no hay ofertas en esta subasta.',
         auctionBidHistoryItem: '{{player}} ofreció ${{amount}}',
@@ -1409,6 +1462,7 @@ void i18n.use(initReactI18next).init({
           acceptPlan: 'Aceptar acuerdo',
           rejectPlan: 'Rechazar acuerdo',
           requestProperties: 'Propiedades solicitadas',
+          moveNotification: 'Mover aviso de deuda',
           noPropertyGroup: 'Sin grupo',
           ownedInPropertyGroup: '+{{count}} tuyas',
           noTransferableProperties:
@@ -1424,7 +1478,8 @@ void i18n.use(initReactI18next).init({
             'Total ${{total}} en {{installments}} cuotas. Cuota inicial: ${{installment}}.',
           proposalSummary:
             'Propuesta: ${{total}} en {{installments}} cuotas, con {{interest}}% de interés. Cuota inicial: ${{installment}}.',
-          proposalProperties: 'Propiedades solicitadas: {{properties}}.',
+          proposalPropertyGroupProgress:
+            'Tienes {{owned}} de {{total}} propiedades de este grupo.',
           activePlan:
             'Plan activo: saldo ${{remaining}}, {{installments}} cuotas pendientes.',
           renegotiateBalance:
@@ -1536,12 +1591,16 @@ void i18n.use(initReactI18next).init({
           buildingPurchased: '{{player}} desarrolló {{property}} al nivel {{level}}.',
           buildingSold: '{{player}} redujo {{property}} al nivel {{level}}.',
           auctionStarted: 'Comenzó la subasta de {{property}}.',
+          auctionReady: '{{player}} confirmó que participará en la subasta.',
+          auctionBiddingStarted: 'Comenzaron las ofertas por {{property}}.',
           auctionBid: '{{player}} ofreció ${{amount}} por {{property}}.',
           auctionDepositPlaced:
             '{{player}} dejó una garantía reembolsable de ${{amount}}.',
           auctionDepositRefunded:
             'Se devolvió la garantía de ${{amount}} a {{player}}.',
           auctionPassed: '{{player}} se retiró de la subasta.',
+          auctionReadinessExpired:
+            '{{player}} quedó fuera de la subasta por no confirmar a tiempo.',
           auctionWon: '{{player}} ganó {{property}} por ${{amount}}.',
           auctionNoWinner: '{{property}} quedó sin comprador.',
           paymentCompleted: '{{player}} pagó ${{amount}}.',
@@ -1765,9 +1824,40 @@ void i18n.use(initReactI18next).init({
     en: {
       translation: {
         subtitle: 'Modular matches, explicit rules',
+        notifications: {
+          unread_one: '{{panel}}: {{count}} new notification',
+          unread_other: '{{panel}}: {{count}} new notifications',
+        },
         board: 'Board',
         boardKeyboardInstructions:
           'Use the arrow keys to move through tiles, Home for the first tile and End for the last. Press Enter or Space to open a tile.',
+        boardView: {
+          controls: 'Board view controls',
+          tileMode: 'Tile content',
+          detailed: 'Tiles with text',
+          visual: 'Visual tiles with colors and icons',
+          fit: 'Fit board to the available space',
+          focus: 'Enter focus mode',
+          exitFocus: 'Exit focus mode',
+          hideOtherPlayerModals: 'Hide other players’ dialogs',
+          showOtherPlayerModals: 'Show other players’ dialogs',
+          transitionSettings: 'Skip transitions',
+          omitAllPresentations: 'All participants',
+          omitBotPresentations: 'Bots',
+          omitOtherHumanPresentations: 'Other players',
+          omitOwnPresentations: 'My actions',
+          participantsResolving:
+            'Participants are playing… Your next result will be shown.',
+          movementPreview: 'Movement preview',
+          previewSteps: 'Every step',
+          previewLanding: 'Landing only',
+          previewOff: 'No preview',
+          previewLabel: 'Tile preview',
+          playerPassing: '{{player}} is passing this tile',
+          playerLanded: '{{player}} landed on this tile',
+          groupSummary: '{{owned}} of {{count}} group tiles have an owner',
+          openDetails: 'View full details',
+        },
         classic: 'Classic',
         extended: 'Extended',
         zoom: 'Zoom',
@@ -1784,7 +1874,7 @@ void i18n.use(initReactI18next).init({
         economy: {
           title: 'Economic calendar and environment',
           week: 'Week {{count}}',
-          summary: '{{season}} · {{difficulty}} difficulty · view indicators',
+          summary: '{{season}} · {{difficulty}} difficulty',
           difficultyLabel: 'Economic difficulty',
           difficulty: {
             novice: 'Novice',
@@ -1826,6 +1916,9 @@ void i18n.use(initReactI18next).init({
           unemployment: 'Unemployment',
           confidence: 'Confidence',
           sentiment: 'Market mood',
+          indicators: 'Economic indicators',
+          activeEvents: 'Active events',
+          companyNews: 'Company news',
           marketPulse: 'Weekly market movement',
           companyAction: '{{company}}: {{action}}.',
           companyActions: {
@@ -2843,8 +2936,26 @@ void i18n.use(initReactI18next).init({
         auctionLeader: 'Current leader',
         auctionNoLeader: 'No leader yet',
         auctionTimeRemaining: '{{seconds}} s remaining',
+        auctionReadyTimeRemaining: '{{seconds}} s to confirm participation',
         auctionTimerPending: 'Waiting for the countdown to start',
         auctionTimerProgress: 'Time remaining to bid',
+        auctionReadinessTimerProgress: 'Time remaining to confirm participation',
+        auctionReadyTitle: 'Participant confirmation',
+        auctionReadyHelp:
+          'You have 30 seconds to read the analysis and confirm. If you do not respond, you will be excluded from this auction.',
+        auctionReadyAction: 'I am ready',
+        auctionDeclineAction: 'Do not participate',
+        auctionYouAreReady: 'You are ready. Waiting for the other participants.',
+        auctionYouDeclined: 'You chose not to participate in this auction.',
+        auctionReadyPending_one: '1 player still needs to respond.',
+        auctionReadyPending_other: '{{count}} players still need to respond.',
+        auctionReadyStatus: {
+          ready: '{{player}}: ready',
+          out: '{{player}}: not participating',
+          pending: '{{player}}: pending',
+        },
+        auctionBidSending: 'Sending ${{amount}} bid…',
+        auctionYouLead: 'Your bid is leading. Wait for another bid before bidding again.',
         auctionBidHistory: 'Recent bids',
         auctionNoBids: 'There are no bids in this auction yet.',
         auctionBidHistoryItem: '{{player}} bid ${{amount}}',
@@ -3145,6 +3256,7 @@ void i18n.use(initReactI18next).init({
           acceptPlan: 'Accept settlement',
           rejectPlan: 'Reject settlement',
           requestProperties: 'Requested properties',
+          moveNotification: 'Move debt notice',
           noPropertyGroup: 'No group',
           ownedInPropertyGroup: '+{{count}} yours',
           noTransferableProperties:
@@ -3160,7 +3272,8 @@ void i18n.use(initReactI18next).init({
             'Total ${{total}} in {{installments}} installments. Initial installment: ${{installment}}.',
           proposalSummary:
             'Proposal: ${{total}} in {{installments}} installments at {{interest}}% interest. Initial installment: ${{installment}}.',
-          proposalProperties: 'Requested properties: {{properties}}.',
+          proposalPropertyGroupProgress:
+            'You own {{owned}} of {{total}} properties in this group.',
           activePlan:
             'Active plan: ${{remaining}} remaining, {{installments}} installments left.',
           renegotiateBalance:
@@ -3272,12 +3385,16 @@ void i18n.use(initReactI18next).init({
           buildingPurchased: '{{player}} developed {{property}} to level {{level}}.',
           buildingSold: '{{player}} reduced {{property}} to level {{level}}.',
           auctionStarted: 'The auction for {{property}} started.',
+          auctionReady: '{{player}} confirmed participation in the auction.',
+          auctionBiddingStarted: 'Bidding started for {{property}}.',
           auctionBid: '{{player}} bid ${{amount}} for {{property}}.',
           auctionDepositPlaced:
             '{{player}} placed a refundable ${{amount}} deposit.',
           auctionDepositRefunded:
             '{{player}} received the ${{amount}} deposit back.',
           auctionPassed: '{{player}} left the auction.',
+          auctionReadinessExpired:
+            '{{player}} was excluded from the auction after not confirming in time.',
           auctionWon: '{{player}} won {{property}} for ${{amount}}.',
           auctionNoWinner: '{{property}} remained unsold.',
           paymentCompleted: '{{player}} paid ${{amount}}.',

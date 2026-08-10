@@ -38,6 +38,7 @@ from business_game.domain.models import (
     PlayerState,
     ProposeRentDebtPlanCommand,
     ProposeTradeCommand,
+    ReadyAuctionCommand,
     RentDebtPlanState,
     RentDebtPlanTemplate,
     RollCommand,
@@ -67,6 +68,27 @@ async def create_user(
             display_name=display_name,
         )
     )
+
+
+async def ready_all_auction_players(
+    games: GameService,
+    game: GameState,
+) -> GameState:
+    assert game.active_auction is not None
+    assert game.active_auction.id is not None
+    auction_id = game.active_auction.id
+    for player_id in game.active_auction.eligible_player_ids:
+        game = await games.execute(
+            game.id,
+            player_id,
+            ReadyAuctionCommand(
+                action="ready_auction",
+                auction_id=auction_id,
+            ),
+        )
+    assert game.active_auction is not None
+    assert game.active_auction.phase == "bidding"
+    return game
 
 
 async def test_first_playable_turn(
@@ -267,6 +289,7 @@ async def test_declined_property_is_sold_by_authoritative_auction(
     assert game.active_auction.property_id == "property_03"
     assert game.active_auction.minimum_bid == 42
     assert game.active_auction.deposit_amount == 6
+    game = await ready_all_auction_players(games, game)
 
     game = await games.execute(
         game.id,
@@ -301,6 +324,116 @@ async def test_declined_property_is_sold_by_authoritative_auction(
     assert completed.data["deposit_applied"] == 6
 
 
+async def test_auction_readiness_and_bid_idempotency_are_server_authoritative(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    current_time = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    first = await create_user(session, "ready-host@example.com", "Host")
+    second = await create_user(session, "ready-guest@example.com", "Guest")
+    games = GameService(
+        session,
+        PackLoader(packs_dir),
+        dice_roller=lambda: (1, 2),
+        clock=lambda: current_time,
+    )
+    game = await games.create("classic-demo", first)
+    await games.join(game.id, second)
+    await games.start(game.id, first.id)
+    await games.execute(game.id, first.id, RollCommand(action="roll"))
+    game = await games.execute(
+        game.id,
+        first.id,
+        DeclinePropertyCommand(action="decline_property"),
+    )
+    assert game.active_auction is not None
+    assert game.active_auction.id is not None
+    auction_id = game.active_auction.id
+
+    game = await games.execute(
+        game.id,
+        first.id,
+        ReadyAuctionCommand(action="ready_auction", auction_id=auction_id),
+    )
+    assert game.active_auction is not None
+    assert game.active_auction.phase == "idle"
+    assert game.active_auction.bid_deadline == current_time + timedelta(seconds=30)
+
+    ready_sequence = game.event_sequence
+    game = await games.execute(
+        game.id,
+        first.id,
+        ReadyAuctionCommand(action="ready_auction", auction_id=auction_id),
+        expected_sequence=ready_sequence,
+    )
+    assert game.event_sequence == ready_sequence
+
+    game = await games.execute(
+        game.id,
+        second.id,
+        ReadyAuctionCommand(action="ready_auction", auction_id=auction_id),
+    )
+    assert game.active_auction is not None
+    assert game.active_auction.phase == "bidding"
+    assert game.active_auction.bid_deadline == current_time + timedelta(seconds=5)
+
+    shared_sequence = game.event_sequence
+    command_id = uuid4()
+    game = await games.execute(
+        game.id,
+        first.id,
+        BidCommand(action="bid", auction_id=auction_id, amount=50),
+        expected_sequence=shared_sequence,
+        command_id=command_id,
+    )
+    retried = await games.execute(
+        game.id,
+        first.id,
+        BidCommand(action="bid", auction_id=auction_id, amount=50),
+        expected_sequence=shared_sequence,
+        command_id=command_id,
+    )
+    assert retried.event_sequence == game.event_sequence
+    assert sum(event.type == "auction.bid_placed" for event in retried.events) == 1
+
+    duplicate_click = await games.execute(
+        game.id,
+        first.id,
+        BidCommand(action="bid", auction_id=auction_id, amount=50),
+        command_id=uuid4(),
+    )
+    assert duplicate_click.event_sequence == game.event_sequence
+    assert (
+        sum(event.type == "auction.bid_placed" for event in duplicate_click.events)
+        == 1
+    )
+
+    with pytest.raises(ConflictError, match="must wait for another offer"):
+        await games.execute(
+            game.id,
+            first.id,
+            BidCommand(action="bid", auction_id=auction_id, amount=60),
+        )
+
+    with pytest.raises(ConflictError, match="auction changed"):
+        await games.execute(
+            game.id,
+            second.id,
+            BidCommand(action="bid", auction_id=uuid4(), amount=60),
+            expected_sequence=shared_sequence,
+        )
+
+    game = await games.execute(
+        game.id,
+        second.id,
+        BidCommand(action="bid", auction_id=auction_id, amount=60),
+        expected_sequence=shared_sequence,
+    )
+    assert game.active_auction is not None
+    assert game.active_auction.current_bidder_id == second.id
+    assert game.active_auction.current_bid == 60
+
+
 async def test_auction_refunds_deposit_to_unsuccessful_bidder(
     packs_dir: Path,
     session: AsyncSession,
@@ -326,6 +459,7 @@ async def test_auction_refunds_deposit_to_unsuccessful_bidder(
         DeclinePropertyCommand(action="decline_property"),
     )
     assert game.active_auction is not None
+    game = await ready_all_auction_players(games, game)
     game = await games.execute(
         game.id,
         second.id,
@@ -393,11 +527,12 @@ async def test_new_bid_resets_auction_deadline_and_stale_timer_cannot_settle(
     await games.join(game.id, second)
     await games.start(game.id, first.id)
     await games.execute(game.id, first.id, RollCommand(action="roll"))
-    await games.execute(
+    game = await games.execute(
         game.id,
         first.id,
         DeclinePropertyCommand(action="decline_property"),
     )
+    game = await ready_all_auction_players(games, game)
 
     game = await games.execute(
         game.id,
@@ -457,11 +592,12 @@ async def test_bid_at_or_after_deadline_is_rejected(
     await games.join(game.id, second)
     await games.start(game.id, first.id)
     await games.execute(game.id, first.id, RollCommand(action="roll"))
-    await games.execute(
+    game = await games.execute(
         game.id,
         first.id,
         DeclinePropertyCommand(action="decline_property"),
     )
+    game = await ready_all_auction_players(games, game)
     game = await games.execute(
         game.id,
         second.id,
@@ -1418,6 +1554,10 @@ async def test_bankruptcy_transfers_assets_and_finishes_two_player_game(
     game = await games.execute(game.id, debtor.id, RollCommand(action="roll"))
     assert game.active_debt is not None
     assert game.active_debt.creditor_id == creditor.id
+    assert [event.type for event in game.events[-2:]] == [
+        "dice.rolled",
+        "debt.created",
+    ]
 
     game = await games.execute(
         game.id,
@@ -1888,6 +2028,7 @@ async def test_bankruptcy_to_bank_starts_sequential_property_auctions(
     )
     assert game.active_auction is not None
     assert game.active_auction.property_id == "property_03"
+    game = await ready_all_auction_players(games, game)
 
     await games.execute(
         game.id,
@@ -2062,7 +2203,10 @@ async def test_optional_rules_change_salary_and_decline_behavior(
     game = await games.execute(game.id, host.id, RollCommand(action="roll"))
     assert game.players[0].position == 0
     assert game.players[0].balance == 1900
-    assert game.events[-2].type == "salary.collected"
+    assert [event.type for event in game.events[-2:]] == [
+        "dice.rolled",
+        "salary.collected",
+    ]
 
     async with session.begin():
         persisted = await GameRepository(session).get(game.id, for_update=True)
@@ -2397,9 +2541,30 @@ async def test_extended_board_auction_taxes_and_discounted_card_purchase(
     assert game.active_auction is not None
     assert game.active_auction.minimum_bid == 70
     assert game.active_auction.deposit_amount == 10
+    assert game.active_auction.id is not None
+    game.active_auction.phase = "bidding"
+    game.active_auction.ready_player_ids = list(
+        game.active_auction.eligible_player_ids
+    )
     with pytest.raises(ConflictError, match="below the auction minimum"):
-        games._bid(game, first_id, 69)
-    games._bid(game, first_id, 70)
+        games._bid(
+            game,
+            first_id,
+            BidCommand(
+                action="bid",
+                auction_id=game.active_auction.id,
+                amount=69,
+            ),
+        )
+    games._bid(
+        game,
+        first_id,
+        BidCommand(
+            action="bid",
+            auction_id=game.active_auction.id,
+            amount=70,
+        ),
+    )
     assert game.active_auction.current_bid == 70
     assert first.balance == 2790
 

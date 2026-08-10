@@ -103,6 +103,7 @@ from business_game.domain.models import (
     PlayerState,
     ProposeRentDebtPlanCommand,
     ProposeTradeCommand,
+    ReadyAuctionCommand,
     RefinanceMortgageCardEffect,
     RejectRentDebtPlanCommand,
     RejectTradeCommand,
@@ -153,6 +154,7 @@ CardShuffler = Callable[[list[str]], list[str]]
 Clock = Callable[[], datetime]
 OutcomeRoller = Callable[[int], int]
 AUCTION_BID_WINDOW = timedelta(seconds=5)
+AUCTION_READY_WINDOW = timedelta(seconds=30)
 MAX_EFFECTS_PER_COMMAND = 32
 DIVIDEND_SCALE = 10_000
 INDEX_DIVIDEND_ALLOCATION_PERCENT = 10
@@ -1030,7 +1032,15 @@ class GameService:
             ):
                 return game
             if expected_sequence is not None and previous_sequence != expected_sequence:
-                raise ConflictError("the game changed before the command ran")
+                auction_scoped = isinstance(
+                    command,
+                    (BidCommand, PassAuctionCommand, ReadyAuctionCommand),
+                ) or (
+                    isinstance(command, RequestLoanCommand)
+                    and command.auction_id is not None
+                )
+                if not auction_scoped:
+                    raise ConflictError("the game changed before the command ran")
             if game.status is not GameStatus.PLAYING:
                 raise ConflictError("the game is not active")
             self._ensure_economy(game)
@@ -1084,13 +1094,24 @@ class GameService:
                 self._set_property_trade_availability(game, actor_id, command)
             elif game.active_auction is not None:
                 if isinstance(command, BidCommand):
-                    self._bid(game, actor_id, command.amount)
+                    self._bid(game, actor_id, command)
                 elif isinstance(command, PassAuctionCommand):
-                    self._pass_auction(game, actor_id)
+                    self._pass_auction(game, actor_id, command)
+                elif isinstance(command, ReadyAuctionCommand):
+                    self._ready_auction(game, actor_id, command)
                 elif isinstance(command, RequestLoanCommand):
+                    if command.auction_id is None:
+                        raise ConflictError(
+                            "auction loan commands require auction_id"
+                        )
+                    auction = self._require_matching_auction(
+                        game,
+                        command.auction_id,
+                    )
                     if (
-                        actor_id not in game.active_auction.eligible_player_ids
-                        or actor_id in game.active_auction.passed_player_ids
+                        auction.phase != "bidding"
+                        or actor_id not in auction.ready_player_ids
+                        or actor_id in auction.passed_player_ids
                     ):
                         raise ConflictError(
                             "only an active auction participant can request a loan"
@@ -1191,7 +1212,12 @@ class GameService:
                 self._cancel_trade(game, actor_id, command)
             elif isinstance(
                 command,
-                (BidCommand, PassAuctionCommand, SelectAuctionPropertyCommand),
+                (
+                    BidCommand,
+                    PassAuctionCommand,
+                    ReadyAuctionCommand,
+                    SelectAuctionPropertyCommand,
+                ),
             ):
                 raise ConflictError("there is no active auction")
             elif isinstance(command, (ChooseCardCommand, ContinueCardCommand)):
@@ -1253,7 +1279,29 @@ class GameService:
             ):
                 return None
             previous_sequence = game.event_sequence
-            self._complete_auction(game)
+            if auction.phase == "idle":
+                pending_player_ids = [
+                    player_id
+                    for player_id in auction.eligible_player_ids
+                    if player_id not in auction.ready_player_ids
+                    and player_id not in auction.passed_player_ids
+                ]
+                for player_id in pending_player_ids:
+                    auction.passed_player_ids.append(player_id)
+                    self._append_event(
+                        game,
+                        "auction.player_passed",
+                        {
+                            "auction_id": str(auction.id),
+                            "property_id": auction.property_id,
+                            "player_id": str(player_id),
+                            "before_bidding": True,
+                            "reason": "readiness_timeout",
+                        },
+                    )
+                self._start_auction_bidding_if_ready(game)
+            else:
+                self._complete_auction(game)
             self._ensure_economy(game)
             self._sync_bank(game)
             await self._games.save(game, previous_sequence)
@@ -1333,13 +1381,8 @@ class GameService:
         game.extra_roll_pending = is_double
         from_position = player.position
         steps = sum(dice)
-        self._move_forward(game, player, steps)
-        tile = pack.board.tiles[player.position]
-        if tile.is_purchasable and tile.id not in game.owners:
-            game.pending_tile_id = tile.id
-            game.phase = TurnPhase.BUY_DECISION
-        else:
-            game.phase = TurnPhase.WAITING_FOR_END
+        to_position = (from_position + steps) % pack.manifest.tile_count
+        tile = pack.board.tiles[to_position]
         self._append_event(
             game,
             "dice.rolled",
@@ -1347,14 +1390,20 @@ class GameService:
                 "player_id": str(player.user_id),
                 "dice": list(dice),
                 "from_position": from_position,
-                "to_position": player.position,
-                "position": player.position,
+                "to_position": to_position,
+                "position": to_position,
                 "steps": steps,
                 "movement": "step",
                 "tile_id": tile.id,
                 "is_double": is_double,
             },
         )
+        self._move_forward(game, player, steps)
+        if tile.is_purchasable and tile.id not in game.owners:
+            game.pending_tile_id = tile.id
+            game.phase = TurnPhase.BUY_DECISION
+        else:
+            game.phase = TurnPhase.WAITING_FOR_END
         if game.phase is TurnPhase.WAITING_FOR_END:
             self._resolve_landed_tile(game, player, tile.id, sum(dice))
 
@@ -4882,7 +4931,9 @@ class GameService:
         if len(eligible_player_ids) < 2:
             raise ConflictError("at least two active players are required for an auction")
         game.active_auction = AuctionState(
+            id=uuid4(),
             property_id=property_id,
+            bid_deadline=self._clock() + AUCTION_READY_WINDOW,
             minimum_bid=minimum_bid,
             deposit_amount=deposit_amount,
             eligible_player_ids=eligible_player_ids,
@@ -4891,7 +4942,9 @@ class GameService:
             game,
             "auction.started",
             {
+                "auction_id": str(game.active_auction.id),
                 "property_id": property_id,
+                "readiness_deadline": game.active_auction.bid_deadline.isoformat(),
                 "minimum_bid": minimum_bid,
                 "deposit_amount": deposit_amount,
                 "eligible_player_ids": [
@@ -4923,7 +4976,9 @@ class GameService:
             requested_minimum_bid=1,
         )
         game.active_auction = AuctionState(
+            id=uuid4(),
             property_id=property_id,
+            bid_deadline=self._clock() + AUCTION_READY_WINDOW,
             minimum_bid=minimum_bid,
             deposit_amount=deposit_amount,
             eligible_player_ids=eligible_player_ids,
@@ -4932,7 +4987,9 @@ class GameService:
             game,
             "auction.started",
             {
+                "auction_id": str(game.active_auction.id),
                 "property_id": property_id,
+                "readiness_deadline": game.active_auction.bid_deadline.isoformat(),
                 "minimum_bid": minimum_bid,
                 "deposit_amount": deposit_amount,
                 "eligible_player_ids": [
@@ -4969,19 +5026,98 @@ class GameService:
                 return UUID(debtor_id)
         return None
 
-    def _bid(self, game: GameState, actor_id: UUID, amount: int) -> None:
+    @staticmethod
+    def _require_matching_auction(
+        game: GameState,
+        auction_id: UUID | None,
+    ) -> AuctionState:
         auction = game.active_auction
         if auction is None:
             raise ConflictError("there is no active auction")
+        if auction_id is not None and auction.id != auction_id:
+            raise ConflictError("the auction changed before the command ran")
+        return auction
+
+    def _ready_auction(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        command: ReadyAuctionCommand,
+    ) -> None:
+        auction = self._require_matching_auction(game, command.auction_id)
+        if actor_id not in auction.eligible_player_ids:
+            raise ConflictError("the player cannot participate in this auction")
+        if actor_id in auction.ready_player_ids:
+            return
+        if auction.phase != "idle":
+            raise ConflictError("the auction bidding has already started")
+        if actor_id in auction.passed_player_ids:
+            raise ConflictError("the player already declined this auction")
+        auction.ready_player_ids.append(actor_id)
+        self._append_event(
+            game,
+            "auction.player_ready",
+            {
+                "auction_id": str(auction.id),
+                "property_id": auction.property_id,
+                "player_id": str(actor_id),
+            },
+        )
+        self._start_auction_bidding_if_ready(game)
+
+    def _start_auction_bidding_if_ready(self, game: GameState) -> None:
+        auction = game.active_auction
+        if auction is None or auction.phase != "idle":
+            return
+        responded = set(auction.ready_player_ids) | set(auction.passed_player_ids)
+        if any(
+            player_id not in responded
+            for player_id in auction.eligible_player_ids
+        ):
+            return
+        if not auction.ready_player_ids:
+            self._complete_auction(game)
+            return
+        auction.phase = "bidding"
+        auction.bid_deadline = self._clock() + AUCTION_BID_WINDOW
+        self._append_event(
+            game,
+            "auction.bidding_started",
+            {
+                "auction_id": str(auction.id),
+                "property_id": auction.property_id,
+                "participant_ids": [
+                    str(player_id) for player_id in auction.ready_player_ids
+                ],
+                "bid_deadline": auction.bid_deadline.isoformat(),
+            },
+        )
+
+    def _bid(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        command: BidCommand,
+    ) -> None:
+        auction = self._require_matching_auction(game, command.auction_id)
+        amount = command.amount
+        if actor_id not in auction.eligible_player_ids:
+            raise ConflictError("the player cannot participate in this auction")
+        if auction.phase != "bidding":
+            raise ConflictError("the auction is waiting for player readiness")
         if (
             auction.bid_deadline is not None
             and auction.bid_deadline <= self._clock()
         ):
             raise ConflictError("the auction bidding window has expired")
-        if actor_id not in auction.eligible_player_ids:
-            raise ConflictError("the player cannot participate in this auction")
+        if actor_id not in auction.ready_player_ids:
+            raise ConflictError("the player did not join the bidding")
         if actor_id in auction.passed_player_ids:
             raise ConflictError("the player already passed")
+        if actor_id == auction.current_bidder_id:
+            if amount == auction.current_bid:
+                return
+            raise ConflictError("the highest bidder must wait for another offer")
         if amount <= auction.current_bid:
             raise ConflictError("the bid must be higher than the current bid")
         if amount < auction.minimum_bid:
@@ -5015,6 +5151,7 @@ class GameService:
             game,
             "auction.bid_placed",
             {
+                "auction_id": str(auction.id),
                 "property_id": auction.property_id,
                 "player_id": str(actor_id),
                 "amount": amount,
@@ -5023,16 +5160,23 @@ class GameService:
         )
         self._resolve_auction_if_finished(game)
 
-    def _pass_auction(self, game: GameState, actor_id: UUID) -> None:
-        auction = game.active_auction
-        if auction is None:
-            raise ConflictError("there is no active auction")
+    def _pass_auction(
+        self,
+        game: GameState,
+        actor_id: UUID,
+        command: PassAuctionCommand,
+    ) -> None:
+        auction = self._require_matching_auction(game, command.auction_id)
         if actor_id not in auction.eligible_player_ids:
             raise ConflictError("the player cannot participate in this auction")
+        if actor_id in auction.passed_player_ids:
+            return
+        if auction.phase == "idle" and actor_id in auction.ready_player_ids:
+            raise ConflictError("the player is already ready for this auction")
         if actor_id == auction.current_bidder_id:
             raise ConflictError("the highest bidder cannot pass")
-        if actor_id in auction.passed_player_ids:
-            raise ConflictError("the player already passed")
+        if auction.phase == "bidding" and actor_id not in auction.ready_player_ids:
+            raise ConflictError("the player did not join the bidding")
         self._refund_auction_deposit(
             game,
             auction,
@@ -5044,19 +5188,26 @@ class GameService:
             game,
             "auction.player_passed",
             {
+                "auction_id": str(auction.id),
                 "property_id": auction.property_id,
                 "player_id": str(actor_id),
+                "before_bidding": auction.phase == "idle",
             },
         )
-        self._resolve_auction_if_finished(game)
+        if auction.phase == "idle":
+            self._start_auction_bidding_if_ready(game)
+        else:
+            self._resolve_auction_if_finished(game)
 
     def _resolve_auction_if_finished(self, game: GameState) -> None:
         auction = game.active_auction
         if auction is None:
             return
+        if auction.phase != "bidding":
+            return
         remaining = [
             player_id
-            for player_id in auction.eligible_player_ids
+            for player_id in auction.ready_player_ids
             if player_id not in auction.passed_player_ids
         ]
         if not remaining and auction.current_bidder_id is None:
@@ -5088,6 +5239,7 @@ class GameService:
             game,
             "auction.completed",
             {
+                "auction_id": str(auction.id),
                 "property_id": auction.property_id,
                 "winner_id": winner_id,
                 "amount": amount,

@@ -1,6 +1,17 @@
 import CasinoRoundedIcon from '@mui/icons-material/CasinoRounded'
-import { Box, Button, Chip, Stack, Typography } from '@mui/material'
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import {
+  Box,
+  Button,
+  Chip,
+  IconButton,
+  Paper,
+  Stack,
+  Typography,
+} from '@mui/material'
+import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -11,6 +22,8 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import type {
+  BoardMovementPreviewMode,
+  BoardTileViewMode,
   ContentPack,
   GameCommand,
   GameEvent,
@@ -41,6 +54,7 @@ interface GameBoardProps {
   pack: ContentPack
   zoom: number
   game?: GameState | null
+  motionGame?: GameState | null
   currentUserId?: string
   currentUserTokenAppearance?: TokenAppearanceSettings | null
   onCreateGame?: () => void
@@ -59,6 +73,8 @@ interface GameBoardProps {
   motionIntensity?: VisualEffectsIntensity
   highlightedTileId?: string | null
   highlightedPlayerId?: string | null
+  tileViewMode?: BoardTileViewMode
+  movementPreviewMode?: BoardMovementPreviewMode
 }
 
 interface TileEffect {
@@ -71,10 +87,19 @@ interface TilePulseState {
   sequences: Map<string, TileEffect>
 }
 
+interface TilePreviewState {
+  tileIndex: number
+  kind: 'tile' | 'group'
+  source: 'manual' | 'movement'
+  playerId?: string
+  final?: boolean
+}
+
 export function GameBoard({
   pack,
   zoom,
   game = null,
+  motionGame,
   currentUserId,
   currentUserTokenAppearance = null,
   onCreateGame,
@@ -93,9 +118,14 @@ export function GameBoard({
   motionIntensity = 'full',
   highlightedTileId = null,
   highlightedPlayerId = null,
+  tileViewMode = 'detailed',
+  movementPreviewMode = 'steps',
 }: GameBoardProps) {
   const { t, i18n } = useTranslation()
+  const authoritativeMotionGame = motionGame === undefined ? game : motionGame
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null)
+  const [tilePreview, setTilePreview] = useState<TilePreviewState | null>(null)
+  const previewTimerRef = useRef<number | null>(null)
   const [focusableTileId, setFocusableTileId] = useState<string | null>(
     () => pack.board.tiles[0]?.id ?? null,
   )
@@ -104,15 +134,67 @@ export function GameBoard({
   const side = pack.manifest.side_length
   const compact = side > 11
   const currentPlayer = game?.players[game.current_player_index]
+  const clearPreviewTimer = useCallback(() => {
+    if (previewTimerRef.current !== null) {
+      window.clearTimeout(previewTimerRef.current)
+      previewTimerRef.current = null
+    }
+  }, [])
+  const showMovementPreview = useCallback(
+    (cue: MotionAudioCue) => {
+      if (
+        movementPreviewMode === 'off' ||
+        (movementPreviewMode === 'landing' && !cue.final)
+      ) {
+        return
+      }
+      clearPreviewTimer()
+      setTilePreview({
+        tileIndex: cue.position,
+        kind: 'tile',
+        source: 'movement',
+        playerId: cue.playerId,
+        final: cue.final,
+      })
+      if (cue.final) {
+        previewTimerRef.current = window.setTimeout(() => {
+          setTilePreview((current) =>
+            current?.source === 'movement' ? null : current,
+          )
+          previewTimerRef.current = null
+        }, 2600)
+      }
+    },
+    [clearPreviewTimer, movementPreviewMode],
+  )
+  const handleTokenStep = useCallback(
+    (cue: MotionAudioCue) => {
+      onTokenStep?.(cue)
+      showMovementPreview(cue)
+    },
+    [onTokenStep, showMovementPreview],
+  )
+  const handleTokenTeleport = useCallback(
+    (cue: MotionAudioCue) => {
+      onTokenTeleport?.(cue)
+      showMovementPreview(cue)
+    },
+    [onTokenTeleport, showMovementPreview],
+  )
   const visualPositions = useVisualPlayerPositions(
-    game,
+    authoritativeMotionGame,
     pack.manifest.tile_count,
     syncMotionKey,
     onMotionSettled,
-    onTokenStep,
-    onTokenTeleport,
+    handleTokenStep,
+    handleTokenTeleport,
     motionIntensity,
   )
+  useEffect(() => clearPreviewTimer, [clearPreviewTimer])
+  useEffect(() => {
+    clearPreviewTimer()
+    setTilePreview(null)
+  }, [clearPreviewTimer, game?.id])
   const tokensByPosition = new Map<number, BoardToken[]>()
   const ownersById = new Map<string, BoardOwner>()
   game?.players.forEach((player, index) => {
@@ -155,7 +237,7 @@ export function GameBoard({
   const boardSize = centerContent
     ? `min(${zoom * 100}%, calc(100dvh * ${zoom}))`
     : `min(${zoom * 100}%, ${maximumSize * zoom}px, calc((100dvh - 160px) * ${zoom}))`
-  const fittedHeight = `min(${Math.min(zoom, 1) * 100}%, ${maximumSize * zoom}px)`
+  const fittedSize = `min(100%, calc(100dvh - 56px), ${maximumSize}px)`
   const requestedFocusableTileIndex = pack.board.tiles.findIndex(
     (tile) => tile.id === focusableTileId,
   )
@@ -164,6 +246,21 @@ export function GameBoard({
     : 0
   const selectedTile =
     pack.board.tiles.find((tile) => tile.id === selectedTileId) ?? null
+  const previewTile = tilePreview
+    ? pack.board.tiles[tilePreview.tileIndex] ?? null
+    : null
+  const previewOwner = previewTile
+    ? ownersById.get(game?.owners[previewTile.id] ?? '')
+    : undefined
+  const previewGroup = previewTile?.group
+    ? pack.board.groups?.find((group) => group.id === previewTile.group)
+    : undefined
+  const previewGroupTiles = previewTile?.group
+    ? pack.board.tiles.filter((tile) => tile.group === previewTile.group)
+    : []
+  const previewPlayer = tilePreview?.playerId
+    ? game?.players.find((player) => player.user_id === tilePreview.playerId)
+    : undefined
   const tileIds = useMemo(
     () => new Set(pack.board.tiles.map((tile) => tile.id)),
     [pack.board.tiles],
@@ -280,8 +377,8 @@ export function GameBoard({
         display: 'grid',
         gridTemplateColumns: trackTemplate,
         gridTemplateRows: trackTemplate,
-        width: fitAvailableHeight ? 'auto' : boardSize,
-        height: fitAvailableHeight ? fittedHeight : undefined,
+        width: fitAvailableHeight ? fittedSize : boardSize,
+        height: undefined,
         maxWidth: fitAvailableHeight ? '100%' : undefined,
         maxHeight: fitAvailableHeight ? '100%' : undefined,
         aspectRatio: '1',
@@ -356,6 +453,7 @@ export function GameBoard({
             tokens={tokensByPosition.get(index)}
             owner={owner}
             heatmap={tileHeatmap}
+            viewMode={tileViewMode}
             buttonRef={(node) => {
               tileButtonRefs.current[index] = node
             }}
@@ -401,11 +499,118 @@ export function GameBoard({
             }
             onClick={() => {
               setFocusableTileId(tile.id)
-              setSelectedTileId(tile.id)
+              if (tileViewMode === 'detailed') {
+                setSelectedTileId(tile.id)
+                return
+              }
+              clearPreviewTimer()
+              setTilePreview({
+                tileIndex: index,
+                kind: tile.group ? 'group' : 'tile',
+                source: 'manual',
+              })
             }}
           />
         )
       })}
+
+      {previewTile && tilePreview && (
+        <Paper
+          role={tilePreview.source === 'manual' ? 'region' : 'status'}
+          aria-live={
+            tilePreview.source === 'movement' && tilePreview.final
+              ? 'polite'
+              : 'off'
+          }
+          aria-label={t('boardView.previewLabel')}
+          elevation={12}
+          sx={{
+            position: 'absolute',
+            zIndex: 20,
+            left: '50%',
+            bottom: { xs: 6, sm: 10 },
+            transform: 'translateX(-50%)',
+            width: { xs: 'min(88%, 310px)', sm: 'min(68%, 380px)' },
+            maxHeight: '46%',
+            overflowY: 'auto',
+            p: { xs: 1, sm: 1.5 },
+            border: `1px solid ${previewTile.color ?? 'rgba(184,255,61,.55)'}`,
+            bgcolor: 'rgba(18,14,31,.96)',
+            backdropFilter: 'blur(14px)',
+            boxShadow: '0 18px 50px rgba(0,0,0,.58)',
+          }}
+        >
+          <Stack direction="row" alignItems="flex-start" spacing={1}>
+            <Box
+              aria-hidden
+              sx={{
+                width: 12,
+                alignSelf: 'stretch',
+                minHeight: 44,
+                flexShrink: 0,
+                borderRadius: 99,
+                bgcolor: previewTile.color ?? 'secondary.main',
+              }}
+            />
+            <Box sx={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+              {previewPlayer && (
+                <Typography variant="caption" color="secondary.light" fontWeight={800}>
+                  {tilePreview.final
+                    ? t('boardView.playerLanded', { player: previewPlayer.display_name })
+                    : t('boardView.playerPassing', { player: previewPlayer.display_name })}
+                </Typography>
+              )}
+              <Typography fontWeight={900} lineHeight={1.2}>
+                {tilePreview.kind === 'group'
+                  ? pack.messages[previewGroup?.name_key ?? ''] ??
+                    previewTile.group ??
+                    (pack.messages[previewTile.name_key] ?? previewTile.id)
+                  : pack.messages[previewTile.name_key] ?? previewTile.id}
+              </Typography>
+              {tilePreview.kind === 'group' ? (
+                <Typography variant="body2" color="text.secondary">
+                  {t('boardView.groupSummary', {
+                    count: previewGroupTiles.length,
+                    owned: previewGroupTiles.filter((tile) => game?.owners[tile.id])
+                      .length,
+                  })}
+                </Typography>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {previewTile.price != null
+                    ? previewOwner
+                      ? t('ownedBy', { player: previewOwner.displayName })
+                      : t('purchasePrice', { amount: previewTile.price })
+                    : t(`tileKind.${previewTile.kind}`)}
+                </Typography>
+              )}
+            </Box>
+            <IconButton
+              size="small"
+              aria-label={t('close')}
+              onClick={() => {
+                clearPreviewTimer()
+                setTilePreview(null)
+              }}
+              sx={{ minWidth: 44, minHeight: 44 }}
+            >
+              <CloseRoundedIcon fontSize="small" />
+            </IconButton>
+          </Stack>
+          {tilePreview.source === 'manual' && (
+            <Button
+              fullWidth
+              size="small"
+              variant="outlined"
+              startIcon={<InfoOutlinedIcon />}
+              onClick={() => setSelectedTileId(previewTile.id)}
+              sx={{ mt: 1, minHeight: 44 }}
+            >
+              {t('boardView.openDetails')}
+            </Button>
+          )}
+        </Paper>
+      )}
 
       <Stack
         sx={{
@@ -469,11 +674,11 @@ export function GameBoard({
                         })
                       : t(`gameStatusMessage.${game.status}`)}
                 </Typography>
-                {game.last_roll && (
+                {authoritativeMotionGame?.last_roll && (
                   <Chip
                     label={t('lastRoll', {
-                      first: game.last_roll[0],
-                      second: game.last_roll[1],
+                      first: authoritativeMotionGame.last_roll[0],
+                      second: authoritativeMotionGame.last_roll[1],
                     })}
                     size="small"
                     sx={{ display: { xs: 'none', sm: 'inline-flex' } }}

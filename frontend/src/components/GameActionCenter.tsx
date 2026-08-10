@@ -30,6 +30,7 @@ import { PlayerStatusSummary } from './PlayerStatusSummary'
 
 interface Props {
   game: GameState
+  diceGame?: GameState
   pack: ContentPack
   user: User
   busy: boolean
@@ -45,6 +46,7 @@ interface Props {
 
 export function GameActionCenter({
   game,
+  diceGame = game,
   pack,
   user,
   busy,
@@ -77,7 +79,7 @@ export function GameActionCenter({
   const discountedPrice = Math.floor(
     (pendingPrice * (100 - game.pending_purchase_discount_percent)) / 100,
   )
-  const latestDice = latestDiceResult(game)
+  const latestDice = latestDiceResult(diceGame)
 
   return (
     <Stack

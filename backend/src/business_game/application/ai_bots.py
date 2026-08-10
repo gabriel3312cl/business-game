@@ -30,6 +30,7 @@ from business_game.domain.models import (
     PayJailFineCommand,
     PlayerState,
     ProposeTradeCommand,
+    ReadyAuctionCommand,
     RejectTradeCommand,
     RepayLoanCommand,
     RequestLoanCommand,
@@ -228,7 +229,39 @@ def build_ai_bot_choices(
 
     if game.active_auction is not None:
         auction = game.active_auction
-        add(PassAuctionCommand(action="pass_auction"))
+        if auction.id is None:
+            return choices
+        if auction.phase == "idle":
+            if (
+                player.user_id in auction.ready_player_ids
+                or player.user_id in auction.passed_player_ids
+            ):
+                return choices
+            add(
+                ReadyAuctionCommand(
+                    action="ready_auction",
+                    auction_id=auction.id,
+                )
+            )
+            add(
+                PassAuctionCommand(
+                    action="pass_auction",
+                    auction_id=auction.id,
+                )
+            )
+            return choices
+        if (
+            player.user_id not in auction.ready_player_ids
+            or player.user_id in auction.passed_player_ids
+            or player.user_id == auction.current_bidder_id
+        ):
+            return choices
+        add(
+            PassAuctionCommand(
+                action="pass_auction",
+                auction_id=auction.id,
+            )
+        )
         tile = _tile(pack, auction.property_id)
         held_deposit = auction.deposits.get(player.user_id, 0)
         available_cash = player.balance + held_deposit
@@ -239,7 +272,13 @@ def build_ai_bot_choices(
         for increment in sorted(increments):
             amount = max(auction.minimum_bid, auction.current_bid + increment)
             if can_place_deposit and amount <= available_cash:
-                add(BidCommand(action="bid", amount=amount))
+                add(
+                    BidCommand(
+                        action="bid",
+                        auction_id=auction.id,
+                        amount=amount,
+                    )
+                )
         return choices
 
     if game.pending_auction_selector_id == fallback.actor_id:
@@ -413,12 +452,14 @@ def build_ai_bot_context(
     auction = None
     if game.active_auction is not None:
         auction = {
+            "phase": game.active_auction.phase,
             "property": _tile_name(pack, game.active_auction.property_id),
             "minimum_bid": game.active_auction.minimum_bid,
             "current_bid": game.active_auction.current_bid,
             "current_bidder": alias(game.active_auction.current_bidder_id),
             "refundable_deposit": game.active_auction.deposit_amount,
             "your_deposit_held": game.active_auction.deposits.get(actor_id, 0),
+            "you_are_ready": actor_id in game.active_auction.ready_player_ids,
         }
     debt = None
     if game.active_debt is not None and game.active_debt.debtor_id == actor_id:
@@ -518,6 +559,8 @@ def _describe_command(command: GameCommand, game: GameState, pack: ContentPack) 
         return "No comprar la propiedad"
     if isinstance(command, BidCommand):
         return f"Ofertar ${command.amount} en la subasta"
+    if isinstance(command, ReadyAuctionCommand):
+        return "Confirmar participación en la subasta"
     if isinstance(command, PassAuctionCommand):
         return "Retirarse de la subasta"
     if isinstance(command, SelectAuctionPropertyCommand):

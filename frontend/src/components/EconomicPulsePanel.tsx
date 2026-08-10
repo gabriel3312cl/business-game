@@ -1,31 +1,85 @@
+import AcUnitRoundedIcon from '@mui/icons-material/AcUnitRounded'
+import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded'
+import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
+import BusinessRoundedIcon from '@mui/icons-material/BusinessRounded'
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded'
+import DeviceThermostatRoundedIcon from '@mui/icons-material/DeviceThermostatRounded'
+import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
 import InsightsRoundedIcon from '@mui/icons-material/InsightsRounded'
-import { Box, Chip, Stack, Typography } from '@mui/material'
+import LandscapeRoundedIcon from '@mui/icons-material/LandscapeRounded'
+import PriceChangeRoundedIcon from '@mui/icons-material/PriceChangeRounded'
+import SentimentSatisfiedAltRoundedIcon from '@mui/icons-material/SentimentSatisfiedAltRounded'
+import ShowChartRoundedIcon from '@mui/icons-material/ShowChartRounded'
+import ThunderstormRoundedIcon from '@mui/icons-material/ThunderstormRounded'
+import TrendingDownRoundedIcon from '@mui/icons-material/TrendingDownRounded'
+import TrendingFlatRoundedIcon from '@mui/icons-material/TrendingFlatRounded'
+import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded'
+import WaterDropRoundedIcon from '@mui/icons-material/WaterDropRounded'
+import WbSunnyRoundedIcon from '@mui/icons-material/WbSunnyRounded'
+import WorkRoundedIcon from '@mui/icons-material/WorkRounded'
+import { Box, Chip, Paper, Stack, Typography } from '@mui/material'
+import type { ReactElement, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ContentPack, GameState, WeatherCondition } from '../types'
+import type {
+  ContentPack,
+  EconomicCycle,
+  EconomicEventState,
+  GameState,
+  WeatherCondition,
+} from '../types'
 
 interface Props {
   game: GameState
   pack: ContentPack
 }
 
-const WEATHER_SYMBOL: Record<WeatherCondition, string> = {
-  clear: '☀️',
-  rain: '🌧️',
-  storm: '⛈️',
-  heatwave: '🌡️',
-  cold_wave: '❄️',
-  drought: '🏜️',
+const ACCENT = {
+  info: '#48c8ff',
+  success: '#69db8f',
+  warning: '#ffb454',
+  danger: '#ff7288',
+  secondary: '#a98cff',
+  primary: '#b8ff3d',
+  neutral: '#b8b3c9',
+} as const
+
+const CYCLE_ACCENT: Record<EconomicCycle, string> = {
+  expansion: ACCENT.success,
+  slowdown: ACCENT.warning,
+  recession: ACCENT.danger,
+  recovery: ACCENT.info,
 }
+
+const FAVORABLE_EVENTS = new Set<EconomicEventState['kind']>([
+  'innovation_boom',
+  'consumer_boom',
+  'fiscal_stimulus',
+])
 
 export function EconomicPulsePanel({ game, pack }: Props) {
   const { t, i18n } = useTranslation()
   const economy = game.economy
+  const cycleAccent = CYCLE_ACCENT[economy.cycle]
   const formattedDate = new Intl.DateTimeFormat(i18n.language, {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   }).format(new Date(`${economy.current_date}T12:00:00`))
+  const percent = new Intl.NumberFormat(i18n.language, {
+    style: 'percent',
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 2,
+  })
+  const signedPercent = new Intl.NumberFormat(i18n.language, {
+    style: 'percent',
+    signDisplay: 'exceptZero',
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 2,
+  })
+  const signedNumber = new Intl.NumberFormat(i18n.language, {
+    signDisplay: 'exceptZero',
+    maximumFractionDigits: 0,
+  })
   const instrumentById = new Map(
     game.bank.investments.map((instrument) => [instrument.id, instrument]),
   )
@@ -35,162 +89,584 @@ export function EconomicPulsePanel({ game, pack }: Props) {
   const companyName = companyInstrument
     ? pack.messages[companyInstrument.name_key] ?? t(companyInstrument.name_key)
     : economy.last_company_instrument_id
+  const basisPoints = (value: number) => percent.format(value / 10_000)
+  const signedBasisPoints = (value: number) =>
+    signedPercent.format(value / 10_000)
+  const marketAccent =
+    economy.market_sentiment > 0
+      ? ACCENT.success
+      : economy.market_sentiment < 0
+        ? ACCENT.danger
+        : ACCENT.neutral
 
   return (
-    <Box
-      component="section"
+    <Paper
+      component="details"
+      variant="outlined"
       aria-label={t('economy.title')}
       sx={{
         width: 'min(100%, 620px)',
         borderRadius: 2.5,
-        border: '1px solid rgba(83,196,255,.28)',
-        bgcolor: 'rgba(13,35,49,.76)',
-        boxShadow: '0 8px 28px rgba(0,0,0,.2)',
+        borderColor: `${cycleAccent}52`,
+        background: `linear-gradient(145deg, ${cycleAccent}12 0%, rgba(29,25,49,.98) 44%, rgba(16,13,29,.99) 100%)`,
+        boxShadow:
+          'inset 0 1px 0 rgba(255,255,255,.055), 0 10px 30px rgba(0,0,0,.18)',
         overflow: 'hidden',
+        '&[open] .economic-pulse-chevron': {
+          transform: 'rotate(180deg)',
+        },
+        '&[open] .economic-pulse-summary': {
+          borderBottomColor: `${cycleAccent}32`,
+        },
+        '@media (prefers-reduced-motion: reduce)': {
+          '& .economic-pulse-chevron': { transition: 'none' },
+        },
       }}
     >
-      <Stack
-        direction="row"
-        alignItems="center"
-        useFlexGap
-        flexWrap="wrap"
-        gap={0.65}
-        sx={{ px: { xs: 0.75, sm: 1.1 }, py: 0.8 }}
-      >
-        <CalendarMonthRoundedIcon color="info" fontSize="small" />
-        <Typography
-          component="time"
-          dateTime={economy.current_date}
-          fontWeight={850}
-          sx={{ fontSize: { xs: '0.76rem', sm: '0.9rem' } }}
-        >
-          {formattedDate}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {t('economy.week', { count: economy.elapsed_weeks + 1 })}
-        </Typography>
-        <Box sx={{ flex: 1 }} />
-        <Chip
-          size="small"
-          label={`${WEATHER_SYMBOL[economy.weather]} ${t(
-            `economy.weather.${economy.weather}`,
-          )}`}
-          sx={{ height: 25 }}
-        />
-        <Chip
-          size="small"
-          color={economy.cycle === 'recession' ? 'warning' : 'info'}
-          variant="outlined"
-          label={t(`economy.cycle.${economy.cycle}`)}
-          sx={{ height: 25 }}
-        />
-      </Stack>
-
       <Box
-        component="details"
+        component="summary"
+        className="economic-pulse-summary"
         sx={{
-          borderTop: '1px solid rgba(83,196,255,.14)',
-          '&[open]': { pb: 1 },
+          minHeight: 56,
+          px: { xs: 0.8, sm: 1.1 },
+          py: 0.75,
+          cursor: 'pointer',
+          listStyle: 'none',
+          borderBottom: '1px solid transparent',
+          transition: 'background-color 140ms ease, border-color 140ms ease',
+          '&::-webkit-details-marker': { display: 'none' },
+          '&:hover': { bgcolor: `${cycleAccent}0b` },
+          '&:focus-visible': {
+            outline: `3px solid ${ACCENT.primary}`,
+            outlineOffset: -3,
+          },
         }}
       >
-        <Typography
-          component="summary"
-          variant="caption"
-          color="info.light"
-          fontWeight={750}
-          sx={{ cursor: 'pointer', px: 1.1, py: 0.55 }}
+        <Stack
+          direction="row"
+          alignItems="center"
+          useFlexGap
+          flexWrap="wrap"
+          gap={{ xs: 0.65, sm: 0.85 }}
         >
-          {t('economy.summary', {
-            season: t(`economy.season.${economy.season}`),
-            difficulty: t(
-              `economy.difficulty.${game.settings.economic_difficulty}`,
-            ),
-          })}
-        </Typography>
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: 0.65,
-            px: 1,
-          }}
-        >
-          <Metric label={t('economy.growth')} value={basisPoints(economy.annual_growth_basis_points)} />
-          <Metric label={t('economy.inflation')} value={basisPoints(economy.annual_inflation_basis_points)} />
-          <Metric label={t('economy.policyRate')} value={basisPoints(economy.policy_rate_basis_points)} />
-          <Metric label={t('economy.unemployment')} value={basisPoints(economy.unemployment_basis_points)} />
-          <Metric label={t('economy.confidence')} value={`${economy.consumer_confidence}/200`} />
-          <Metric label={t('economy.sentiment')} value={signed(economy.market_sentiment)} />
+          <Box
+            aria-hidden
+            sx={{
+              width: { xs: 32, sm: 36 },
+              height: { xs: 32, sm: 36 },
+              flex: '0 0 auto',
+              display: 'grid',
+              placeItems: 'center',
+              borderRadius: 1.5,
+              color: cycleAccent,
+              bgcolor: `${cycleAccent}1f`,
+              border: `1px solid ${cycleAccent}38`,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,.08), 0 0 16px ${cycleAccent}16`,
+              '& svg': { fontSize: { xs: 18, sm: 21 } },
+            }}
+          >
+            <CalendarMonthRoundedIcon />
+          </Box>
+          <Box sx={{ minWidth: 0, flex: '1 1 170px' }}>
+            <Stack direction="row" alignItems="baseline" useFlexGap flexWrap="wrap" gap={0.6}>
+              <Typography
+                component="time"
+                dateTime={economy.current_date}
+                fontWeight={900}
+                sx={{ fontSize: { xs: '0.78rem', sm: '0.92rem' }, lineHeight: 1.2 }}
+              >
+                {formattedDate}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {t('economy.week', { count: economy.elapsed_weeks + 1 })}
+              </Typography>
+            </Stack>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', mt: 0.15, lineHeight: 1.25 }}
+            >
+              {t('economy.summary', {
+                season: t(`economy.season.${economy.season}`),
+                difficulty: t(
+                  `economy.difficulty.${game.settings.economic_difficulty}`,
+                ),
+              })}
+            </Typography>
+          </Box>
+          <Stack
+            direction="row"
+            alignItems="center"
+            useFlexGap
+            flexWrap="wrap"
+            gap={0.55}
+            sx={{ ml: { sm: 'auto' } }}
+          >
+            <Chip
+              size="small"
+              icon={weatherIcon(economy.weather)}
+              label={t(`economy.weather.${economy.weather}`)}
+              sx={{
+                height: 28,
+                color: 'text.primary',
+                bgcolor: `${ACCENT.info}16`,
+                border: `1px solid ${ACCENT.info}2e`,
+                '& .MuiChip-icon': { color: ACCENT.info },
+              }}
+            />
+            <Chip
+              size="small"
+              variant="outlined"
+              label={t(`economy.cycle.${economy.cycle}`)}
+              sx={{
+                height: 28,
+                color: cycleAccent,
+                borderColor: `${cycleAccent}66`,
+                bgcolor: `${cycleAccent}0d`,
+                fontWeight: 750,
+              }}
+            />
+            <Box
+              className="economic-pulse-chevron"
+              aria-hidden
+              sx={{
+                width: 32,
+                height: 32,
+                display: 'grid',
+                placeItems: 'center',
+                color: 'text.secondary',
+                transition: 'transform 180ms ease',
+              }}
+            >
+              <ExpandMoreRoundedIcon />
+            </Box>
+          </Stack>
+        </Stack>
+      </Box>
+
+      <Stack spacing={1.1} sx={{ p: { xs: 0.8, sm: 1.1 } }}>
+        <Box component="section" aria-label={t('economy.indicators')}>
+          <SectionHeading
+            icon={<InsightsRoundedIcon />}
+            title={t('economy.indicators')}
+            accent={ACCENT.secondary}
+          />
+          <Box
+            component="dl"
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: {
+                xs: 'repeat(2, minmax(0, 1fr))',
+                sm: 'repeat(3, minmax(0, 1fr))',
+              },
+              gap: { xs: 0.6, sm: 0.75 },
+              m: 0,
+              mt: 0.65,
+            }}
+          >
+            <Metric
+              icon={
+                economy.annual_growth_basis_points < 0 ? (
+                  <TrendingDownRoundedIcon />
+                ) : (
+                  <TrendingUpRoundedIcon />
+                )
+              }
+              label={t('economy.growth')}
+              value={basisPoints(economy.annual_growth_basis_points)}
+              accent={economy.annual_growth_basis_points >= 0 ? ACCENT.success : ACCENT.danger}
+            />
+            <Metric
+              icon={<PriceChangeRoundedIcon />}
+              label={t('economy.inflation')}
+              value={basisPoints(economy.annual_inflation_basis_points)}
+              accent={ACCENT.warning}
+            />
+            <Metric
+              icon={<AccountBalanceRoundedIcon />}
+              label={t('economy.policyRate')}
+              value={basisPoints(economy.policy_rate_basis_points)}
+              accent={ACCENT.secondary}
+            />
+            <Metric
+              icon={<WorkRoundedIcon />}
+              label={t('economy.unemployment')}
+              value={basisPoints(economy.unemployment_basis_points)}
+              accent={ACCENT.danger}
+            />
+            <Metric
+              icon={<SentimentSatisfiedAltRoundedIcon />}
+              label={t('economy.confidence')}
+              value={`${economy.consumer_confidence}/200`}
+              accent={ACCENT.primary}
+            />
+            <Metric
+              icon={<ShowChartRoundedIcon />}
+              label={t('economy.sentiment')}
+              value={signedNumber.format(economy.market_sentiment)}
+              accent={marketAccent}
+            />
+          </Box>
         </Box>
 
         {economy.active_events.length > 0 && (
-          <Stack spacing={0.35} sx={{ px: 1, mt: 0.8 }}>
-            {economy.active_events.map((event) => (
-              <Typography key={event.kind} variant="caption" color="warning.light">
-                {t(`economy.events.${event.kind}`)} · {t('economy.weeksRemaining', {
-                  count: event.remaining_weeks,
-                })}
-              </Typography>
-            ))}
-          </Stack>
+          <Box component="section" aria-label={t('economy.activeEvents')}>
+            <SectionHeading
+              icon={<BoltRoundedIcon />}
+              title={t('economy.activeEvents')}
+              accent={ACCENT.warning}
+            />
+            <Stack
+              component="ul"
+              spacing={0.5}
+              sx={{ listStyle: 'none', p: 0, m: 0, mt: 0.6 }}
+            >
+              {economy.active_events.map((event) => {
+                const accent = FAVORABLE_EVENTS.has(event.kind)
+                  ? ACCENT.success
+                  : ACCENT.warning
+                return (
+                  <InformationRow
+                    key={event.kind}
+                    icon={<BoltRoundedIcon />}
+                    title={t(`economy.events.${event.kind}`)}
+                    detail={t('economy.weeksRemaining', {
+                      count: event.remaining_weeks,
+                    })}
+                    accent={accent}
+                  />
+                )
+              })}
+            </Stack>
+          </Box>
         )}
 
         {economy.last_company_action && economy.last_company_instrument_id && (
-          <Typography variant="caption" color="secondary.light" sx={{ px: 1, mt: 0.8, display: 'block' }}>
-            {t('economy.companyAction', {
-              company: companyName,
-              action: t(`economy.companyActions.${economy.last_company_action}`),
-            })}
-          </Typography>
+          <Box component="section" aria-label={t('economy.companyNews')}>
+            <SectionHeading
+              icon={<BusinessRoundedIcon />}
+              title={t('economy.companyNews')}
+              accent={ACCENT.secondary}
+            />
+            <Stack component="ul" sx={{ listStyle: 'none', p: 0, m: 0, mt: 0.6 }}>
+              <InformationRow
+                icon={<BusinessRoundedIcon />}
+                title={companyName ?? economy.last_company_instrument_id}
+                detail={t(`economy.companyActions.${economy.last_company_action}`)}
+                accent={companyActionAccent(economy.last_company_action)}
+              />
+            </Stack>
+          </Box>
         )}
 
         {economy.last_market_movements.length > 0 && (
-          <Stack spacing={0.35} sx={{ px: 1, mt: 0.8 }}>
-            <Stack direction="row" spacing={0.5} alignItems="center">
-              <InsightsRoundedIcon sx={{ fontSize: 16 }} color="secondary" />
-              <Typography variant="caption" fontWeight={800}>
-                {t('economy.marketPulse')}
-              </Typography>
+          <Box component="section" aria-label={t('economy.marketPulse')}>
+            <SectionHeading
+              icon={<InsightsRoundedIcon />}
+              title={t('economy.marketPulse')}
+              accent={ACCENT.info}
+            />
+            <Stack
+              component="ul"
+              spacing={0.5}
+              sx={{ listStyle: 'none', p: 0, m: 0, mt: 0.6 }}
+            >
+              {economy.last_market_movements.slice(0, 3).map((movement) => {
+                const instrument = instrumentById.get(movement.instrument_id)
+                const name = instrument
+                  ? pack.messages[instrument.name_key] ?? t(instrument.name_key)
+                  : movement.instrument_id
+                const accent =
+                  movement.change_basis_points > 0
+                    ? ACCENT.success
+                    : movement.change_basis_points < 0
+                      ? ACCENT.danger
+                      : ACCENT.neutral
+                return (
+                  <MarketMovementRow
+                    key={movement.instrument_id}
+                    name={name}
+                    cause={t(`economy.causes.${movement.primary_cause}`)}
+                    value={signedBasisPoints(movement.change_basis_points)}
+                    direction={Math.sign(movement.change_basis_points)}
+                    accent={accent}
+                  />
+                )
+              })}
             </Stack>
-            {economy.last_market_movements.slice(0, 3).map((movement) => {
-              const instrument = instrumentById.get(movement.instrument_id)
-              const name = instrument
-                ? pack.messages[instrument.name_key] ?? t(instrument.name_key)
-                : movement.instrument_id
-              return (
-                <Typography key={movement.instrument_id} variant="caption">
-                  {name}: {basisPoints(movement.change_basis_points)} ·{' '}
-                  {t(`economy.causes.${movement.primary_cause}`)}
-                </Typography>
-              )
-            })}
-          </Stack>
+          </Box>
         )}
+      </Stack>
+    </Paper>
+  )
+}
+
+function Metric({
+  icon,
+  label,
+  value,
+  accent,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  accent: string
+}) {
+  return (
+    <Paper
+      component="div"
+      variant="outlined"
+      sx={{
+        position: 'relative',
+        overflow: 'hidden',
+        minWidth: 0,
+        minHeight: { xs: 64, sm: 66 },
+        px: { xs: 0.7, sm: 0.85 },
+        py: 0.7,
+        borderRadius: 1.75,
+        borderColor: `${accent}45`,
+        background: `linear-gradient(135deg, ${accent}1a 0%, rgba(29,25,49,.95) 48%, rgba(22,19,39,.98) 100%)`,
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,.045)',
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          inset: '10px auto 10px 0',
+          width: 3,
+          borderRadius: '0 4px 4px 0',
+          bgcolor: accent,
+          boxShadow: `0 0 10px ${accent}80`,
+        },
+      }}
+    >
+      <Stack direction="row" spacing={0.65} alignItems="center" sx={{ height: '100%' }}>
+        <Box
+          aria-hidden
+          sx={{
+            width: { xs: 28, sm: 32 },
+            height: { xs: 28, sm: 32 },
+            flex: '0 0 auto',
+            display: 'grid',
+            placeItems: 'center',
+            borderRadius: 1.25,
+            color: accent,
+            bgcolor: `${accent}1d`,
+            border: `1px solid ${accent}32`,
+            '& svg': { fontSize: { xs: 16, sm: 18 } },
+          }}
+        >
+          {icon}
+        </Box>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography
+            component="dt"
+            color="text.secondary"
+            sx={{ fontSize: '0.75rem', lineHeight: 1.15 }}
+          >
+            {label}
+          </Typography>
+          <Typography
+            component="dd"
+            fontWeight={900}
+            sx={{
+              m: 0,
+              mt: 0.1,
+              color: accent,
+              fontSize: { xs: '0.9rem', sm: '1rem' },
+              lineHeight: 1.2,
+              textShadow: `0 0 14px ${accent}20`,
+            }}
+          >
+            {value}
+          </Typography>
+        </Box>
+      </Stack>
+    </Paper>
+  )
+}
+
+function SectionHeading({
+  icon,
+  title,
+  accent,
+}: {
+  icon: ReactNode
+  title: string
+  accent: string
+}) {
+  return (
+    <Stack direction="row" spacing={0.55} alignItems="center">
+      <Box aria-hidden sx={{ display: 'grid', placeItems: 'center', color: accent, '& svg': { fontSize: 17 } }}>
+        {icon}
+      </Box>
+      <Typography
+        variant="overline"
+        fontWeight={850}
+        sx={{ color: 'text.secondary', lineHeight: 1.2, letterSpacing: '.08em' }}
+      >
+        {title}
+      </Typography>
+      <Box
+        aria-hidden
+        sx={{
+          height: '1px',
+          flex: 1,
+          background: `linear-gradient(90deg, ${accent}55, transparent)`,
+        }}
+      />
+    </Stack>
+  )
+}
+
+function InformationRow({
+  icon,
+  title,
+  detail,
+  accent,
+}: {
+  icon: ReactNode
+  title: string
+  detail: string
+  accent: string
+}) {
+  return (
+    <Box
+      component="li"
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: 'auto minmax(0, 1fr)',
+        alignItems: 'center',
+        gap: 0.7,
+        minWidth: 0,
+        px: 0.75,
+        py: 0.6,
+        borderRadius: 1.5,
+        borderLeft: `3px solid ${accent}`,
+        bgcolor: `${accent}0d`,
+      }}
+    >
+      <Box
+        aria-hidden
+        sx={{
+          width: 25,
+          height: 25,
+          display: 'grid',
+          placeItems: 'center',
+          borderRadius: '50%',
+          color: accent,
+          bgcolor: `${accent}1d`,
+          '& svg': { fontSize: 15 },
+        }}
+      >
+        {icon}
+      </Box>
+      <Box minWidth={0}>
+        <Typography variant="body2" fontWeight={800} sx={{ lineHeight: 1.25 }}>
+          {title}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.3 }}>
+          {detail}
+        </Typography>
       </Box>
     </Box>
   )
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function MarketMovementRow({
+  name,
+  cause,
+  value,
+  direction,
+  accent,
+}: {
+  name: string
+  cause: string
+  value: string
+  direction: number
+  accent: string
+}) {
   return (
-    <Box sx={{ minWidth: 0, p: 0.55, borderRadius: 1.25, bgcolor: 'rgba(255,255,255,.045)' }}>
-      <Typography variant="caption" color="text.secondary" noWrap display="block">
-        {label}
-      </Typography>
-      <Typography variant="body2" fontWeight={850}>
+    <Box
+      component="li"
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+        alignItems: 'center',
+        gap: 0.7,
+        minWidth: 0,
+        px: 0.75,
+        py: 0.6,
+        borderRadius: 1.5,
+        borderLeft: `3px solid ${accent}`,
+        bgcolor: `${accent}0d`,
+      }}
+    >
+      <Box
+        aria-hidden
+        sx={{
+          width: 25,
+          height: 25,
+          display: 'grid',
+          placeItems: 'center',
+          borderRadius: '50%',
+          color: accent,
+          bgcolor: `${accent}1d`,
+          '& svg': { fontSize: 15 },
+        }}
+      >
+        {direction < 0 ? (
+          <TrendingDownRoundedIcon />
+        ) : direction > 0 ? (
+          <TrendingUpRoundedIcon />
+        ) : (
+          <TrendingFlatRoundedIcon />
+        )}
+      </Box>
+      <Box minWidth={0}>
+        <Typography
+          variant="body2"
+          fontWeight={800}
+          sx={{ lineHeight: 1.2, overflowWrap: 'anywhere' }}
+        >
+          {name}
+        </Typography>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          display="block"
+          sx={{ lineHeight: 1.25, overflowWrap: 'anywhere' }}
+        >
+          {cause}
+        </Typography>
+      </Box>
+      <Typography fontWeight={900} sx={{ color: accent, whiteSpace: 'nowrap' }}>
         {value}
       </Typography>
     </Box>
   )
 }
 
-function basisPoints(value: number): string {
-  return `${(value / 100).toLocaleString(undefined, {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 2,
-  })}%`
+function weatherIcon(condition: WeatherCondition): ReactElement {
+  switch (condition) {
+    case 'clear':
+      return <WbSunnyRoundedIcon />
+    case 'rain':
+      return <WaterDropRoundedIcon />
+    case 'storm':
+      return <ThunderstormRoundedIcon />
+    case 'heatwave':
+      return <DeviceThermostatRoundedIcon />
+    case 'cold_wave':
+      return <AcUnitRoundedIcon />
+    case 'drought':
+      return <LandscapeRoundedIcon />
+  }
 }
 
-function signed(value: number): string {
-  return value > 0 ? `+${value}` : `${value}`
+function companyActionAccent(action: string): string {
+  if (action === 'expansion' || action === 'new_contract') return ACCENT.success
+  if (action === 'dividend_warning' || action === 'labor_conflict') {
+    return ACCENT.danger
+  }
+  if (action === 'debt_restructuring') return ACCENT.warning
+  return ACCENT.secondary
 }

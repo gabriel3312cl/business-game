@@ -215,10 +215,14 @@ async def test_active_auction_participant_can_request_a_loan_off_turn(
 
     async with session.begin():
         persisted = await GameRepository(session).get(game.id, for_update=True)
+        auction_id = uuid4()
         persisted.active_auction = AuctionState(
+            id=auction_id,
             property_id="property_03",
+            phase="bidding",
             minimum_bid=42,
             eligible_player_ids=[host.id, guest.id],
+            ready_player_ids=[host.id],
             passed_player_ids=[guest.id],
         )
         await GameRepository(session).save(persisted, persisted.event_sequence)
@@ -230,19 +234,28 @@ async def test_active_auction_participant_can_request_a_loan_off_turn(
         await games.execute(
             game.id,
             guest.id,
-            RequestLoanCommand(action="request_loan", amount=100),
+            RequestLoanCommand(
+                action="request_loan",
+                amount=100,
+                auction_id=auction_id,
+            ),
         )
 
     async with session.begin():
         persisted = await GameRepository(session).get(game.id, for_update=True)
         assert persisted.active_auction is not None
         persisted.active_auction.passed_player_ids = []
+        persisted.active_auction.ready_player_ids.append(guest.id)
         await GameRepository(session).save(persisted, persisted.event_sequence)
 
     game = await games.execute(
         game.id,
         guest.id,
-        RequestLoanCommand(action="request_loan", amount=100),
+        RequestLoanCommand(
+            action="request_loan",
+            amount=100,
+            auction_id=auction_id,
+        ),
     )
 
     guest_state = next(player for player in game.players if player.user_id == guest.id)
@@ -257,7 +270,11 @@ async def test_active_auction_participant_can_request_a_loan_off_turn(
         await games.execute(
             game.id,
             guest.id,
-            RequestLoanCommand(action="request_loan", amount=100),
+            RequestLoanCommand(
+                action="request_loan",
+                amount=100,
+                auction_id=auction_id,
+            ),
         )
 
 

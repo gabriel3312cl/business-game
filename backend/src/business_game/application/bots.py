@@ -45,6 +45,7 @@ from business_game.domain.models import (
     PayJailFineCommand,
     PlayerState,
     ProposeRentDebtPlanCommand,
+    ReadyAuctionCommand,
     RejectRentDebtPlanCommand,
     RejectTradeCommand,
     RentDebtPlanTemplate,
@@ -421,16 +422,26 @@ class BotPolicy:
                 )
             return None
         if game.active_auction is not None:
+            auction = game.active_auction
+            if auction.id is None:
+                return None
             for player_id in game.active_auction.eligible_player_ids:
                 bot = self._bot(game, player_id)
                 if (
                     bot is not None
                     and player_id != game.active_auction.current_bidder_id
                     and player_id not in game.active_auction.passed_player_ids
+                    and (
+                        game.active_auction.phase == "bidding"
+                        or player_id not in game.active_auction.ready_player_ids
+                    )
                 ):
                     return BotAction(
                         player_id,
-                        PassAuctionCommand(action="pass_auction"),
+                        PassAuctionCommand(
+                            action="pass_auction",
+                            auction_id=auction.id,
+                        ),
                         "safeguard_pass_auction",
                     )
             return None
@@ -505,7 +516,7 @@ class BotPolicy:
         engine: NegotiationEngine,
     ) -> BotAction | None:
         auction = game.active_auction
-        if auction is None:
+        if auction is None or auction.id is None:
             return None
         tile = self._tile(pack, auction.property_id)
         for player_id in auction.eligible_player_ids:
@@ -515,6 +526,14 @@ class BotPolicy:
                 or bot.bankrupt
                 or player_id == auction.current_bidder_id
                 or player_id in auction.passed_player_ids
+                or (
+                    auction.phase == "idle"
+                    and player_id in auction.ready_player_ids
+                )
+                or (
+                    auction.phase == "bidding"
+                    and player_id not in auction.ready_player_ids
+                )
             ):
                 continue
             profile = self._profile(bot)
@@ -537,17 +556,42 @@ class BotPolicy:
             can_place_deposit = (
                 held_deposit > 0 or bot.balance >= auction.deposit_amount
             )
+            if auction.phase == "idle":
+                if can_place_deposit and auction.minimum_bid <= max_bid:
+                    return BotAction(
+                        bot.user_id,
+                        ReadyAuctionCommand(
+                            action="ready_auction",
+                            auction_id=auction.id,
+                        ),
+                        "ready_for_auction_within_valuation",
+                    )
+                return BotAction(
+                    bot.user_id,
+                    PassAuctionCommand(
+                        action="pass_auction",
+                        auction_id=auction.id,
+                    ),
+                    "decline_auction_before_bidding",
+                )
             if can_place_deposit and amount <= max_bid:
                 return BotAction(
                     bot.user_id,
-                    BidCommand(action="bid", amount=amount),
+                    BidCommand(
+                        action="bid",
+                        auction_id=auction.id,
+                        amount=amount,
+                    ),
                     "bid_completes_group"
                     if engine.completes_group(bot.user_id, tile)
                     else "bid_within_valuation",
                 )
             return BotAction(
                 bot.user_id,
-                PassAuctionCommand(action="pass_auction"),
+                PassAuctionCommand(
+                    action="pass_auction",
+                    auction_id=auction.id,
+                ),
                 "auction_exceeds_valuation",
             )
         return None

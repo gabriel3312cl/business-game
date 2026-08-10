@@ -47,6 +47,7 @@ from business_game.domain.models import (
     PlayerState,
     ProposeRentDebtPlanCommand,
     ProposeTradeCommand,
+    ReadyAuctionCommand,
     RejectRentDebtPlanCommand,
     RejectTradeCommand,
     RentDebtPlanProposal,
@@ -365,9 +366,12 @@ async def test_personalities_bid_to_different_valuation_limits(
     game.players = [bot, human]
     game.status = GameStatus.PLAYING
     game.active_auction = AuctionState(
+        id=uuid4(),
         property_id=tile.id,
+        phase="bidding",
         current_bid=tile.price or 0,
         eligible_player_ids=[bot.user_id, human.user_id],
+        ready_player_ids=[bot.user_id, human.user_id],
     )
 
     conservative = BotPolicy().choose_action(game, pack)
@@ -379,6 +383,44 @@ async def test_personalities_bid_to_different_valuation_limits(
     assert aggressive is not None
     assert isinstance(aggressive.command, BidCommand)
     assert aggressive.command.amount > game.active_auction.current_bid
+
+
+async def test_bots_confirm_or_decline_before_auction_bidding(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    host = await create_user(session, "ready-bot-host@example.com", "Host")
+    game = await GameService(session, PackLoader(packs_dir)).create(
+        "classic-demo",
+        host,
+    )
+    pack = PackLoader(packs_dir).load("classic-demo")
+    tile = next(tile for tile in pack.board.tiles if tile.is_purchasable and tile.price)
+    human = PlayerState(user_id=game.id, display_name="Human")
+    bot = PlayerState(
+        user_id=host.id,
+        display_name="Bot",
+        is_bot=True,
+        bot_personality=BotPersonality.AGGRESSIVE,
+    )
+    game.players = [bot, human]
+    game.status = GameStatus.PLAYING
+    game.active_auction = AuctionState(
+        id=uuid4(),
+        property_id=tile.id,
+        minimum_bid=1,
+        eligible_player_ids=[bot.user_id, human.user_id],
+    )
+
+    ready = BotPolicy().choose_action(game, pack)
+    assert ready is not None
+    assert isinstance(ready.command, ReadyAuctionCommand)
+
+    bot.bot_personality = BotPersonality.CONSERVATIVE
+    game.active_auction.minimum_bid = bot.balance + 1
+    declined = BotPolicy().choose_action(game, pack)
+    assert declined is not None
+    assert isinstance(declined.command, PassAuctionCommand)
 
 
 def test_bot_borrows_to_resolve_debt_when_credit_is_convenient(
@@ -958,8 +1000,11 @@ async def test_runner_falls_back_in_time_for_ai_bot_auction(
         persisted = await GameRepository(session).get(game.id, for_update=True)
         previous_sequence = len(persisted.events)
         persisted.active_auction = AuctionState(
+            id=uuid4(),
             property_id=tile.id,
+            phase="bidding",
             eligible_player_ids=[host.id, bot.user_id],
+            ready_player_ids=[host.id, bot.user_id],
             bid_deadline=datetime.now(UTC) + timedelta(seconds=5),
         )
         await GameRepository(session).save(persisted, previous_sequence)

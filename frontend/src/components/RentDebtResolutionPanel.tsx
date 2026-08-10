@@ -118,19 +118,18 @@ export function RentDebtResolutionPanel({
     )
     .map(([propertyId]) => propertyId)
   const debtorPropertyGroups = groupPropertyIds(pack, debtorPropertyIds)
-  const propertyName = (propertyId: string) => {
-    const tile = pack.board.tiles.find((candidate) => candidate.id === propertyId)
-    return tile ? pack.messages[tile.name_key] : propertyId
-  }
   const propertyContext = (propertyId: string) => {
     const tile = pack.board.tiles.find((candidate) => candidate.id === propertyId)
     const group = pack.board.groups?.find(
       (candidate) => candidate.id === tile?.group,
     )
+    const groupTiles = tile?.group
+      ? pack.board.tiles.filter((candidate) => candidate.group === tile.group)
+      : []
     const ownedInGroup = tile?.group
-      ? pack.board.tiles.filter(
+      ? groupTiles.filter(
           (candidate) =>
-            candidate.group === tile.group && game.owners[candidate.id] === user.id,
+            game.owners[candidate.id] === user.id,
         ).length
       : 0
     return {
@@ -140,6 +139,7 @@ export function RentDebtResolutionPanel({
         : t('rentDebt.noPropertyGroup'),
       color: group?.color ?? tile?.color ?? '#8f8a9d',
       ownedInGroup,
+      totalInGroup: groupTiles.length,
     }
   }
 
@@ -182,13 +182,55 @@ export function RentDebtResolutionPanel({
             </Typography>
           )}
           {proposal.requested_property_ids.length > 0 && (
-            <Typography variant="caption" fontWeight={700}>
-              {t('rentDebt.proposalProperties', {
-                properties: proposal.requested_property_ids
-                  .map(propertyName)
-                  .join(', '),
+            <Stack spacing={0.65}>
+              <Typography variant="caption" fontWeight={800}>
+                {t('rentDebt.requestProperties')}
+              </Typography>
+              {proposal.requested_property_ids.map((propertyId) => {
+                const context = propertyContext(propertyId)
+                return (
+                  <Box
+                    key={propertyId}
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: '7px minmax(0, 1fr)',
+                      overflow: 'hidden',
+                      border: `1px solid ${context.color}55`,
+                      borderRadius: 1.25,
+                      bgcolor: `${context.color}10`,
+                    }}
+                  >
+                    <Box
+                      aria-hidden="true"
+                      sx={{
+                        bgcolor: context.color,
+                        boxShadow: `0 0 10px ${context.color}77`,
+                      }}
+                    />
+                    <Stack spacing={0.15} sx={{ px: 1, py: 0.7, minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={850}>
+                        {context.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {context.groupName}
+                      </Typography>
+                      {context.totalInGroup > 0 && (
+                        <Typography
+                          variant="caption"
+                          fontWeight={750}
+                          sx={{ color: context.color }}
+                        >
+                          {t('rentDebt.proposalPropertyGroupProgress', {
+                            owned: context.ownedInGroup,
+                            total: context.totalInGroup,
+                          })}
+                        </Typography>
+                      )}
+                    </Stack>
+                  </Box>
+                )
               })}
-            </Typography>
+            </Stack>
           )}
         </Stack>
       )}

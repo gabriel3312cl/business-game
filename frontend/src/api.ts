@@ -8,6 +8,7 @@ import type {
   EconomicDifficulty,
   GameCommand,
   GameState,
+  GameViewPreferenceSettings,
   OptionalRules,
   PanelLayoutPreferences,
   PackManifest,
@@ -231,6 +232,15 @@ export const api = {
       {
         method: 'PATCH',
         body: JSON.stringify({ player_sort: playerSort }),
+      },
+      true,
+    ),
+  updateGameView: (gameView: GameViewPreferenceSettings) =>
+    request<UserPreferences>(
+      '/users/me/preferences',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ game_view: gameView }),
       },
       true,
     ),

@@ -7,6 +7,12 @@ import ChevronRightRoundedIcon from '@mui/icons-material/ChevronRightRounded'
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import ForumRoundedIcon from '@mui/icons-material/ForumRounded'
+import FitScreenRoundedIcon from '@mui/icons-material/FitScreenRounded'
+import CenterFocusStrongRoundedIcon from '@mui/icons-material/CenterFocusStrongRounded'
+import GridViewRoundedIcon from '@mui/icons-material/GridViewRounded'
+import TextFieldsRoundedIcon from '@mui/icons-material/TextFieldsRounded'
+import DragIndicatorRoundedIcon from '@mui/icons-material/DragIndicatorRounded'
+import FastForwardRoundedIcon from '@mui/icons-material/FastForwardRounded'
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
 import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded'
 import LayersRoundedIcon from '@mui/icons-material/LayersRounded'
@@ -20,8 +26,11 @@ import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded'
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded'
 import TuneRoundedIcon from '@mui/icons-material/TuneRounded'
 import VerticalAlignCenterRoundedIcon from '@mui/icons-material/VerticalAlignCenterRounded'
+import VisibilityOffRoundedIcon from '@mui/icons-material/VisibilityOffRounded'
+import VisibilityRoundedIcon from '@mui/icons-material/VisibilityRounded'
 import {
   Alert,
+  Badge,
   BottomNavigation,
   BottomNavigationAction,
   Box,
@@ -38,8 +47,10 @@ import {
   FormControlLabel,
   IconButton,
   MenuItem,
+  Paper,
   Select,
   Stack,
+  Switch,
   Tab,
   Tabs,
   ToggleButton,
@@ -51,6 +62,8 @@ import {
 } from '@mui/material'
 import {
   type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   lazy,
   Suspense,
   useCallback,
@@ -75,6 +88,7 @@ import { GameChatPanel } from '../chat/GameChatPanel'
 import type { ChatMessage } from '../chat/types'
 import { useGameChat } from '../chat/useGameChat'
 import { createCommandId } from '../commandId'
+import { mergeGameState } from '../gameState'
 import type {
   AutomationPreferenceSettings,
   BoardHistoricalStats,
@@ -83,6 +97,7 @@ import type {
   ContentPack,
   GameCommand,
   GameState,
+  GameViewPreferenceSettings,
   AudioPreferenceSettings,
   ManagementPanelId,
   PanelId,
@@ -96,8 +111,10 @@ import type {
   WorkspacePanelLayoutPreferences,
   WorkspacePanelPlacement,
   WorkspacePanelWindowGeometry,
+  MobileWorkspacePanel,
 } from '../types'
 import { nextAutomationCommand } from '../gameAutomation'
+import { shouldBufferParticipantPresentation } from './botPresentation'
 import { BotManagementPanel } from './BotManagementPanel'
 import { BankPanel } from './BankPanel'
 import { GameActionCenter } from './GameActionCenter'
@@ -123,9 +140,15 @@ import {
   type MotionAudioCue,
   type MotionSettlement,
 } from './gameMotion'
+import { presentedGameSnapshot } from './gamePresentation'
+import {
+  DEFAULT_GAME_VIEW_PREFERENCES,
+  normalizeGameViewPreferences,
+} from './gameViewPreferences'
 import { GamePlayersPanel } from './GamePlayersPanel'
 import { FloatingWorkspacePanel } from './FloatingWorkspacePanel'
 import { automaticPlayerAppearance } from './playerAppearance'
+import { shouldShowPlayerModal } from './playerModalVisibility'
 import { GameTradePanel, type TradeDraft } from './GameTradePanel'
 import { LobbySettingsPanel } from './LobbySettingsPanel'
 import {
@@ -153,6 +176,12 @@ import {
   normalizeWorkspacePanelLayout,
   placeWorkspacePanel,
 } from './workspacePanelLayout'
+import {
+  countWorkspaceEventNotifications,
+  EMPTY_WORKSPACE_NOTIFICATION_COUNTS,
+  type WorkspaceNotificationCounts,
+  type WorkspaceNotificationPanel,
+} from './workspaceNotifications'
 
 const GameAnalyticsDashboard = lazy(() =>
   import('./GameAnalyticsDashboard').then((module) => ({
@@ -191,7 +220,7 @@ type ConnectionState =
   | 'reconnecting'
   | 'disconnected'
 
-type MobilePanel = 'room' | 'players' | 'manage' | 'heatmap' | 'chat' | null
+type MobilePanel = MobileWorkspacePanel
 type PanelLayout = Omit<PanelLayoutPreferences, 'rail'> & {
   rail: WorkspacePanelLayoutPreferences
 }
@@ -220,6 +249,7 @@ const PANEL_LAYOUT_STORAGE_PREFIX = 'business-game:panel-layout:v1:'
 const TOKEN_APPEARANCE_STORAGE_PREFIX = 'business-game:token-appearance:v1:'
 const VISUAL_EFFECTS_STORAGE_PREFIX = 'business-game:visual-effects:v1:'
 const PLAYER_SORT_STORAGE_PREFIX = 'business-game:player-sort:v1:'
+const GAME_VIEW_STORAGE_PREFIX = 'business-game:game-view:v1:'
 const WORKSPACE_PANEL_GROUPS = [
   { id: 'status', panelIds: ['room', 'players', 'chat'] },
   {
@@ -384,6 +414,33 @@ function isPlayerSortOption(value: unknown): value is PlayerSortOption {
   )
 }
 
+function readGameView(userId: string): GameViewPreferenceSettings {
+  try {
+    const raw = localStorage.getItem(`${GAME_VIEW_STORAGE_PREFIX}${userId}`)
+    return raw
+      ? normalizeGameViewPreferences(
+          JSON.parse(raw) as Partial<GameViewPreferenceSettings>,
+        )
+      : DEFAULT_GAME_VIEW_PREFERENCES
+  } catch {
+    return DEFAULT_GAME_VIEW_PREFERENCES
+  }
+}
+
+function writeGameView(
+  userId: string,
+  preferences: GameViewPreferenceSettings,
+): void {
+  try {
+    localStorage.setItem(
+      `${GAME_VIEW_STORAGE_PREFIX}${userId}`,
+      JSON.stringify(preferences),
+    )
+  } catch {
+    // PostgreSQL remains authoritative when browser storage is unavailable.
+  }
+}
+
 function isPanelId(value: unknown): value is PanelId {
   return typeof value === 'string' && PANEL_IDS.includes(value as PanelId)
 }
@@ -426,6 +483,20 @@ export function GameSessionPanel({
   const socketRef = useRef<Socket | null>(null)
   const refreshingSocketRef = useRef(false)
   const [busy, setBusy] = useState(false)
+  const debtAlertRef = useRef<HTMLDivElement | null>(null)
+  const debtAlertDragRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    startLeft: number
+    startTop: number
+    width: number
+    height: number
+  } | null>(null)
+  const [debtAlertPosition, setDebtAlertPosition] = useState<{
+    x: number
+    y: number
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('connecting')
@@ -433,14 +504,26 @@ export function GameSessionPanel({
   const [gameResultOpen, setGameResultOpen] = useState(
     game.status === 'finished',
   )
-  const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null)
+  const [gameView, setGameView] = useState<GameViewPreferenceSettings>(() =>
+    readGameView(user.id),
+  )
+  const gameViewRef = useRef(gameView)
+  const gameViewChangeRef = useRef(0)
+  const latestAuthoritativeGameRef = useRef(game)
+  const bufferedPresentationGameRef = useRef<GameState | null>(null)
+  const presentationOmissionActiveRef = useRef(false)
+  const suppressNextOwnPresentationRef = useRef(false)
+  const [presentationOmissionActive, setPresentationOmissionActive] =
+    useState(false)
+  const [presentationSettingsOpen, setPresentationSettingsOpen] = useState(false)
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>(gameView.mobile_panel)
   const [mobileManagementPanel, setMobileManagementPanel] =
-    useState<ManagementPanelId>('properties')
+    useState<ManagementPanelId>(gameView.mobile_management_panel)
   const [panelLayout, setPanelLayout] = useState<PanelLayout>(() =>
     readPanelLayout(user.id),
   )
   const [tabletWorkspacePanel, setTabletWorkspacePanel] =
-    useState<WorkspacePanelId>(() => panelLayout.rail.visible[0] ?? 'properties')
+    useState<WorkspacePanelId>(gameView.tablet_workspace_panel)
   const [layoutEditing, setLayoutEditing] = useState(false)
   const [tokenAppearance, setTokenAppearance] =
     useState<TokenAppearanceSettings | null>(() => readTokenAppearance(user.id))
@@ -462,7 +545,7 @@ export function GameSessionPanel({
   const playerSortRef = useRef(playerSort)
   const playerSortChangeRef = useRef(0)
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
-  const [analyticsOpen, setAnalyticsOpen] = useState(false)
+  const [analyticsOpen, setAnalyticsOpen] = useState(gameView.analytics_open)
   const [highlightedPropertyId, setHighlightedPropertyId] = useState<
     string | null
   >(null)
@@ -481,18 +564,156 @@ export function GameSessionPanel({
     useState<WorkspacePanelId | null>(null)
   const [draggedManagementPanel, setDraggedManagementPanel] =
     useState<ManagementPanelId | null>(null)
+  const [workspaceNotificationCounts, setWorkspaceNotificationCounts] =
+    useState<WorkspaceNotificationCounts>(() => ({
+      ...EMPTY_WORKSPACE_NOTIFICATION_COUNTS,
+    }))
+  const workspaceNotificationCursorRef = useRef({
+    gameId: game.id,
+    sequence: game.event_sequence,
+  })
+  const workspaceChatNotificationCursorRef = useRef({
+    gameId: game.id,
+    messageId: 0,
+  })
+  const bufferedPresentationChatMessagesRef = useRef<ChatMessage[]>([])
+  const clampDebtAlertPosition = useCallback(
+    (x: number, y: number, width: number, height: number) => ({
+      x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - width - 8)),
+      y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - height - 8)),
+    }),
+    [],
+  )
+  const startDebtAlertDrag = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (!isTablet || !debtAlertRef.current) return
+      event.preventDefault()
+      event.stopPropagation()
+      const bounds = debtAlertRef.current.getBoundingClientRect()
+      event.currentTarget.setPointerCapture(event.pointerId)
+      debtAlertDragRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        startLeft: bounds.left,
+        startTop: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+      }
+      setDebtAlertPosition({ x: bounds.left, y: bounds.top })
+    },
+    [isTablet],
+  )
+  const moveDebtAlert = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      const drag = debtAlertDragRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+      setDebtAlertPosition(
+        clampDebtAlertPosition(
+          drag.startLeft + event.clientX - drag.startX,
+          drag.startTop + event.clientY - drag.startY,
+          drag.width,
+          drag.height,
+        ),
+      )
+    },
+    [clampDebtAlertPosition],
+  )
+  const finishDebtAlertDrag = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      const drag = debtAlertDragRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      }
+      debtAlertDragRef.current = null
+    },
+    [],
+  )
+  const moveDebtAlertWithKeyboard = useCallback(
+    (event: ReactKeyboardEvent<HTMLElement>) => {
+      if (!isTablet || !debtAlertRef.current) return
+      const delta = event.shiftKey ? 64 : 24
+      const horizontal =
+        event.key === 'ArrowLeft' ? -delta : event.key === 'ArrowRight' ? delta : 0
+      const vertical =
+        event.key === 'ArrowUp' ? -delta : event.key === 'ArrowDown' ? delta : 0
+      if (horizontal === 0 && vertical === 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      const bounds = debtAlertRef.current.getBoundingClientRect()
+      setDebtAlertPosition(
+        clampDebtAlertPosition(
+          bounds.left + horizontal,
+          bounds.top + vertical,
+          bounds.width,
+          bounds.height,
+        ),
+      )
+    },
+    [clampDebtAlertPosition, isTablet],
+  )
   useEffect(() => {
     if (!layoutEditing) {
       setDraggedWorkspacePanel(null)
       setDraggedManagementPanel(null)
     }
   }, [layoutEditing])
+  useEffect(() => {
+    setDebtAlertPosition(null)
+    debtAlertDragRef.current = null
+  }, [game.active_debt?.debtor_id, game.active_debt?.tile_id, game.id])
   const chat = useGameChat(game.id)
   const receiveChatMessage = chat.receive
+  const flushBufferedPresentationChatMessages = useCallback(() => {
+    const messages = bufferedPresentationChatMessagesRef.current
+    if (messages.length === 0) return
+    bufferedPresentationChatMessagesRef.current = []
+    let notificationCount = 0
+    const cursor = workspaceChatNotificationCursorRef.current
+    for (const message of messages) {
+      receiveChatMessage(message)
+      if (cursor.gameId !== message.game_id) {
+        cursor.gameId = message.game_id
+        cursor.messageId = 0
+      }
+      if (message.id <= cursor.messageId) continue
+      cursor.messageId = message.id
+      notificationCount += 1
+    }
+    if (notificationCount > 0) {
+      setWorkspaceNotificationCounts((current) => ({
+        ...current,
+        chat: current.chat + notificationCount,
+      }))
+    }
+  }, [receiveChatMessage])
   const receiveChatMessageWithAudio = useCallback(
     (message: ChatMessage) => {
+      const author = latestAuthoritativeGameRef.current.players.find(
+        (player) => player.user_id === message.author_id,
+      )
+      const authorPresentationOmitted = author?.is_bot
+        ? gameViewRef.current.omit_bot_presentations
+        : author?.user_id !== user.id &&
+          gameViewRef.current.omit_other_human_presentations
+      if (presentationOmissionActiveRef.current && authorPresentationOmitted) {
+        bufferedPresentationChatMessagesRef.current.push(message)
+        return
+      }
       receiveChatMessage(message)
       if (message.author_id === user.id) return
+      const cursor = workspaceChatNotificationCursorRef.current
+      if (cursor.gameId !== message.game_id) {
+        cursor.gameId = message.game_id
+        cursor.messageId = 0
+      }
+      if (message.id <= cursor.messageId) return
+      cursor.messageId = message.id
+      setWorkspaceNotificationCounts((current) => ({
+        ...current,
+        chat: current.chat + 1,
+      }))
       const mention = `@${user.display_name}`.toLocaleLowerCase()
       gameAudio.play(
         message.body.toLocaleLowerCase().includes(mention)
@@ -503,6 +724,52 @@ export function GameSessionPanel({
     },
     [receiveChatMessage, user.display_name, user.id],
   )
+  useEffect(() => {
+    const openPanels = new Set<WorkspaceNotificationPanel>()
+    if (isWideWorkspace) {
+      for (const panelId of panelLayout.rail.visible) {
+        if (panelId === 'trades' || panelId === 'debts' || panelId === 'chat') {
+          openPanels.add(panelId)
+        }
+      }
+    } else if (isTablet) {
+      if (
+        tabletWorkspacePanel === 'trades' ||
+        tabletWorkspacePanel === 'debts' ||
+        tabletWorkspacePanel === 'chat'
+      ) {
+        openPanels.add(tabletWorkspacePanel)
+      }
+    } else if (mobilePanel === 'chat') {
+      openPanels.add('chat')
+    } else if (
+      mobilePanel === 'manage' &&
+      (mobileManagementPanel === 'trades' || mobileManagementPanel === 'debts')
+    ) {
+      openPanels.add(mobileManagementPanel)
+    }
+    if (openPanels.size === 0) return
+    setWorkspaceNotificationCounts((current) => {
+      if ([...openPanels].every((panelId) => current[panelId] === 0)) {
+        return current
+      }
+      const next = { ...current }
+      for (const panelId of openPanels) next[panelId] = 0
+      return next
+    })
+  }, [
+    chat.messages.length,
+    game.event_sequence,
+    isTablet,
+    isWideWorkspace,
+    mobileManagementPanel,
+    mobilePanel,
+    panelLayout.rail.visible,
+    tabletWorkspacePanel,
+    workspaceNotificationCounts.chat,
+    workspaceNotificationCounts.debts,
+    workspaceNotificationCounts.trades,
+  ])
   const [heatmapMode, setHeatmapMode] = useState<BoardHeatmapMode>('off')
   const [heatmapSource, setHeatmapSource] = useState<BoardHeatmapSource>('current')
   const [heatmapPlayerId, setHeatmapPlayerId] = useState<string | null>(null)
@@ -514,6 +781,84 @@ export function GameSessionPanel({
     to: number | null
   }>(() => ({ gameId: game.id, from: 1, to: null }))
   const [motionSyncKey, setMotionSyncKey] = useState(0)
+  const [suppressedPresentation, setSuppressedPresentation] = useState<{
+    gameId: string
+    sequence: number
+  } | null>(null)
+  const flushBufferedPresentation = useCallback(() => {
+    const buffered = bufferedPresentationGameRef.current
+    if (!buffered) return
+    bufferedPresentationGameRef.current = null
+    latestAuthoritativeGameRef.current = buffered
+    presentationOmissionActiveRef.current = false
+    setPresentationOmissionActive(false)
+    setSuppressedPresentation({
+      gameId: buffered.id,
+      sequence: buffered.event_sequence,
+    })
+    setMotionSyncKey((value) => value + 1)
+    flushBufferedPresentationChatMessages()
+    onChange(buffered)
+  }, [flushBufferedPresentationChatMessages, onChange])
+  const applyIncomingGameState = useCallback(
+    (nextGame: GameState, suppressTransition = false) => {
+      const merged = mergeGameState(
+        latestAuthoritativeGameRef.current,
+        nextGame,
+      )
+      latestAuthoritativeGameRef.current = merged
+      const suppressOwnPresentation =
+        suppressTransition || suppressNextOwnPresentationRef.current
+      suppressNextOwnPresentationRef.current = false
+      if (
+        shouldBufferParticipantPresentation(merged, user.id, {
+          bots: gameViewRef.current.omit_bot_presentations,
+          otherHumans: gameViewRef.current.omit_other_human_presentations,
+        })
+      ) {
+        const startsPresentation = bufferedPresentationGameRef.current === null
+        bufferedPresentationGameRef.current = merged
+        presentationOmissionActiveRef.current = true
+        setPresentationOmissionActive(true)
+        if (startsPresentation) {
+          setMotionSyncKey((value) => value + 1)
+        }
+        return
+      }
+      const skippedPresentation = bufferedPresentationGameRef.current !== null
+      bufferedPresentationGameRef.current = null
+      presentationOmissionActiveRef.current = false
+      setPresentationOmissionActive(false)
+      if (skippedPresentation || suppressOwnPresentation) {
+        setSuppressedPresentation({
+          gameId: merged.id,
+          sequence: merged.event_sequence,
+        })
+        setMotionSyncKey((value) => value + 1)
+      }
+      if (skippedPresentation) {
+        flushBufferedPresentationChatMessages()
+      }
+      onChange(merged)
+    },
+    [flushBufferedPresentationChatMessages, onChange, user.id],
+  )
+  useEffect(() => {
+    if (latestAuthoritativeGameRef.current.id !== game.id) {
+      latestAuthoritativeGameRef.current = game
+      bufferedPresentationGameRef.current = null
+      bufferedPresentationChatMessagesRef.current = []
+      presentationOmissionActiveRef.current = false
+      setPresentationOmissionActive(false)
+      return
+    }
+    if (bufferedPresentationGameRef.current === null) {
+      latestAuthoritativeGameRef.current = mergeGameState(
+        latestAuthoritativeGameRef.current,
+        game,
+      )
+    }
+  }, [game])
   useEffect(() => {
     let active = true
     setBoardHistory(null)
@@ -542,7 +887,7 @@ export function GameSessionPanel({
   const [motionSettlement, setMotionSettlement] = useState<MotionSettlement>(
     () => ({
       gameId: game.id,
-      sequence: latestMotionSequence(game),
+      sequence: game.event_sequence,
       syncMotionKey: 0,
     }),
   )
@@ -556,30 +901,110 @@ export function GameSessionPanel({
         (event) => event.sequence <= motionSettlement.sequence,
       )
     : game.events
+  const presentedGameRef = useRef(game)
+  const presentedGame = presentedGameSnapshot(
+    presentedGameRef.current,
+    game,
+    motionPending,
+  )
+  presentedGameRef.current = presentedGame
+  const presentationBusy = busy || motionPending || presentationOmissionActive
+  const presentationMotionIntensity =
+    suppressedPresentation?.gameId === game.id &&
+    suppressedPresentation.sequence === game.event_sequence
+      ? 'off'
+      : motionIntensity
+  const allParticipantPresentationsOmitted =
+    gameView.omit_bot_presentations &&
+    gameView.omit_other_human_presentations &&
+    gameView.omit_own_presentations
+  const anyParticipantPresentationOmitted =
+    gameView.omit_bot_presentations ||
+    gameView.omit_other_human_presentations ||
+    gameView.omit_own_presentations
+  useEffect(() => {
+    const cursor = workspaceNotificationCursorRef.current
+    if (cursor.gameId !== game.id) {
+      workspaceNotificationCursorRef.current = {
+        gameId: game.id,
+        sequence: game.event_sequence,
+      }
+      workspaceChatNotificationCursorRef.current = {
+        gameId: game.id,
+        messageId: 0,
+      }
+      setWorkspaceNotificationCounts({
+        ...EMPTY_WORKSPACE_NOTIFICATION_COUNTS,
+      })
+      return
+    }
+    const incoming = countWorkspaceEventNotifications(
+      visibleEvents,
+      cursor.sequence,
+      user.id,
+    )
+    const visibleSequence = visibleEvents.reduce(
+      (latest, event) => Math.max(latest, event.sequence),
+      cursor.sequence,
+    )
+    cursor.sequence = visibleSequence
+    if (incoming.trades === 0 && incoming.debts === 0) return
+    setWorkspaceNotificationCounts((current) => ({
+      ...current,
+      trades: current.trades + incoming.trades,
+      debts: current.debts + incoming.debts,
+    }))
+  }, [game.event_sequence, game.id, user.id, visibleEvents])
   useGameEventAudio(
     game,
     visibleEvents,
     pack,
     user.id,
     connectionState === 'connected',
+    motionSyncKey,
   )
   const maximumHeatmapSequence =
     visibleEvents[visibleEvents.length - 1]?.sequence ?? 1
-  const selectedHeatmapPlayerId = game.players.some(
+  const selectedHeatmapPlayerId = presentedGame.players.some(
     (player) => player.user_id === heatmapPlayerId,
   )
     ? heatmapPlayerId
     : null
-  const currentPlayer = game.players[game.current_player_index]
+  const currentPlayer =
+    presentedGame.players[presentedGame.current_player_index]
+  const showCardDrawModal = shouldShowPlayerModal(
+    gameView.show_other_player_modals,
+    user.id,
+    [presentedGame.pending_card_draw?.player_id],
+  )
+  const showCardChoiceModal = shouldShowPlayerModal(
+    gameView.show_other_player_modals,
+    user.id,
+    [
+      presentedGame.pending_card_choice?.player_id,
+      presentedGame.pending_card_choice_result?.player_id,
+    ],
+  )
+  const activeAuctionPlayerIds = presentedGame.active_auction
+    ? presentedGame.active_auction.eligible_player_ids.filter(
+        (playerId) =>
+          !presentedGame.active_auction?.passed_player_ids.includes(playerId),
+      )
+    : []
+  const showAuctionModal = shouldShowPlayerModal(
+    gameView.show_other_player_modals,
+    user.id,
+    [presentedGame.pending_auction_selector_id, ...activeAuctionPlayerIds],
+  )
   const probabilityHeatmapAvailable =
-    game.status === 'playing' &&
-    game.phase === 'waiting_for_roll' &&
-    game.pending_auction_selector_id === null &&
-    game.active_auction === null &&
-    game.active_debt === null &&
-    game.pending_card_draw === null &&
-    game.pending_card_choice === null &&
-    game.pending_card_choice_result === null &&
+    presentedGame.status === 'playing' &&
+    presentedGame.phase === 'waiting_for_roll' &&
+    presentedGame.pending_auction_selector_id === null &&
+    presentedGame.active_auction === null &&
+    presentedGame.active_debt === null &&
+    presentedGame.pending_card_draw === null &&
+    presentedGame.pending_card_choice === null &&
+    presentedGame.pending_card_choice_result === null &&
     currentPlayer !== undefined &&
     !motionPending
   const activeRange =
@@ -617,17 +1042,17 @@ export function GameSessionPanel({
       probabilityHeatmapAvailable &&
       currentPlayer
     ) {
-      return buildProbabilityHeatmap(game, pack, currentPlayer)
+      return buildProbabilityHeatmap(presentedGame, pack, currentPlayer)
     }
     return null
   }, [
     boardHistory,
     currentPlayer,
-    game,
     heatmapMode,
     heatmapSource,
     pack,
     probabilityHeatmapAvailable,
+    presentedGame,
     resolvedHeatmapRange,
     selectedHeatmapPlayerId,
     visibleEvents,
@@ -661,8 +1086,10 @@ export function GameSessionPanel({
   }, [game.id])
 
   useEffect(() => {
-    if (game.status === 'finished') setGameResultOpen(true)
-  }, [game.id, game.status])
+    if (!motionPending && presentedGame.status === 'finished') {
+      setGameResultOpen(true)
+    }
+  }, [motionPending, presentedGame.id, presentedGame.status])
 
   useEffect(() => {
     if (heatmapMode === 'probability' && !probabilityHeatmapAvailable) {
@@ -752,6 +1179,21 @@ export function GameSessionPanel({
       })
   }, [])
 
+  const saveGameViewRemotely = useCallback(
+    (preferences: GameViewPreferenceSettings) => {
+      preferenceSaveQueueRef.current = preferenceSaveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            await api.updateGameView(preferences)
+          } catch {
+            // The per-user browser cache remains available until a later change retries.
+          }
+        })
+    },
+    [],
+  )
+
   useEffect(() => {
     gameAudio.useUser(user.id)
     const unsubscribe = gameAudio.subscribe(() => {
@@ -782,6 +1224,7 @@ export function GameSessionPanel({
     const automationChangesAtStart = automationSettingsChangeRef.current
     const visualEffectsChangesAtStart = visualEffectsChangeRef.current
     const playerSortChangesAtStart = playerSortChangeRef.current
+    const gameViewChangesAtStart = gameViewChangeRef.current
     void api
       .getUserPreferences()
       .then((preferences) => {
@@ -864,6 +1307,24 @@ export function GameSessionPanel({
         ) {
           savePlayerSortRemotely(playerSortRef.current)
         }
+        if (
+          preferences.game_view &&
+          gameViewChangeRef.current === gameViewChangesAtStart
+        ) {
+          const restored = normalizeGameViewPreferences(preferences.game_view)
+          gameViewRef.current = restored
+          setGameView(restored)
+          setMobilePanel(restored.mobile_panel)
+          setMobileManagementPanel(restored.mobile_management_panel)
+          setTabletWorkspacePanel(restored.tablet_workspace_panel)
+          setAnalyticsOpen(restored.analytics_open)
+          writeGameView(user.id, restored)
+        } else if (
+          gameViewChangeRef.current !== gameViewChangesAtStart ||
+          !preferences.game_view
+        ) {
+          saveGameViewRemotely(gameViewRef.current)
+        }
         setAutomationSettingsReady(true)
       })
       .catch(() => {
@@ -878,10 +1339,63 @@ export function GameSessionPanel({
     saveAutomationSettingsRemotely,
     savePanelLayoutRemotely,
     savePlayerSortRemotely,
+    saveGameViewRemotely,
     saveTokenAppearanceRemotely,
     saveVisualEffectsRemotely,
     user.id,
   ])
+
+  const updateGameView = useCallback(
+    (update: Partial<GameViewPreferenceSettings>) => {
+      const next = normalizeGameViewPreferences({
+        ...gameViewRef.current,
+        ...update,
+      })
+      gameViewRef.current = next
+      gameViewChangeRef.current += 1
+      setGameView(next)
+      if ('mobile_panel' in update) setMobilePanel(next.mobile_panel)
+      if ('mobile_management_panel' in update) {
+        setMobileManagementPanel(next.mobile_management_panel)
+      }
+      if ('tablet_workspace_panel' in update) {
+        setTabletWorkspacePanel(next.tablet_workspace_panel)
+      }
+      if ('analytics_open' in update) setAnalyticsOpen(next.analytics_open)
+      const presentationScopeChanged =
+        'omit_bot_presentations' in update ||
+        'omit_other_human_presentations' in update
+      const buffered = bufferedPresentationGameRef.current
+      if (
+        presentationScopeChanged &&
+        buffered &&
+        !shouldBufferParticipantPresentation(buffered, user.id, {
+          bots: next.omit_bot_presentations,
+          otherHumans: next.omit_other_human_presentations,
+        })
+      ) {
+        flushBufferedPresentation()
+      }
+      writeGameView(user.id, next)
+      saveGameViewRemotely(next)
+    },
+    [flushBufferedPresentation, saveGameViewRemotely, user.id],
+  )
+
+  const selectMobilePanel = useCallback(
+    (panel: MobilePanel) => updateGameView({ mobile_panel: panel }),
+    [updateGameView],
+  )
+  const selectMobileManagementPanel = useCallback(
+    (panel: ManagementPanelId) =>
+      updateGameView({ mobile_management_panel: panel }),
+    [updateGameView],
+  )
+  const selectTabletWorkspacePanel = useCallback(
+    (panel: WorkspacePanelId) =>
+      updateGameView({ tablet_workspace_panel: panel }),
+    [updateGameView],
+  )
 
   const updateAutomationSettings = useCallback(
     (settings: AutomationPreferenceSettings) => {
@@ -959,7 +1473,7 @@ export function GameSessionPanel({
   const toggleWorkspacePanel = useCallback(
     (panelId: WorkspacePanelId) => {
       if (!isWideWorkspace) {
-        setTabletWorkspacePanel(panelId)
+        selectTabletWorkspacePanel(panelId)
         return
       }
       updatePanelLayout((current) => {
@@ -975,7 +1489,7 @@ export function GameSessionPanel({
         }
       })
     },
-    [isWideWorkspace, updatePanelLayout],
+    [isWideWorkspace, selectTabletWorkspacePanel, updatePanelLayout],
   )
 
   const toggleWorkspaceRail = useCallback(() => {
@@ -1275,7 +1789,7 @@ export function GameSessionPanel({
     socket.on('connect', joinRoom)
     socket.on('game_state', (nextGame: GameState) => {
       setConnectionState('connected')
-      onChange(nextGame)
+      applyIncomingGameState(nextGame)
     })
     socket.on('chat_message', receiveChatMessageWithAudio)
     socket.on('disconnect', (reason) => {
@@ -1316,10 +1830,17 @@ export function GameSessionPanel({
       socketRef.current = null
       refreshingSocketRef.current = false
     }
-  }, [game.id, onChange, onSessionExpired, receiveChatMessageWithAudio, t])
+  }, [
+    applyIncomingGameState,
+    game.id,
+    onSessionExpired,
+    receiveChatMessageWithAudio,
+    t,
+  ])
 
   const playerName = (playerId: string | null) =>
-    game.players.find((player) => player.user_id === playerId)?.display_name ??
+    presentedGame.players.find((player) => player.user_id === playerId)
+      ?.display_name ??
     t('bank')
 
   const run = async (
@@ -1330,7 +1851,7 @@ export function GameSessionPanel({
     setError(null)
     try {
       const nextGame = await operation()
-      onChange(nextGame)
+      applyIncomingGameState(nextGame)
       if (snapToSnapshot) {
         setMotionSyncKey((value) => value + 1)
       }
@@ -1353,8 +1874,7 @@ export function GameSessionPanel({
   }
 
   const openAnalytics = () => {
-    setMobilePanel(null)
-    setAnalyticsOpen(true)
+    updateGameView({ mobile_panel: null, analytics_open: true })
     void run(() => api.getGame(game.id), true)
   }
 
@@ -1365,7 +1885,10 @@ export function GameSessionPanel({
         setBusy(true)
         setError(null)
         try {
-          onChange(await api.executeCommand(game.id, command, game.event_sequence))
+          applyIncomingGameState(
+            await api.executeCommand(game.id, command, game.event_sequence),
+            gameViewRef.current.omit_own_presentations,
+          )
           return true
         } catch (requestError) {
           if (requestError instanceof ApiError && requestError.status === 401) {
@@ -1384,6 +1907,8 @@ export function GameSessionPanel({
         }
       }
       const commandId = createCommandId()
+      suppressNextOwnPresentationRef.current =
+        gameViewRef.current.omit_own_presentations
       setBusy(true)
       setError(null)
       return new Promise<boolean>((resolve) => {
@@ -1397,6 +1922,7 @@ export function GameSessionPanel({
           },
           (timeoutError: Error | null, ack?: CommandAck) => {
             if (timeoutError) {
+              suppressNextOwnPresentationRef.current = false
               gameAudio.play('action-rejected', { gain: 0.72 })
               setError(t('realtimeError'))
               setConnectionState('reconnecting')
@@ -1405,6 +1931,7 @@ export function GameSessionPanel({
               return
             }
             if (!ack) {
+              suppressNextOwnPresentationRef.current = false
               gameAudio.play('action-rejected', { gain: 0.72 })
               setError(t('commandRejected'))
               setBusy(false)
@@ -1412,6 +1939,7 @@ export function GameSessionPanel({
               return
             }
             if (!ack.ok) {
+              suppressNextOwnPresentationRef.current = false
               gameAudio.play('action-rejected', { gain: 0.72 })
               setError(ack.error ?? t('commandRejected'))
               if (isAuthenticationError(ack.code, ack.error)) {
@@ -1428,11 +1956,17 @@ export function GameSessionPanel({
         )
       })
     },
-    [game.event_sequence, game.id, onChange, onSessionExpired, t],
+    [
+      applyIncomingGameState,
+      game.event_sequence,
+      game.id,
+      onSessionExpired,
+      t,
+    ],
   )
 
   useEffect(() => {
-    if (!automationSettingsReady || busy) return
+    if (!automationSettingsReady || busy || presentationOmissionActive) return
     const command = nextAutomationCommand({
       game,
       userId: user.id,
@@ -1451,6 +1985,7 @@ export function GameSessionPanel({
   }, [
     automationSettings,
     automationSettingsReady,
+    presentationOmissionActive,
     busy,
     game,
     motionPending,
@@ -1526,17 +2061,17 @@ export function GameSessionPanel({
     }
   }
 
-  const isParticipant = game.players.some(
+  const isParticipant = presentedGame.players.some(
     (player) => player.user_id === user.id,
   )
-  const isSpectator = game.spectators.some(
+  const isSpectator = presentedGame.spectators.some(
     (spectator) => spectator.user_id === user.id,
   )
-  const isHost = game.host_user_id === user.id
-  const currentUserPlayerIndex = game.players.findIndex(
+  const isHost = presentedGame.host_user_id === user.id
+  const currentUserPlayerIndex = presentedGame.players.findIndex(
     (player) => player.user_id === user.id,
   )
-  const currentUserPlayer = game.players[currentUserPlayerIndex]
+  const currentUserPlayer = presentedGame.players[currentUserPlayerIndex]
   const tokenDialogValue = useMemo<TokenAppearanceSettings>(
     () =>
       tokenAppearance ??
@@ -1652,8 +2187,8 @@ export function GameSessionPanel({
           <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
             <Chip
               size="small"
-              label={t(`gameStatus.${game.status}`)}
-              color={game.status === 'playing' ? 'success' : 'default'}
+              label={t(`gameStatus.${presentedGame.status}`)}
+              color={presentedGame.status === 'playing' ? 'success' : 'default'}
             />
             <Chip
               size="small"
@@ -1675,7 +2210,7 @@ export function GameSessionPanel({
             <Button
               size="small"
               startIcon={<RefreshRoundedIcon />}
-              disabled={busy}
+              disabled={presentationBusy}
               onClick={() => void run(() => api.getGame(game.id), true)}
             >
               {t('refresh')}
@@ -1684,6 +2219,7 @@ export function GameSessionPanel({
               size="small"
               color="secondary"
               startIcon={<AnalyticsRoundedIcon />}
+              disabled={presentationBusy}
               onClick={openAnalytics}
             >
               {t('analytics.open')}
@@ -1692,19 +2228,21 @@ export function GameSessionPanel({
               <Button
                 size="small"
                 color={
-                  game.status === 'playing' && isParticipant ? 'error' : 'inherit'
+                  presentedGame.status === 'playing' && isParticipant
+                    ? 'error'
+                    : 'inherit'
                 }
                 startIcon={<LogoutRoundedIcon />}
-                disabled={busy}
+                disabled={presentationBusy}
                 onClick={() => {
-                  if (game.status === 'playing' && isParticipant) {
+                  if (presentedGame.status === 'playing' && isParticipant) {
                     setConfirmResignation(true)
                   } else {
                     void leaveGame()
                   }
                 }}
               >
-                {game.status === 'playing' && isParticipant
+                {presentedGame.status === 'playing' && isParticipant
                   ? t('resignGame')
                   : t('leaveRoom')}
               </Button>
@@ -1765,41 +2303,45 @@ export function GameSessionPanel({
             <Chip
               size="small"
               variant="outlined"
-              label={t('houseSupply', { count: game.houses_remaining })}
+              label={t('houseSupply', {
+                count: presentedGame.houses_remaining,
+              })}
             />
             <Chip
               size="small"
               variant="outlined"
-              label={t('hotelSupply', { count: game.hotels_remaining })}
+              label={t('hotelSupply', {
+                count: presentedGame.hotels_remaining,
+              })}
             />
-            {game.settings.rules.free_parking_jackpot && (
+            {presentedGame.settings.rules.free_parking_jackpot && (
               <Chip
                 size="small"
-                color={game.bank_pot > 0 ? 'secondary' : 'default'}
+                color={presentedGame.bank_pot > 0 ? 'secondary' : 'default'}
                 variant="outlined"
-                label={t('bankPot', { amount: game.bank_pot })}
+                label={t('bankPot', { amount: presentedGame.bank_pot })}
               />
             )}
           </Stack>
 
-          {game.status === 'lobby' && (
+          {presentedGame.status === 'lobby' && (
             <Stack spacing={2}>
               <LobbySettingsPanel
-                game={game}
+                game={presentedGame}
                 pack={pack}
                 isHost={isHost}
-                busy={busy}
+                busy={presentationBusy}
                 onUpdate={(data) =>
                   void run(() => api.updateGameSettings(game.id, data))
                 }
               />
               <BotManagementPanel
-                game={game}
+                game={presentedGame}
                 maximumPlayers={
                   game.settings.max_players ?? pack.manifest.max_players
                 }
                 isHost={isHost}
-                busy={busy}
+                busy={presentationBusy}
                 onAdd={(
                   controller: BotController,
                   personality: BotPersonality,
@@ -1821,7 +2363,7 @@ export function GameSessionPanel({
     <BoardHeatmapControls
       mode={heatmapMode}
       playerId={selectedHeatmapPlayerId}
-      players={game.players}
+      players={presentedGame.players}
       range={resolvedHeatmapRange}
       maximumSequence={maximumHeatmapSequence}
       probabilityAvailable={probabilityHeatmapAvailable}
@@ -1848,13 +2390,13 @@ export function GameSessionPanel({
 
   const playersContent = (
     <GamePlayersPanel
-      game={game}
+      game={presentedGame}
       pack={pack}
       user={user}
       currentUserTokenAppearance={tokenAppearance}
       sortOption={playerSort}
       showTitle={false}
-      motionIntensity={motionIntensity}
+      motionIntensity={presentationMotionIntensity}
       onSortOptionChange={updatePlayerSort}
       onHoveredPlayerChange={setHighlightedPlayerId}
     />
@@ -1863,9 +2405,9 @@ export function GameSessionPanel({
   const startTradeFromProperty = useCallback(
     (recipientId: string, requestedPropertyId: string) => {
       setTradeDraft({ recipientId, requestedPropertyId })
-      setMobileManagementPanel('trades')
+      selectMobileManagementPanel('trades')
       if (isTablet) {
-        setTabletWorkspacePanel('trades')
+        selectTabletWorkspacePanel('trades')
         updatePanelLayout((current) => ({
           ...current,
           rail: {
@@ -1886,31 +2428,39 @@ export function GameSessionPanel({
             : [...current.management.visible, 'trades'],
         },
       }))
-      setMobilePanel('manage')
+      selectMobilePanel('manage')
     },
-    [isTablet, updatePanelLayout],
+    [
+      isTablet,
+      selectMobileManagementPanel,
+      selectMobilePanel,
+      selectTabletWorkspacePanel,
+      updatePanelLayout,
+    ],
   )
   const consumeTradeDraft = useCallback(() => setTradeDraft(null), [])
 
   const propertiesContent = (
     <PropertyManagementPanel
       embedded
-      game={game}
+      game={presentedGame}
       pack={pack}
       user={user}
-      busy={busy}
+      busy={presentationBusy}
       onCommand={sendCommand}
       onTrade={startTradeFromProperty}
       onHoveredPropertyChange={setHighlightedPropertyId}
+      filter={gameView.property_filter}
+      onFilterChange={(property_filter) => updateGameView({ property_filter })}
     />
   )
 
   const tradesContent = (
     <GameTradePanel
-      game={game}
+      game={presentedGame}
       pack={pack}
       user={user}
-      busy={busy}
+      busy={presentationBusy}
       error={error}
       boardHistory={boardHistory}
       draft={tradeDraft}
@@ -1921,31 +2471,55 @@ export function GameSessionPanel({
 
   const bankContent = (
     <BankPanel
-      game={game}
+      game={presentedGame}
       pack={pack}
       user={user}
-      busy={busy}
+      busy={presentationBusy}
       onCommand={sendCommand}
+      tab={gameView.bank_tab}
+      onTabChange={(bank_tab) => updateGameView({ bank_tab })}
     />
   )
 
   const marketContent = (
     <MarketPanel
-      game={game}
+      game={presentedGame}
       pack={pack}
       user={user}
-      busy={busy}
+      busy={presentationBusy}
       onCommand={sendCommand}
+      activeTab={gameView.market_tab}
+      onTabChange={(market_tab) => updateGameView({ market_tab })}
     />
   )
 
   const debtsContent = (
     <DebtAccountsPanel
-      game={game}
+      game={presentedGame}
       user={user}
-      busy={busy}
+      busy={presentationBusy}
       onCommand={sendCommand}
     />
+  )
+
+  const notificationCount = (panelId: WorkspaceNotificationPanel) =>
+    workspaceNotificationCounts[panelId]
+
+  const notificationLabel = (label: string, count: number) =>
+    count > 0 ? t('notifications.unread', { panel: label, count }) : label
+
+  const iconWithNotifications = (
+    panelId: WorkspaceNotificationPanel,
+    icon: React.ReactElement,
+  ) => (
+    <Badge
+      badgeContent={notificationCount(panelId)}
+      color="error"
+      max={99}
+      overlap="circular"
+    >
+      {icon}
+    </Badge>
   )
 
   const managementPanelTitle = (panelId: ManagementPanelId) =>
@@ -1963,9 +2537,9 @@ export function GameSessionPanel({
     panelId === 'properties' ? (
       <HomeWorkRoundedIcon fontSize="small" />
     ) : panelId === 'trades' ? (
-      <SwapHorizRoundedIcon fontSize="small" />
+      iconWithNotifications('trades', <SwapHorizRoundedIcon fontSize="small" />)
     ) : panelId === 'debts' ? (
-      <ReceiptLongRoundedIcon fontSize="small" />
+      iconWithNotifications('debts', <ReceiptLongRoundedIcon fontSize="small" />)
     ) : panelId === 'bank' ? (
       <AccountBalanceRoundedIcon fontSize="small" />
     ) : (
@@ -2014,7 +2588,12 @@ export function GameSessionPanel({
               <ToggleButton
                 key={panelId}
                 value={panelId}
-                aria-label={title}
+                aria-label={notificationLabel(
+                  title,
+                  panelId === 'trades' || panelId === 'debts'
+                    ? notificationCount(panelId)
+                    : 0,
+                )}
                 title={title}
               >
                 {managementPanelIcon(panelId)}
@@ -2071,7 +2650,7 @@ export function GameSessionPanel({
               onHeightChange={(height) =>
                 resizeManagementPanel(panelId, height)
               }
-              motionIntensity={motionIntensity}
+              motionIntensity={presentationMotionIntensity}
             >
               {managementPanelContent(panelId)}
             </PersonalizablePanel>
@@ -2086,7 +2665,7 @@ export function GameSessionPanel({
       <Tabs
         value={mobileManagementPanel}
         onChange={(_, panelId: ManagementPanelId) =>
-          setMobileManagementPanel(panelId)
+          selectMobileManagementPanel(panelId)
         }
         variant="scrollable"
         scrollButtons="auto"
@@ -2112,6 +2691,12 @@ export function GameSessionPanel({
               icon={managementPanelIcon(panelId)}
               iconPosition="start"
               label={title}
+              aria-label={notificationLabel(
+                title,
+                panelId === 'trades' || panelId === 'debts'
+                  ? notificationCount(panelId)
+                  : 0,
+              )}
               aria-controls={`mobile-management-panel-${panelId}`}
             />
           )
@@ -2138,16 +2723,21 @@ export function GameSessionPanel({
           {error}
         </Alert>
       )}
-      {!motionPending && game.active_debt && (
+      {presentationOmissionActive && (
+        <Alert severity="info">{t('boardView.participantsResolving')}</Alert>
+      )}
+      {!presentationOmissionActive &&
+        !motionPending &&
+        presentedGame.active_debt && (
         <Alert
           severity="error"
           sx={{
             flexDirection: { xs: 'column', sm: 'row' },
-            maxHeight: { xs: 'min(58dvh, 520px)', sm: 'none' },
-            overflowY: { xs: 'auto', sm: 'visible' },
-            overscrollBehaviorY: { xs: 'contain', sm: 'auto' },
-            touchAction: { xs: 'pan-y', sm: 'auto' },
-            WebkitOverflowScrolling: { xs: 'touch', sm: 'auto' },
+            maxHeight: 'min(72dvh, 620px)',
+            overflowY: 'auto',
+            overscrollBehaviorY: 'contain',
+            touchAction: { xs: 'pan-y', md: 'auto' },
+            WebkitOverflowScrolling: 'touch',
             '& .MuiAlert-action': {
               ml: { xs: 0, sm: 2 },
               mt: { xs: 1, sm: 0 },
@@ -2155,14 +2745,47 @@ export function GameSessionPanel({
             },
           }}
         >
-          <RentDebtResolutionPanel
-            game={game}
-            pack={pack}
-            user={user}
-            busy={busy}
-            playerName={playerName}
-            onCommand={sendCommand}
-          />
+          <Stack spacing={0.75} sx={{ width: '100%', minWidth: 0 }}>
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={0.5}
+              tabIndex={isTablet ? 0 : -1}
+              aria-label={t('rentDebt.moveNotification')}
+              aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown"
+              onPointerDown={startDebtAlertDrag}
+              onPointerMove={moveDebtAlert}
+              onPointerUp={finishDebtAlertDrag}
+              onPointerCancel={finishDebtAlertDrag}
+              onKeyDown={moveDebtAlertWithKeyboard}
+              sx={{
+                width: 'fit-content',
+                maxWidth: '100%',
+                cursor: { xs: 'default', md: 'grab' },
+                touchAction: { xs: 'auto', md: 'none' },
+                userSelect: 'none',
+                '&:active': { cursor: { md: 'grabbing' } },
+                '&:focus-visible': {
+                  outline: '2px solid currentColor',
+                  outlineOffset: 3,
+                  borderRadius: 0.5,
+                },
+              }}
+            >
+              <DragIndicatorRoundedIcon fontSize="small" />
+              <Typography variant="caption" fontWeight={800}>
+                {t('rentDebt.moveNotification')}
+              </Typography>
+            </Stack>
+            <RentDebtResolutionPanel
+              game={presentedGame}
+              pack={pack}
+              user={user}
+              busy={presentationBusy}
+              playerName={playerName}
+              onCommand={sendCommand}
+            />
+          </Stack>
         </Alert>
       )}
     </>
@@ -2198,7 +2821,7 @@ export function GameSessionPanel({
     ) : panelId === 'players' ? (
       <GroupsRoundedIcon fontSize="small" />
     ) : panelId === 'chat' ? (
-      <ForumRoundedIcon fontSize="small" />
+      iconWithNotifications('chat', <ForumRoundedIcon fontSize="small" />)
     ) : (
       managementPanelIcon(panelId)
     )
@@ -2260,17 +2883,15 @@ export function GameSessionPanel({
         dragLabel={t('layout.dragPanel', { panel: title })}
         resizeLabel={t('layout.resizePanel', { panel: title })}
         headerActions={
-          layoutEditing ? (
-            <Tooltip title={t('layout.floatPanel', { panel: title })}>
-              <IconButton
-                size="small"
-                aria-label={t('layout.floatPanel', { panel: title })}
-                onClick={() => placeWorkspacePanelIn(panelId, 'floating')}
-              >
-                <OpenInNewRoundedIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          ) : undefined
+          <Tooltip title={t('layout.floatPanel', { panel: title })}>
+            <IconButton
+              size="small"
+              aria-label={t('layout.floatPanel', { panel: title })}
+              onClick={() => placeWorkspacePanelIn(panelId, 'floating')}
+            >
+              <OpenInNewRoundedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
         }
         onDragStart={
           layoutEditing
@@ -2523,17 +3144,23 @@ export function GameSessionPanel({
           height: '100%',
           minHeight: 0,
           gridTemplateRows: 'minmax(0, 1fr)',
-          gridTemplateColumns: {
-            xs: 'minmax(0, 1fr)',
-            md: `minmax(0, 1fr) ${tabletDockColumn} 64px`,
-            lg: `${leftDockColumn} minmax(0, 1fr) ${rightDockColumn} ${showWorkspaceRailLabels ? 'clamp(148px, 12vw, 176px)' : '64px'}`,
-            xl: `${leftDockColumn} minmax(0, 1fr) ${rightDockColumn} ${showWorkspaceRailLabels ? 'clamp(176px, 12vw, 204px)' : '64px'}`,
-          },
-          gridTemplateAreas: {
-            xs: '"board"',
-            md: '"board tablet rail"',
-            lg: '"left board right rail"',
-          },
+          gridTemplateColumns:
+            gameView.workspace_mode === 'focus'
+              ? { xs: 'minmax(0, 1fr)' }
+              : {
+                  xs: 'minmax(0, 1fr)',
+                  md: `minmax(0, 1fr) ${tabletDockColumn} 64px`,
+                  lg: `${leftDockColumn} minmax(0, 1fr) ${rightDockColumn} ${showWorkspaceRailLabels ? 'clamp(148px, 12vw, 176px)' : '64px'}`,
+                  xl: `${leftDockColumn} minmax(0, 1fr) ${rightDockColumn} ${showWorkspaceRailLabels ? 'clamp(176px, 12vw, 204px)' : '64px'}`,
+                },
+          gridTemplateAreas:
+            gameView.workspace_mode === 'focus'
+              ? { xs: '"board"' }
+              : {
+                  xs: '"board"',
+                  md: '"board tablet rail"',
+                  lg: '"left board right rail"',
+                },
           gap: 0,
           alignItems: 'stretch',
           transition:
@@ -2558,13 +3185,166 @@ export function GameSessionPanel({
             overflow: 'hidden',
           }}
         >
+          <Paper
+            component="section"
+            aria-label={t('boardView.controls')}
+            elevation={8}
+            sx={{
+              position: 'relative',
+              zIndex: 30,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 0.5,
+              p: 0.5,
+              width: '100%',
+              maxWidth: '100%',
+              flexShrink: 0,
+              overflowX: 'auto',
+              bgcolor: 'rgba(17,13,29,.92)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(255,255,255,.12)',
+            }}
+          >
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={gameView.tile_mode}
+              onChange={(_, tile_mode) => {
+                if (tile_mode) updateGameView({ tile_mode })
+              }}
+              aria-label={t('boardView.tileMode')}
+            >
+              <ToggleButton value="detailed" aria-label={t('boardView.detailed')}>
+                <TextFieldsRoundedIcon fontSize="small" />
+              </ToggleButton>
+              <ToggleButton value="visual" aria-label={t('boardView.visual')}>
+                <GridViewRoundedIcon fontSize="small" />
+              </ToggleButton>
+            </ToggleButtonGroup>
+            <Tooltip title={t('boardView.fit')}>
+              <ToggleButton
+                value="fit"
+                selected={gameView.camera_mode === 'fit'}
+                aria-label={t('boardView.fit')}
+                onClick={() =>
+                  updateGameView({
+                    camera_mode:
+                      gameView.camera_mode === 'fit' ? 'detail' : 'fit',
+                  })
+                }
+                sx={{ minWidth: 44, minHeight: 44, p: 0.75 }}
+              >
+                <FitScreenRoundedIcon fontSize="small" />
+              </ToggleButton>
+            </Tooltip>
+            <Tooltip
+              title={
+                gameView.workspace_mode === 'focus'
+                  ? t('boardView.exitFocus')
+                  : t('boardView.focus')
+              }
+            >
+              <ToggleButton
+                value="focus"
+                selected={gameView.workspace_mode === 'focus'}
+                aria-label={
+                  gameView.workspace_mode === 'focus'
+                    ? t('boardView.exitFocus')
+                    : t('boardView.focus')
+                }
+                onClick={() =>
+                  updateGameView({
+                    workspace_mode:
+                      gameView.workspace_mode === 'focus' ? 'normal' : 'focus',
+                    mobile_panel: null,
+                  })
+                }
+                sx={{ minWidth: 44, minHeight: 44, p: 0.75 }}
+              >
+                <CenterFocusStrongRoundedIcon fontSize="small" />
+              </ToggleButton>
+            </Tooltip>
+            <Tooltip
+              title={
+                gameView.show_other_player_modals
+                  ? t('boardView.hideOtherPlayerModals')
+                  : t('boardView.showOtherPlayerModals')
+              }
+            >
+              <ToggleButton
+                value="other-player-modals"
+                selected={gameView.show_other_player_modals}
+                aria-label={
+                  gameView.show_other_player_modals
+                    ? t('boardView.hideOtherPlayerModals')
+                    : t('boardView.showOtherPlayerModals')
+                }
+                aria-pressed={gameView.show_other_player_modals}
+                onClick={() =>
+                  updateGameView({
+                    show_other_player_modals:
+                      !gameView.show_other_player_modals,
+                  })
+                }
+                sx={{ minWidth: 44, minHeight: 44, p: 0.75 }}
+              >
+                {gameView.show_other_player_modals ? (
+                  <VisibilityRoundedIcon fontSize="small" />
+                ) : (
+                  <VisibilityOffRoundedIcon fontSize="small" />
+                )}
+              </ToggleButton>
+            </Tooltip>
+            <Tooltip title={t('boardView.transitionSettings')}>
+              <ToggleButton
+                value="presentation-settings"
+                selected={anyParticipantPresentationOmitted}
+                aria-label={t('boardView.transitionSettings')}
+                aria-pressed={anyParticipantPresentationOmitted}
+                onClick={() => setPresentationSettingsOpen(true)}
+                sx={{ minWidth: 44, minHeight: 44, p: 0.75 }}
+              >
+                <FastForwardRoundedIcon fontSize="small" />
+              </ToggleButton>
+            </Tooltip>
+            <FormControl size="small" sx={{ minWidth: 104 }}>
+              <Select
+                value={gameView.movement_preview}
+                onChange={(event) =>
+                  updateGameView({
+                    movement_preview: event.target
+                      .value as GameViewPreferenceSettings['movement_preview'],
+                  })
+                }
+                aria-label={t('boardView.movementPreview')}
+                sx={{ minHeight: 44, fontSize: '0.78rem' }}
+              >
+                <MenuItem value="steps">{t('boardView.previewSteps')}</MenuItem>
+                <MenuItem value="landing">{t('boardView.previewLanding')}</MenuItem>
+                <MenuItem value="off">{t('boardView.previewOff')}</MenuItem>
+              </Select>
+            </FormControl>
+          </Paper>
           <Stack
+            ref={debtAlertRef}
             spacing={0.75}
             sx={{
-              position: 'absolute',
-              top: 8,
-              left: '50%',
-              transform: 'translateX(-50%)',
+              position: { xs: 'absolute', md: 'fixed' },
+              top: {
+                xs: 8,
+                md: presentedGame.active_debt
+                  ? (debtAlertPosition?.y ?? 'clamp(150px, 18dvh, 210px)')
+                  : 8,
+              },
+              left: {
+                xs: '50%',
+                md: debtAlertPosition?.x ?? '50%',
+              },
+              transform: {
+                xs: 'translateX(-50%)',
+                md: debtAlertPosition ? 'none' : 'translateX(-50%)',
+              },
               width: 'min(92%, 760px)',
               zIndex: 8,
               pointerEvents: 'none',
@@ -2576,8 +3356,10 @@ export function GameSessionPanel({
           <Box
             sx={{
               width: '100%',
-              height: '100%',
+              height: 'auto',
+              flex: 1,
               minWidth: 0,
+              minHeight: 0,
               overflow: 'auto',
               pb: {
                 xs: 'calc(72px + env(safe-area-inset-bottom))',
@@ -2588,14 +3370,18 @@ export function GameSessionPanel({
                 md: 0,
               },
               display: 'flex',
-              justifyContent: zoom > 1 ? 'flex-start' : 'center',
+              justifyContent:
+                gameView.camera_mode === 'fit' || zoom <= 1
+                  ? 'center'
+                  : 'flex-start',
               alignItems: 'flex-start',
             }}
           >
             <GameBoard
               pack={pack}
               zoom={zoom}
-              game={game}
+              game={presentedGame}
+              motionGame={game}
               currentUserId={user.id}
               currentUserTokenAppearance={tokenAppearance}
               syncMotionKey={motionSyncKey}
@@ -2603,20 +3389,24 @@ export function GameSessionPanel({
               onTokenStep={handleTokenStep}
               onTokenTeleport={handleTokenTeleport}
               motionPending={motionPending}
-              busy={busy}
+              fitAvailableHeight={gameView.camera_mode === 'fit'}
+              tileViewMode={gameView.tile_mode}
+              movementPreviewMode={gameView.movement_preview}
+              busy={presentationBusy}
               onCommand={sendCommand}
               onTrade={startTradeFromProperty}
               heatmap={boardHeatmap}
               actionEvents={visibleEvents}
-              motionIntensity={motionIntensity}
+              motionIntensity={presentationMotionIntensity}
               highlightedTileId={highlightedPropertyId}
               highlightedPlayerId={highlightedPlayerId}
               centerContent={
                 <GameActionCenter
-                  game={game}
+                  game={presentedGame}
+                  diceGame={game}
                   pack={pack}
                   user={user}
-                  busy={busy}
+                  busy={presentationBusy}
                   motionPending={motionPending}
                   visibleEvents={visibleEvents}
                   isHost={isHost}
@@ -2628,14 +3418,14 @@ export function GameSessionPanel({
                     )
                   }
                   onStart={() => void run(() => api.startGame(game.id))}
-                  motionIntensity={motionIntensity}
+                  motionIntensity={presentationMotionIntensity}
                 />
               }
             />
           </Box>
         </Stack>
 
-        {isTablet && !isWideWorkspace && (
+        {gameView.workspace_mode !== 'focus' && isTablet && !isWideWorkspace && (
           <Box
             component="aside"
             aria-label={t('layout.activePanel', {
@@ -2663,14 +3453,14 @@ export function GameSessionPanel({
           </Box>
         )}
 
-        {isWideWorkspace && (
+        {gameView.workspace_mode !== 'focus' && isWideWorkspace && (
           <>
             {renderWorkspaceDock('left', leftWorkspacePanels)}
             {renderWorkspaceDock('right', rightWorkspacePanels)}
           </>
         )}
 
-        {isTablet && (
+        {gameView.workspace_mode !== 'focus' && isTablet && (
           <Stack
             component="nav"
             aria-label={t('layout.workspaceViews')}
@@ -2767,12 +3557,18 @@ export function GameSessionPanel({
                       const selected = isWideWorkspace
                         ? panelLayout.rail.visible.includes(panelId)
                         : tabletWorkspacePanel === panelId
+                      const count =
+                        panelId === 'trades' ||
+                        panelId === 'debts' ||
+                        panelId === 'chat'
+                          ? notificationCount(panelId)
+                          : 0
                       return (
                         <Tooltip key={panelId} title={title} placement="left">
                           <ToggleButton
                             value={panelId}
                             selected={selected}
-                            aria-label={title}
+                            aria-label={notificationLabel(title, count)}
                             aria-pressed={selected}
                             onClick={() => toggleWorkspacePanel(panelId)}
                             sx={{
@@ -2955,22 +3751,32 @@ export function GameSessionPanel({
         )}
       </Box>
 
-      {isWideWorkspace && floatingWorkspacePanels.map(renderFloatingWorkspacePanel)}
+      {gameView.workspace_mode !== 'focus' &&
+        isWideWorkspace &&
+        floatingWorkspacePanels.map(renderFloatingWorkspacePanel)}
 
       {analyticsOpen && (
         <Suspense fallback={null}>
           <GameAnalyticsDashboard
             open
-            game={game}
+            game={presentedGame}
             pack={pack}
             boardHistory={boardHistory}
             boardHistoryLoading={boardHistoryLoading}
-            onClose={() => setAnalyticsOpen(false)}
+            tab={gameView.analytics_tab}
+            view={gameView.analytics_view}
+            source={gameView.analytics_source}
+            onTabChange={(analytics_tab) => updateGameView({ analytics_tab })}
+            onViewChange={(analytics_view) => updateGameView({ analytics_view })}
+            onSourceChange={(analytics_source) =>
+              updateGameView({ analytics_source })
+            }
+            onClose={() => updateGameView({ analytics_open: false })}
           />
         </Suspense>
       )}
 
-      {!isTablet && (
+      {!isTablet && gameView.workspace_mode !== 'focus' && (
         <>
           <BottomNavigation
             component="nav"
@@ -3002,37 +3808,57 @@ export function GameSessionPanel({
               value="room"
               label={t('room')}
               icon={<MenuRoundedIcon />}
-              onClick={() => setMobilePanel('room')}
+              onClick={() => selectMobilePanel('room')}
             />
             <BottomNavigationAction
               value="players"
               label={t('playersPanel')}
               icon={<GroupsRoundedIcon />}
-              onClick={() => setMobilePanel('players')}
+              onClick={() => selectMobilePanel('players')}
             />
             <BottomNavigationAction
               value="manage"
               label={t('manage')}
-              icon={<ApartmentRoundedIcon />}
-              onClick={() => setMobilePanel('manage')}
+              aria-label={notificationLabel(
+                t('manage'),
+                notificationCount('trades') + notificationCount('debts'),
+              )}
+              icon={
+                <Badge
+                  badgeContent={
+                    notificationCount('trades') + notificationCount('debts')
+                  }
+                  color="error"
+                  max={99}
+                  overlap="circular"
+                >
+                  <ApartmentRoundedIcon />
+                </Badge>
+              }
+              onClick={() => selectMobilePanel('manage')}
             />
             <BottomNavigationAction
               value="heatmap"
               label={t('heatmap.title')}
               icon={<LayersRoundedIcon />}
-              onClick={() => setMobilePanel('heatmap')}
+              onClick={() => selectMobilePanel('heatmap')}
             />
             <BottomNavigationAction
               value="analytics"
               label={t('analytics.open')}
               icon={<AnalyticsRoundedIcon />}
+              disabled={presentationBusy}
               onClick={openAnalytics}
             />
             <BottomNavigationAction
               value="chat"
               label={t('chat.short')}
-              icon={<ForumRoundedIcon />}
-              onClick={() => setMobilePanel('chat')}
+              aria-label={notificationLabel(
+                t('chat.short'),
+                notificationCount('chat'),
+              )}
+              icon={iconWithNotifications('chat', <ForumRoundedIcon />)}
+              onClick={() => selectMobilePanel('chat')}
             />
           </BottomNavigation>
           <Drawer
@@ -3045,7 +3871,7 @@ export function GameSessionPanel({
                   ? 140
                   : 240
             }
-            onClose={() => setMobilePanel(null)}
+            onClose={() => selectMobilePanel(null)}
             slotProps={{
               paper: {
                 role: 'dialog',
@@ -3101,7 +3927,7 @@ export function GameSessionPanel({
               </Typography>
               <IconButton
                 aria-label={t('close')}
-                onClick={() => setMobilePanel(null)}
+                onClick={() => selectMobilePanel(null)}
                 sx={{ width: 48, height: 48, flexShrink: 0 }}
               >
                 <CloseRoundedIcon />
@@ -3137,64 +3963,73 @@ export function GameSessionPanel({
       )}
 
       <GameVisualEffects
-        game={game}
+        game={presentedGame}
         events={visibleEvents}
         pack={pack}
-        intensity={motionIntensity}
+        intensity={presentationMotionIntensity}
         synchronized={connectionState === 'connected'}
+        presentationSyncKey={motionSyncKey}
       />
 
-      {!motionPending && !game.pending_card_choice_result && (
+      {!presentationOmissionActive &&
+        !motionPending &&
+        showCardDrawModal &&
+        !presentedGame.pending_card_choice_result && (
         <GameCardDrawDialog
-          game={game}
+          game={presentedGame}
           pack={pack}
           user={user}
-          busy={busy}
+          busy={presentationBusy}
           error={error}
           onCommand={sendCommand}
-          motionIntensity={motionIntensity}
+          motionIntensity={presentationMotionIntensity}
         />
       )}
 
       <GameCardChoiceDialog
-        game={game}
+        game={presentedGame}
         pack={pack}
         user={user}
-        busy={busy}
+        busy={presentationBusy}
         error={error}
         onCommand={sendCommand}
-        motionIntensity={motionIntensity}
+        motionIntensity={presentationMotionIntensity}
         visible={
+          !presentationOmissionActive &&
           !motionPending &&
-          (!game.pending_card_draw || game.pending_card_choice_result !== null)
+          showCardChoiceModal &&
+          (!presentedGame.pending_card_draw ||
+            presentedGame.pending_card_choice_result !== null)
         }
       />
 
-      {!motionPending &&
-        !game.pending_card_draw &&
-        !game.pending_card_choice &&
-        !game.pending_card_choice_result && (
+      {!presentationOmissionActive &&
+        !motionPending &&
+        showAuctionModal &&
+        !presentedGame.pending_card_draw &&
+        !presentedGame.pending_card_choice &&
+        !presentedGame.pending_card_choice_result && (
         <GameAuctionDialog
-          game={game}
+          game={presentedGame}
           pack={pack}
           user={user}
-          busy={busy}
+          busy={presentationBusy}
           error={error}
           boardHistory={boardHistory}
           onCommand={sendCommand}
           onCountdownWarning={handleAuctionCountdown}
-          motionIntensity={motionIntensity}
+          motionIntensity={presentationMotionIntensity}
         />
       )}
 
       <GameFinishedDialog
         open={gameResultOpen}
-        game={game}
+        game={presentedGame}
         currentUserId={user.id}
-        busy={busy}
+        busy={presentationBusy}
         onClose={() => setGameResultOpen(false)}
         onExit={() => void leaveGame()}
-        motionIntensity={motionIntensity}
+        motionIntensity={presentationMotionIntensity}
       />
 
       <TokenCustomizationDialog
@@ -3204,6 +4039,78 @@ export function GameSessionPanel({
         onClose={() => setTokenDialogOpen(false)}
         onSave={updateTokenAppearance}
       />
+
+      <Dialog
+        open={presentationSettingsOpen}
+        onClose={() => setPresentationSettingsOpen(false)}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>{t('boardView.transitionSettings')}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={0.5}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={allParticipantPresentationsOmitted}
+                  onChange={(event) =>
+                    updateGameView({
+                      omit_bot_presentations: event.target.checked,
+                      omit_other_human_presentations: event.target.checked,
+                      omit_own_presentations: event.target.checked,
+                    })
+                  }
+                />
+              }
+              label={t('boardView.omitAllPresentations')}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={gameView.omit_bot_presentations}
+                  onChange={(event) =>
+                    updateGameView({
+                      omit_bot_presentations: event.target.checked,
+                    })
+                  }
+                />
+              }
+              label={t('boardView.omitBotPresentations')}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={gameView.omit_other_human_presentations}
+                  onChange={(event) =>
+                    updateGameView({
+                      omit_other_human_presentations: event.target.checked,
+                    })
+                  }
+                />
+              }
+              label={t('boardView.omitOtherHumanPresentations')}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={gameView.omit_own_presentations}
+                  onChange={(event) =>
+                    updateGameView({
+                      omit_own_presentations: event.target.checked,
+                    })
+                  }
+                />
+              }
+              label={t('boardView.omitOwnPresentations')}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPresentationSettingsOpen(false)}>
+            {t('close')}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog
         open={confirmResignation}

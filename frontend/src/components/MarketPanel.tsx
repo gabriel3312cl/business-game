@@ -39,6 +39,7 @@ import type {
   InvestmentInstrumentState,
   User,
 } from '../types'
+import type { GameViewPreferenceSettings } from '../types'
 import {
   buildInstrumentHistory,
   buildMarketIndexHistory,
@@ -58,15 +59,32 @@ interface Props {
   user: User
   busy: boolean
   onCommand: (command: GameCommand) => Promise<boolean>
+  activeTab?: GameViewPreferenceSettings['market_tab']
+  onTabChange?: (tab: GameViewPreferenceSettings['market_tab']) => void
 }
 
-export function MarketPanel({ game, pack, user, busy, onCommand }: Props) {
+export function MarketPanel({
+  game,
+  pack,
+  user,
+  busy,
+  onCommand,
+  activeTab: controlledActiveTab,
+  onTabChange,
+}: Props) {
   const { t, i18n } = useTranslation()
   const [selectedInstrumentId, setSelectedInstrumentId] = useState<string | null>(
     null,
   )
   const [quantity, setQuantity] = useState('1')
-  const [activeTab, setActiveTab] = useState<'market' | 'performance'>('market')
+  const [internalActiveTab, setInternalActiveTab] = useState<
+    GameViewPreferenceSettings['market_tab']
+  >('market')
+  const activeTab = controlledActiveTab ?? internalActiveTab
+  const setActiveTab = (nextTab: GameViewPreferenceSettings['market_tab']) => {
+    if (controlledActiveTab === undefined) setInternalActiveTab(nextTab)
+    onTabChange?.(nextTab)
+  }
   const currency = useMemo(
     () => new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 0 }),
     [i18n.language],
@@ -93,8 +111,8 @@ export function MarketPanel({ game, pack, user, busy, onCommand }: Props) {
   useEffect(() => {
     setSelectedInstrumentId(null)
     setQuantity('1')
-    setActiveTab('market')
-  }, [game.id])
+    if (controlledActiveTab === undefined) setInternalActiveTab('market')
+  }, [controlledActiveTab, game.id])
 
   if (!game.bank.initialized) {
     return <Alert severity="info">{t('marketPanel.initializing')}</Alert>

@@ -549,6 +549,7 @@ async def test_bots_always_have_a_legal_move(pack: ContentPack, state: str) -> N
         )
     elif state == "auction":
         game.active_auction = AuctionState(
+            id=uuid4(),
             property_id=ORANGE[2],
             minimum_bid=10,
             eligible_player_ids=[bot.user_id, rival.user_id],
@@ -568,10 +569,13 @@ async def test_bidding_respects_the_auction_minimum(pack: ContentPack) -> None:
     rival = make_bot(BotPersonality.BALANCED, name="Rival")
     game = make_game(pack, [bot, rival])
     game.active_auction = AuctionState(
+        id=uuid4(),
         property_id=ORANGE[2],
+        phase="bidding",
         minimum_bid=150,
         current_bid=0,
         eligible_player_ids=[bot.user_id, rival.user_id],
+        ready_player_ids=[bot.user_id, rival.user_id],
     )
 
     action = BotPolicy().choose_action(game, pack)

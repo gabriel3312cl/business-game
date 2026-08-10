@@ -32,11 +32,26 @@ interface Props {
   user: User
   busy: boolean
   onCommand: (command: GameCommand) => Promise<boolean>
+  tab?: 0 | 1 | 2
+  onTabChange?: (tab: 0 | 1 | 2) => void
 }
 
-export function BankPanel({ game, pack, user, busy, onCommand }: Props) {
+export function BankPanel({
+  game,
+  pack,
+  user,
+  busy,
+  onCommand,
+  tab: controlledTab,
+  onTabChange,
+}: Props) {
   const { t, i18n } = useTranslation()
-  const [tab, setTab] = useState(0)
+  const [internalTab, setInternalTab] = useState<0 | 1 | 2>(0)
+  const tab = controlledTab ?? internalTab
+  const setTab = (nextTab: 0 | 1 | 2) => {
+    if (controlledTab === undefined) setInternalTab(nextTab)
+    onTabChange?.(nextTab)
+  }
   const [loanAmount, setLoanAmount] = useState('')
   const currency = useMemo(
     () => new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 0 }),
@@ -118,7 +133,7 @@ export function BankPanel({ game, pack, user, busy, onCommand }: Props) {
 
       <Tabs
         value={tab}
-        onChange={(_, value: number) => setTab(value)}
+        onChange={(_, value: 0 | 1 | 2) => setTab(value)}
         variant="scrollable"
         scrollButtons="auto"
         allowScrollButtonsMobile

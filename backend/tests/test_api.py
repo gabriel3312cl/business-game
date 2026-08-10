@@ -129,6 +129,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "automation_settings": None,
         "visual_effects": None,
         "player_sort": None,
+        "game_view": None,
     }
 
     panel_layout = {
@@ -190,6 +191,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "automation_settings": None,
         "visual_effects": None,
         "player_sort": None,
+        "game_view": None,
     }
 
     audio_settings = {
@@ -210,6 +212,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "automation_settings": None,
         "visual_effects": None,
         "player_sort": None,
+        "game_view": None,
     }
 
     token_appearance = {
@@ -235,6 +238,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "automation_settings": None,
         "visual_effects": None,
         "player_sort": None,
+        "game_view": None,
     }
 
     automation_settings = {
@@ -255,6 +259,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "automation_settings": automation_settings,
         "visual_effects": None,
         "player_sort": None,
+        "game_view": None,
     }
 
     visual_effects = {"intensity": "soft"}
@@ -271,6 +276,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "automation_settings": automation_settings,
         "visual_effects": visual_effects,
         "player_sort": None,
+        "game_view": None,
     }
 
     player_sort = "netWorth"
@@ -287,7 +293,36 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "automation_settings": automation_settings,
         "visual_effects": visual_effects,
         "player_sort": player_sort,
+        "game_view": None,
     }
+
+    game_view = {
+        "tile_mode": "visual",
+        "workspace_mode": "focus",
+        "camera_mode": "detail",
+        "movement_preview": "landing",
+        "show_other_player_modals": False,
+        "omit_bot_presentations": True,
+        "omit_other_human_presentations": True,
+        "omit_own_presentations": True,
+        "mobile_panel": "manage",
+        "mobile_management_panel": "bank",
+        "tablet_workspace_panel": "market",
+        "bank_tab": 1,
+        "market_tab": "performance",
+        "property_filter": "mine",
+        "analytics_open": True,
+        "analytics_tab": "dice",
+        "analytics_view": "window",
+        "analytics_source": "historical",
+    }
+    game_view_updated = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=first_headers,
+        json={"game_view": game_view},
+    )
+    assert game_view_updated.status_code == 200
+    assert game_view_updated.json()["game_view"] == game_view
 
     restored = await client.get(
         "/api/v1/users/me/preferences",
@@ -301,6 +336,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "automation_settings": automation_settings,
         "visual_effects": visual_effects,
         "player_sort": player_sort,
+        "game_view": game_view,
     }
 
     first_user = await session.scalar(
@@ -314,6 +350,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "automation_settings": automation_settings,
         "visual_effects": visual_effects,
         "player_sort": player_sort,
+        "game_view": game_view,
     }
     await session.rollback()
 
@@ -330,6 +367,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "automation_settings": None,
         "visual_effects": None,
         "player_sort": None,
+        "game_view": None,
     }
 
 
