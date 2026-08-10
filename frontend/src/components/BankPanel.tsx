@@ -105,7 +105,7 @@ export function BankPanel({ game, pack, user, busy, onCommand }: Props) {
   }
 
   return (
-    <Stack spacing={1.5}>
+    <Stack spacing={1.5} sx={{ minWidth: 0 }}>
       <Stack direction="row" spacing={1} alignItems="center">
         <AccountBalanceRoundedIcon color="secondary" />
         <Box minWidth={0}>
@@ -120,20 +120,47 @@ export function BankPanel({ game, pack, user, busy, onCommand }: Props) {
         value={tab}
         onChange={(_, value: number) => setTab(value)}
         variant="scrollable"
-        scrollButtons={false}
+        scrollButtons="auto"
+        allowScrollButtonsMobile
         aria-label={t('bankPanel.title')}
+        sx={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 2,
+          minHeight: 48,
+          bgcolor: 'background.paper',
+          borderBottom: '1px solid rgba(255,255,255,.1)',
+          '& .MuiTab-root': { minHeight: 48, minWidth: 'auto', px: 1.5 },
+        }}
       >
-        <Tab label={t('bankPanel.tabs.summary')} />
-        <Tab label={t('bankPanel.tabs.loans')} />
-        <Tab label={t('bankPanel.tabs.activity')} />
+        <Tab
+          id="bank-tab-summary"
+          label={t('bankPanel.tabs.summary')}
+          aria-controls="bank-panel-summary"
+        />
+        <Tab
+          id="bank-tab-loans"
+          label={t('bankPanel.tabs.loans')}
+          aria-controls="bank-panel-loans"
+        />
+        <Tab
+          id="bank-tab-activity"
+          label={t('bankPanel.tabs.activity')}
+          aria-controls="bank-panel-activity"
+        />
       </Tabs>
 
       {tab === 0 && (
-        <Stack spacing={1.25}>
+        <Stack
+          id="bank-panel-summary"
+          role="tabpanel"
+          aria-labelledby="bank-tab-summary"
+          spacing={1.25}
+        >
           <Box
             sx={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))',
               gap: 1,
             }}
           >
@@ -230,11 +257,26 @@ export function BankPanel({ game, pack, user, busy, onCommand }: Props) {
               }
             />
           </Stack>
+          {game.settings.rules.loans_enabled && !activeLoan && (
+            <Button
+              variant="outlined"
+              startIcon={<CreditScoreRoundedIcon />}
+              onClick={() => setTab(1)}
+              sx={{ minHeight: 48, alignSelf: { sm: 'flex-start' } }}
+            >
+              {t('bankPanel.requestLoanAction')}
+            </Button>
+          )}
         </Stack>
       )}
 
       {tab === 1 && (
-        <Stack spacing={1.25}>
+        <Stack
+          id="bank-panel-loans"
+          role="tabpanel"
+          aria-labelledby="bank-tab-loans"
+          spacing={1.25}
+        >
           {game.settings.rules.loans_enabled && player && (
             <Paper variant="outlined" sx={{ p: 1.25 }}>
               <Stack spacing={0.75}>
@@ -301,7 +343,11 @@ export function BankPanel({ game, pack, user, busy, onCommand }: Props) {
                     ),
                   })}
                 </Typography>
-                <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  spacing={0.75}
+                  useFlexGap
+                >
                   <Button
                     size="small"
                     variant="outlined"
@@ -315,6 +361,7 @@ export function BankPanel({ game, pack, user, busy, onCommand }: Props) {
                         ),
                       })
                     }
+                    sx={{ minHeight: 48 }}
                   >
                     {t('bankPanel.payInstallment')}
                   </Button>
@@ -330,6 +377,7 @@ export function BankPanel({ game, pack, user, busy, onCommand }: Props) {
                     onClick={() =>
                       void onCommand({ action: 'repay_loan', amount: null })
                     }
+                    sx={{ minHeight: 48 }}
                   >
                     {t('bankPanel.payFullLoan')}
                   </Button>
@@ -345,10 +393,16 @@ export function BankPanel({ game, pack, user, busy, onCommand }: Props) {
                 <TextField
                   size="small"
                   type="number"
+                  fullWidth
                   label={t('bankPanel.loanAmount')}
                   value={loanAmount}
                   slotProps={{
-                    htmlInput: { min: 1, max: maximumLoan, step: 1 },
+                    htmlInput: {
+                      min: 1,
+                      max: maximumLoan,
+                      step: 1,
+                      inputMode: 'numeric',
+                    },
                   }}
                   onChange={(event) => setLoanAmount(event.target.value)}
                   helperText={t('bankPanel.loanLimit', {
@@ -374,6 +428,7 @@ export function BankPanel({ game, pack, user, busy, onCommand }: Props) {
                       if (success) setLoanAmount('')
                     })
                   }
+                  sx={{ minHeight: 48 }}
                 >
                   {t('bankPanel.requestLoanAction')}
                 </Button>
@@ -394,7 +449,12 @@ export function BankPanel({ game, pack, user, busy, onCommand }: Props) {
       )}
 
       {tab === 2 && (
-        <Stack spacing={0.75}>
+        <Stack
+          id="bank-panel-activity"
+          role="tabpanel"
+          aria-labelledby="bank-tab-activity"
+          spacing={0.75}
+        >
           {financialEvents.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
               {t('bankPanel.noActivity')}

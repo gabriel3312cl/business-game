@@ -251,6 +251,7 @@ async def create_game(
         current_user,
         data.version,
         data.deck_collection_ids,
+        data.economic_difficulty,
     )
     return game_state_view(game, current_user.id)
 
@@ -342,6 +343,21 @@ async def add_bot(
     games: Annotated[GameService, Depends(get_game_service)],
 ) -> GameStateView:
     game = await games.add_bot(game_id, current_user.id, data)
+    await broadcast_game_state(game, complete_events=False)
+    return game_state_view(game, current_user.id)
+
+
+@router.post(
+    "/games/{game_id}/bots/fill",
+    response_model=GameStateView,
+    status_code=status.HTTP_201_CREATED,
+)
+async def fill_with_random_bots(
+    game_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    games: Annotated[GameService, Depends(get_game_service)],
+) -> GameStateView:
+    game = await games.fill_with_random_bots(game_id, current_user.id)
     await broadcast_game_state(game, complete_events=False)
     return game_state_view(game, current_user.id)
 

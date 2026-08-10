@@ -1131,7 +1131,17 @@ class BotPolicy:
             BotPersonality.AGGRESSIVE: 50,
             BotPersonality.NEGOTIATOR: 75,
         }[personality]
+        allocation_percent = {
+            BotPersonality.CONSERVATIVE: 10,
+            BotPersonality.BALANCED: 20,
+            BotPersonality.AGGRESSIVE: 35,
+            BotPersonality.NEGOTIATOR: 20,
+        }[personality]
         required_reserve = floor * reserve_percent // 100
+        active_player_count = max(
+            1,
+            sum(not player.bankrupt for player in game.players),
+        )
         candidates = []
         for instrument in game.bank.investments:
             held = instrument.holdings.get(bot.user_id, 0)
@@ -1141,19 +1151,22 @@ class BotPolicy:
                 * instrument.max_ownership_percent
                 // 100,
             )
-            quote = market_order_quote(instrument, 1, buying=True)
-            fee = (
-                quote.gross * instrument.transaction_fee_percent + 99
+            holding_capacity = max(0, maximum - held)
+            quote_one = market_order_quote(instrument, 1, buying=True)
+            fee_one = (
+                quote_one.gross * instrument.transaction_fee_percent + 99
             ) // 100
-            cost = quote.gross + fee
+            cost_one = quote_one.gross + fee_one
             historic_dividend = instrument.dividends_paid // instrument.total_shares
             attractively_priced = (
                 instrument.current_price * 100 <= instrument.base_price * 120
                 or historic_dividend * 100 >= instrument.current_price * 5
             )
+            exposure = 0
+            instrument_reserve = required_reserve
             if loan is not None:
                 credit = game.bank.credit_profiles.get(bot.user_id)
-                required_reserve = (
+                instrument_reserve = (
                     loan.installment_amount
                     * pack.manifest.loan_investment_installment_reserve
                     + pack.manifest.pass_start_salary
@@ -1180,35 +1193,58 @@ class BotPolicy:
                     and credit.score >= 600
                     and bot.bot_personality is BotPersonality.AGGRESSIVE
                     and instrument.current_price <= instrument.base_price
-                    and bot.balance - cost >= required_reserve
-                    and exposure + quote.gross <= exposure_limit
                 )
             if (
                 instrument.available_shares > 0
-                and held < maximum
-                and bot.balance - cost >= required_reserve
+                and holding_capacity > 0
+                and bot.balance - cost_one >= instrument_reserve
                 and attractively_priced
             ):
+                surplus = bot.balance - instrument_reserve
+                budget = max(cost_one, surplus * allocation_percent // 100)
+                fair_turn_capacity = max(
+                    1,
+                    (instrument.total_shares + active_player_count - 1)
+                    // active_player_count,
+                )
+                quantity = min(
+                    instrument.available_shares,
+                    holding_capacity,
+                    fair_turn_capacity,
+                    max(1, budget // cost_one),
+                )
+                quote = market_order_quote(instrument, quantity, buying=True)
+                fee = (
+                    quote.gross * instrument.transaction_fee_percent + 99
+                ) // 100
+                cost = quote.gross + fee
+                if cost > surplus or (
+                    loan is not None
+                    and exposure + quote.gross > exposure_limit
+                ):
+                    continue
                 candidates.append(
                     (
                         historic_dividend * 100
                         + instrument.base_price * 100 // instrument.current_price,
                         -instrument.current_price,
+                        instrument.id,
                         instrument,
+                        quantity,
                     )
                 )
         if not candidates:
             return repayment_action
-        instrument = max(
+        _, _, _, instrument, quantity = max(
             candidates,
-            key=lambda item: (item[0], item[1], item[2].id),
-        )[2]
+            key=lambda item: (item[0], item[1], item[2]),
+        )
         return BotAction(
             bot.user_id,
             BuySharesCommand(
                 action="buy_shares",
                 instrument_id=instrument.id,
-                quantity=1,
+                quantity=quantity,
             ),
             "invest_surplus_cash_at_fair_value",
         )

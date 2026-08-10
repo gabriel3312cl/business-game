@@ -1,7 +1,12 @@
-import type { ContentPack, GameState, PlayerState } from '../types'
+import type {
+  ContentPack,
+  GameState,
+  PlayerSortOption,
+  PlayerState,
+} from '../types'
 import { buildGameAnalytics } from './gameAnalytics'
 
-export type PlayerSortOption = 'turnOrder' | 'netWorth' | 'cash' | 'name'
+export type { PlayerSortOption } from '../types'
 
 export interface PlayerListEntry {
   player: PlayerState

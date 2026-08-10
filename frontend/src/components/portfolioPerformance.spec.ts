@@ -28,6 +28,7 @@ function instrument(): InvestmentInstrumentState {
     last_settlement_sequence: 4,
     buy_volume: 5,
     sell_volume: 2,
+    trade_volume: 7,
     trade_count: 3,
     last_trade_price: 30,
     session_high: 32,

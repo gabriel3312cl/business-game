@@ -11,7 +11,12 @@ import business_game.realtime as realtime
 from business_game.application.bots import BotAction, BotPolicy
 from business_game.application.economy import initialize_bank
 from business_game.application.pack_loader import PackLoader
-from business_game.application.services import GameService, UserService
+from business_game.application.services import (
+    FUN_BOT_NAMES,
+    FUN_BOT_NAMES_BY_PERSONALITY,
+    GameService,
+    UserService,
+)
 from business_game.domain.errors import ConflictError, ForbiddenError
 from business_game.domain.models import (
     AcceptTradeCommand,
@@ -36,6 +41,7 @@ from business_game.domain.models import (
     GameStatus,
     MortgagePropertyCommand,
     OptionalRules,
+    OptionalRulesUpdate,
     PassAuctionCommand,
     PayDebtCommand,
     PlayerState,
@@ -51,6 +57,7 @@ from business_game.domain.models import (
     SetPropertyTradeAvailabilityCommand,
     TradeOffer,
     TurnPhase,
+    UpdateGameSettingsRequest,
     UserCreate,
 )
 from business_game.infrastructure.repositories import GameRepository
@@ -118,6 +125,21 @@ async def test_bot_http_contract(client: AsyncClient) -> None:
     assert removed.status_code == 200
     assert all(player["user_id"] != bot["user_id"] for player in removed.json()["players"])
 
+    configured = await client.patch(
+        f"/api/v1/games/{game_id}/settings",
+        headers=headers,
+        json={"max_players": 4},
+    )
+    assert configured.status_code == 200
+    filled = await client.post(
+        f"/api/v1/games/{game_id}/bots/fill",
+        headers=headers,
+    )
+    assert filled.status_code == 201
+    players = filled.json()["players"]
+    assert len(players) == 4
+    assert len([player for player in players if player["is_bot"]]) == 3
+
 
 async def test_host_can_add_and_remove_personality_bots(
     packs_dir: Path,
@@ -137,7 +159,8 @@ async def test_host_can_add_and_remove_personality_bots(
     bot = game.players[-1]
     assert bot.is_bot
     assert bot.bot_personality is BotPersonality.NEGOTIATOR
-    assert bot.display_name == "Bot Negociador"
+    assert bot.display_name in FUN_BOT_NAMES_BY_PERSONALITY[BotPersonality.NEGOTIATOR]
+    assert len({player.appearance_slot for player in game.players}) == 3
     assert game.events[-1].data["is_bot"] is True
 
     with pytest.raises(ForbiddenError, match="only the host"):
@@ -146,6 +169,39 @@ async def test_host_can_add_and_remove_personality_bots(
     game = await games.remove_bot(game.id, host.id, bot.user_id)
     assert all(player.user_id != bot.user_id for player in game.players)
     assert game.events[-1].type == "player.left"
+
+
+async def test_host_can_fill_every_open_slot_with_random_personality_bots(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    host = await create_user(session, "fill-bots-host@example.com", "Host")
+    guest = await create_user(session, "fill-bots-guest@example.com", "Guest")
+    games = GameService(session, PackLoader(packs_dir))
+    game = await games.create("classic-demo", host)
+    game = await games.join(game.id, guest)
+    game = await games.update_settings(
+        game.id,
+        host.id,
+        UpdateGameSettingsRequest(max_players=6),
+    )
+
+    with pytest.raises(ForbiddenError, match="only the host"):
+        await games.fill_with_random_bots(game.id, guest.id)
+
+    game = await games.fill_with_random_bots(game.id, host.id)
+    bots = [player for player in game.players if player.is_bot]
+
+    assert len(game.players) == 6
+    assert len(bots) == 4
+    assert all(bot.bot_controller is BotController.STANDARD for bot in bots)
+    assert all(bot.bot_personality in set(BotPersonality) for bot in bots)
+    assert all(bot.display_name in FUN_BOT_NAMES for bot in bots)
+    assert len({bot.display_name for bot in bots}) == len(bots)
+    assert len({player.appearance_slot for player in game.players}) == 6
+
+    with pytest.raises(ConflictError, match="full"):
+        await games.fill_with_random_bots(game.id, host.id)
 
 
 async def test_lobby_accepts_twenty_players_and_rejects_twenty_first(
@@ -168,10 +224,23 @@ async def test_lobby_accepts_twenty_players_and_rejects_twenty_first(
         )
 
     assert len(game.players) == 20
+    assert {player.appearance_slot for player in game.players} == set(range(20))
     with pytest.raises(ConflictError, match="full"):
         await games.add_bot(game.id, host.id, AddBotRequest(display_name="Bot 20"))
 
-    await games.start(game.id, host.id)
+    game = await games.update_settings(
+        game.id,
+        host.id,
+        UpdateGameSettingsRequest(
+            rules=OptionalRulesUpdate(stock_market_enabled=True),
+        ),
+    )
+    game = await games.start(game.id, host.id)
+    assert game.bank.monetary_base == 68_600
+    assert {item.total_shares for item in game.bank.investments} == {67}
+    started = next(event for event in game.events if event.type == "game.started")
+    assert started.data["player_count"] == 20
+    assert started.data["market_share_supply"] == 67
     await games.execute(game.id, host.id, RollCommand(action="roll"))
     game = await games.execute(
         game.id,
@@ -440,7 +509,7 @@ def test_bot_invests_only_surplus_cash_at_a_fair_price(packs_dir: Path) -> None:
 
     assert action is not None
     assert isinstance(action.command, BuySharesCommand)
-    assert action.command.quantity == 1
+    assert 1 < action.command.quantity <= 6
 
 
 def test_ai_auction_timeout_preserves_time_for_the_fallback() -> None:

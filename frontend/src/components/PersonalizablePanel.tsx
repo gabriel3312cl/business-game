@@ -9,6 +9,7 @@ import {
 } from '@mui/material'
 import {
   type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useEffect,
@@ -116,6 +117,31 @@ export function PersonalizablePanel({
     onHeightChange?.(Math.round(resizeState.currentHeight))
   }
 
+  const handleResizeKeyDown = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) => {
+    if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const maximumHeight = Math.max(MIN_PANEL_HEIGHT, window.innerHeight - 16)
+    const measuredHeight =
+      panelRef.current?.getBoundingClientRect().height ?? MIN_PANEL_HEIGHT
+    const step = event.shiftKey ? 96 : 24
+    const nextHeight =
+      event.key === 'Home'
+        ? MIN_PANEL_HEIGHT
+        : event.key === 'End'
+          ? maximumHeight
+          : Math.min(
+              maximumHeight,
+              Math.max(
+                MIN_PANEL_HEIGHT,
+                measuredHeight + (event.key === 'ArrowDown' ? step : -step),
+              ),
+            )
+    setDraftHeight(nextHeight)
+    onHeightChange?.(Math.round(nextHeight))
+  }
+
   return (
     <Box
       ref={panelRef}
@@ -182,6 +208,7 @@ export function PersonalizablePanel({
           sx={{
             minHeight: 48,
             flexShrink: 0,
+            pr: headerActions ? 9 : undefined,
             '& .MuiAccordionSummary-content': {
               my: 1,
               minWidth: 0,
@@ -194,12 +221,9 @@ export function PersonalizablePanel({
             <Box
               component="span"
               draggable
-              role="button"
-              tabIndex={0}
-              aria-label={dragLabel}
+              aria-hidden="true"
               title={dragLabel}
               onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => event.stopPropagation()}
               onDragStart={(event) => onDragStart?.(event)}
               onDragEnd={onDragEnd}
               sx={{
@@ -217,19 +241,6 @@ export function PersonalizablePanel({
           <Typography fontWeight={850} noWrap title={title}>
             {title}
           </Typography>
-          {headerActions && (
-            <Box
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => event.stopPropagation()}
-              sx={{
-                ml: 'auto',
-                display: 'inline-flex',
-                alignItems: 'center',
-              }}
-            >
-              {headerActions}
-            </Box>
-          )}
         </AccordionSummary>
         <AccordionDetails
           id={`${id}-content`}
@@ -238,11 +249,16 @@ export function PersonalizablePanel({
             flex: keepsContentHeight || fillsAvailableHeight ? 1 : '0 0 auto',
             display: 'flex',
             flexDirection: 'column',
-            overflowY: 'auto',
-            overscrollBehaviorY: 'contain',
-            touchAction: 'pan-y',
-            WebkitOverflowScrolling: 'touch',
-            scrollbarGutter: 'stable',
+            overflowY:
+              keepsContentHeight || fillsAvailableHeight ? 'auto' : 'visible',
+            overscrollBehaviorY:
+              keepsContentHeight || fillsAvailableHeight ? 'contain' : 'auto',
+            touchAction:
+              keepsContentHeight || fillsAvailableHeight ? 'pan-y' : 'auto',
+            WebkitOverflowScrolling:
+              keepsContentHeight || fillsAvailableHeight ? 'touch' : 'auto',
+            scrollbarGutter:
+              keepsContentHeight || fillsAvailableHeight ? 'stable' : 'auto',
             pt: 0.5,
             '& > *': { width: '100%' },
           }}
@@ -251,12 +267,39 @@ export function PersonalizablePanel({
         </AccordionDetails>
       </Accordion>
 
+      {headerActions && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 5,
+            right: 42,
+            zIndex: 3,
+            display: 'inline-flex',
+            alignItems: 'center',
+          }}
+        >
+          {headerActions}
+        </Box>
+      )}
+
       {personalizable && expanded && (
         <Box
           role="separator"
           aria-orientation="horizontal"
           aria-label={resizeLabel}
+          aria-valuemin={MIN_PANEL_HEIGHT}
+          aria-valuemax={Math.max(MIN_PANEL_HEIGHT, window.innerHeight - 16)}
+          aria-valuenow={
+            typeof currentHeight === 'number'
+              ? Math.round(currentHeight)
+              : Math.round(
+                  panelRef.current?.getBoundingClientRect().height ??
+                    MIN_PANEL_HEIGHT,
+                )
+          }
+          tabIndex={0}
           title={resizeLabel}
+          onKeyDown={handleResizeKeyDown}
           onPointerDown={handleResizeStart}
           onPointerMove={handleResizeMove}
           onPointerUp={finishResize}
@@ -266,10 +309,14 @@ export function PersonalizablePanel({
             left: 10,
             right: 10,
             bottom: 0,
-            height: 10,
+            height: 16,
             cursor: 'ns-resize',
             touchAction: 'none',
             zIndex: 2,
+            '&:focus-visible': {
+              outline: '2px solid #b8ff3d',
+              outlineOffset: -2,
+            },
             '&::after': {
               content: '""',
               position: 'absolute',

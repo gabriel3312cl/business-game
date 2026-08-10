@@ -32,6 +32,7 @@ const legacy: Parameters<typeof normalizeWorkspacePanelLayout>[1] = {
 describe('workspace panel layout', () => {
   it('migrates the prior general and management layout into the icon rail', () => {
     expect(normalizeWorkspacePanelLayout(null, legacy)).toEqual({
+      compact: false,
       order: [
         'room',
         'bank',
@@ -48,6 +49,30 @@ describe('workspace panel layout', () => {
       placements: rightPlacements,
       windows: {},
     })
+  })
+
+  it('preserves the compact rail choice without changing older layouts', () => {
+    const compact = normalizeWorkspacePanelLayout(
+      {
+        compact: true,
+        order: [
+          'room',
+          'heatmap',
+          'players',
+          'properties',
+          'trades',
+          'debts',
+          'bank',
+          'market',
+          'chat',
+        ],
+        visible: ['properties'],
+      },
+      legacy,
+    )
+
+    expect(compact.compact).toBe(true)
+    expect(normalizeWorkspacePanelLayout({}, legacy).compact).toBe(false)
   })
 
   it('supports multiple panels but keeps at least one selected', () => {

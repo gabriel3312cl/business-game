@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     environment:
       BUSINESS_GAME_ENVIRONMENT: ${BUSINESS_GAME_ENVIRONMENT:-development}
+      BUSINESS_GAME_CORS_ORIGINS: ${BUSINESS_GAME_CORS_ORIGINS:-["http://127.0.0.1:43173","http://localhost:43173"]}
       BUSINESS_GAME_DATABASE_URL: postgresql+asyncpg://${BUSINESS_GAME_POSTGRES_USER:-business_game}:${BUSINESS_GAME_POSTGRES_PASSWORD:-local_business_game_only}@postgres:5432/${BUSINESS_GAME_POSTGRES_DB:-business_game}
       BUSINESS_GAME_REDIS_URL: redis://redis:6379/0
       BUSINESS_GAME_JWT_SECRET: ${BUSINESS_GAME_JWT_SECRET:-development-only-change-this-secret}
@@ -66,7 +67,7 @@ services:
     environment:
       BUSINESS_GAME_VITE_PROXY_TARGET: http://api:8000
     ports:
-      - "127.0.0.1:${BUSINESS_GAME_FRONTEND_PORT:-43173}:8080"
+      - "${BUSINESS_GAME_FRONTEND_BIND_ADDRESS:-127.0.0.1}:${BUSINESS_GAME_FRONTEND_PORT:-43173}:8080"
     volumes:
       - ./frontend:/app
       - /app/node_modules

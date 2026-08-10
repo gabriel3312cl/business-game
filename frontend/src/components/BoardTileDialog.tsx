@@ -1,6 +1,7 @@
 import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded'
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded'
+import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded'
 import {
   Box,
   Button,
@@ -23,7 +24,7 @@ import type {
   TileDefinition,
 } from '../types'
 import { TileVisual } from './AssetVisual'
-import { playerColors } from './gameColors'
+import { playerColor } from './gameColors'
 import {
   buildAvailability,
   mortgageAvailability,
@@ -43,6 +44,7 @@ interface Props {
   onClose: () => void
   onSelectTile: (tileId: string) => void
   onCommand?: (command: GameCommand) => Promise<boolean>
+  onTrade?: (ownerId: string, propertyId: string) => void
 }
 
 export function BoardTileDialog({
@@ -54,6 +56,7 @@ export function BoardTileDialog({
   onClose,
   onSelectTile,
   onCommand,
+  onTrade,
 }: Props) {
   const { t } = useTranslation()
   if (!tile) return null
@@ -74,6 +77,31 @@ export function BoardTileDialog({
     : 0
   const groupComplete = groupTiles.length > 0 && groupOwnedCount === groupTiles.length
   const canManage = Boolean(game && currentUserId && isCurrentOwner && onCommand)
+  const currentPlayer = game?.players.find(
+    (player) => player.user_id === currentUserId,
+  )
+  const isTradeableAsset =
+    tile.price != null &&
+    tile.purchasable !== false &&
+    ['property', 'transport', 'utility'].includes(tile.kind)
+  const tradeAvailable =
+    !game?.trade_unavailable_property_ids.includes(tile.id) && level === 0
+  const showOwnerTrade = Boolean(
+    isTradeableAsset && ownerId && !isCurrentOwner && currentUserId,
+  )
+  const canStartOwnerTrade = Boolean(
+    showOwnerTrade &&
+      tradeAvailable &&
+      owner &&
+      !owner.bankrupt &&
+      currentPlayer &&
+      !currentPlayer.bankrupt &&
+      game?.status === 'playing' &&
+      !game.active_auction &&
+      !game.pending_auction_selector_id &&
+      !game.active_debt &&
+      onTrade,
+  )
   const build =
     game && currentUserId
       ? buildAvailability(game, pack, tile, currentUserId)
@@ -140,7 +168,7 @@ export function BoardTileDialog({
             {owner ? (
               <Chip
                 sx={{
-                  borderColor: playerColors[ownerIndex % playerColors.length],
+                  borderColor: playerColor(owner, ownerIndex),
                 }}
                 variant="outlined"
                 label={t('ownedBy', { player: owner.display_name })}
@@ -412,6 +440,22 @@ export function BoardTileDialog({
         </Stack>
       </DialogContent>
       <DialogActions>
+        {showOwnerTrade && ownerId && owner && (
+          <Button
+            variant="contained"
+            color="secondary"
+            startIcon={<SwapHorizRoundedIcon />}
+            disabled={busy || !canStartOwnerTrade}
+            onClick={() => {
+              onClose()
+              onTrade?.(ownerId, tile.id)
+            }}
+          >
+            {tradeAvailable
+              ? t('tradeWithOwner', { player: owner.display_name })
+              : t('propertyNotAvailableForTrade')}
+          </Button>
+        )}
         <Button onClick={onClose}>{t('close')}</Button>
       </DialogActions>
     </Dialog>

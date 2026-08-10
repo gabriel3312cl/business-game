@@ -33,6 +33,7 @@ function investment(): InvestmentInstrumentState {
     last_settlement_sequence: 1,
     buy_volume: 2,
     sell_volume: 0,
+    trade_volume: 2,
     trade_count: 1,
     last_trade_price: 20,
     session_high: 30,

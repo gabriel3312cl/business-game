@@ -338,7 +338,7 @@ def build_advisor_context(
                 "session_high": instrument.session_high,
                 "available_shares": instrument.available_shares,
                 "total_shares": instrument.total_shares,
-                "trading_volume": instrument.buy_volume + instrument.sell_volume,
+                "trading_volume": instrument.trade_volume,
                 "gross_revenue": instrument.gross_revenue,
                 "current_round_revenue": instrument.period_revenue,
                 "dividends_accrued": round(

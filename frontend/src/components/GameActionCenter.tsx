@@ -24,6 +24,7 @@ import type {
   VisualEffectsIntensity,
 } from '../types'
 import { Dice3D } from './Dice3D'
+import { EconomicPulsePanel } from './EconomicPulsePanel'
 import { GameActivityFeed } from './GameActivityFeed'
 import { PlayerStatusSummary } from './PlayerStatusSummary'
 
@@ -116,21 +117,40 @@ export function GameActionCenter({
             })
           : ''}
       </Typography>
-      <PlayerStatusSummary game={game} pack={pack} playerId={user.id} />
-      <Dice3D
-        key={latestDice.sequence ?? 'decorative'}
-        values={latestDice.values}
-        rollSequence={latestDice.sequence}
-        dieLabel={t('dice')}
-        motionIntensity={motionIntensity}
-      />
-
-      {game.status === 'lobby' ? (
-        <>
+      <EconomicPulsePanel game={game} pack={pack} />
+      <Box
+        id="turn-actions"
+        component="section"
+        tabIndex={-1}
+        aria-label={t('turnActions')}
+        sx={{
+          width: 'min(100%, 620px)',
+          px: { xs: 0.75, sm: 1.25 },
+          py: { xs: 0.75, sm: 1 },
+          borderRadius: 2.5,
+          border: '1px solid',
+          borderColor: isCurrentPlayer
+            ? 'rgba(184,255,61,.42)'
+            : 'rgba(255,255,255,.1)',
+          bgcolor: isCurrentPlayer
+            ? 'rgba(184,255,61,.085)'
+            : 'rgba(17,14,29,.76)',
+          boxShadow: isCurrentPlayer
+            ? '0 10px 34px rgba(0,0,0,.24), inset 0 0 24px rgba(184,255,61,.045)'
+            : '0 8px 24px rgba(0,0,0,.18)',
+          '&:focus-visible': {
+            outline: '3px solid #b8ff3d',
+            outlineOffset: 3,
+          },
+        }}
+      >
+        <Stack spacing={{ xs: 0.65, sm: 0.9 }} alignItems="center">
+          {game.status === 'lobby' ? (
+            <>
           <Typography
             fontWeight={800}
             aria-live="polite"
-            sx={{ fontSize: { xs: '0.65rem', sm: '0.9rem', lg: '1rem' } }}
+            sx={{ fontSize: { xs: '0.8rem', sm: '0.9rem', lg: '1rem' } }}
           >
             {t('waitingForPlayers', {
               current: game.players.length,
@@ -148,14 +168,14 @@ export function GameActionCenter({
               {t('startGame')}
             </Button>
           )}
-        </>
-      ) : game.status === 'playing' ? (
-        <>
+            </>
+          ) : game.status === 'playing' ? (
+            <>
           <Typography
             color={isCurrentPlayer ? 'secondary.light' : 'text.secondary'}
             fontWeight={isCurrentPlayer ? 800 : 600}
             aria-live="polite"
-            sx={{ fontSize: { xs: '0.62rem', sm: '0.85rem', lg: '1rem' } }}
+            sx={{ fontSize: { xs: '0.8rem', sm: '0.85rem', lg: '1rem' } }}
           >
             {isCurrentPlayer
               ? t('yourTurn')
@@ -329,20 +349,54 @@ export function GameActionCenter({
               })}
             />
           )}
-        </>
-      ) : (
-        <Typography fontWeight={800}>
-          {t(`gameStatusMessage.${game.status}`)}
-        </Typography>
-      )}
+            </>
+          ) : (
+            <Typography fontWeight={800}>
+              {t(`gameStatusMessage.${game.status}`)}
+            </Typography>
+          )}
+        </Stack>
+      </Box>
+
+      <PlayerStatusSummary game={game} pack={pack} playerId={user.id} />
+      <Dice3D
+        key={latestDice.sequence ?? 'decorative'}
+        values={latestDice.values}
+        rollSequence={latestDice.sequence}
+        dieLabel={t('dice')}
+        motionIntensity={motionIntensity}
+      />
 
       <Box
+        component="details"
         sx={{
           width: 'min(100%, 620px)',
           px: { xs: 0.5, sm: 1.5 },
           display: { xs: 'none', sm: 'block' },
+          borderRadius: 2,
+          color: 'text.secondary',
+          '&[open]': {
+            pb: 1,
+            bgcolor: 'rgba(18,15,31,.68)',
+          },
         }}
       >
+        <Typography
+          component="summary"
+          variant="body2"
+          fontWeight={750}
+          sx={{
+            py: 0.75,
+            cursor: 'pointer',
+            color: 'text.secondary',
+            '&:focus-visible': {
+              outline: '2px solid #b8ff3d',
+              outlineOffset: 2,
+            },
+          }}
+        >
+          {t('activity.title')}
+        </Typography>
         <GameActivityFeed
           compact
           events={visibleEvents}

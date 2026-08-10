@@ -105,6 +105,11 @@ export function RentDebtResolutionPanel({
   const totalWithInterest = Math.ceil(
     (settlementAmount * (100 + interestPercent)) / 100,
   )
+  const proposedTotal = proposal
+    ? Math.ceil(
+        (settlementAmount * (100 + proposal.interest_percent)) / 100,
+      )
+    : 0
   const debtorPropertyIds = Object.entries(game.owners)
     .filter(
       ([propertyId, ownerId]) =>
@@ -169,10 +174,9 @@ export function RentDebtResolutionPanel({
           {proposal.installments > 0 && (
             <Typography variant="caption" fontWeight={700}>
               {t('rentDebt.proposalSummary', {
-                total: Math.ceil(
-                  (settlementAmount * (100 + proposal.interest_percent)) / 100,
-                ),
+                total: proposedTotal,
                 installments: proposal.installments,
+                installment: Math.ceil(proposedTotal / proposal.installments),
                 interest: proposal.interest_percent,
               })}
             </Typography>
@@ -453,12 +457,15 @@ export function RentDebtResolutionPanel({
                       }}
                     />
                   </Stack>
-                  <Typography variant="caption">
-                    {t('rentDebt.preview', {
-                      total: totalWithInterest,
-                      installments,
-                    })}
-                  </Typography>
+                  {installments >= 2 && (
+                    <Typography variant="caption">
+                      {t('rentDebt.preview', {
+                        total: totalWithInterest,
+                        installments,
+                        installment: Math.ceil(totalWithInterest / installments),
+                      })}
+                    </Typography>
+                  )}
                 </>
               )}
               <Button

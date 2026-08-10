@@ -28,7 +28,7 @@ import {
   type VisualEffectPlayback,
   visualEffectsForEvent,
 } from '../visualEffects'
-import { playerColors } from './gameColors'
+import { playerColor } from './gameColors'
 
 interface Props {
   game: GameState
@@ -155,7 +155,10 @@ function EffectPresentation({
             sx={{
               width: 38,
               height: 38,
-              bgcolor: playerColors[Math.max(0, index) % playerColors.length],
+              bgcolor:
+                index >= 0
+                  ? playerColor(game.players[index], index)
+                  : 'secondary.main',
               color: '#090711',
               fontWeight: 900,
             }}

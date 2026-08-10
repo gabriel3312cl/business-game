@@ -1,4 +1,5 @@
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded'
+import GroupAddRoundedIcon from '@mui/icons-material/GroupAddRounded'
 import SmartToyRoundedIcon from '@mui/icons-material/SmartToyRounded'
 import {
   Box,
@@ -26,6 +27,7 @@ interface Props {
     personality: BotPersonality,
     displayName?: string,
   ) => Promise<boolean>
+  onFill: () => Promise<boolean>
   onRemove: (botId: string) => Promise<boolean>
 }
 
@@ -42,6 +44,7 @@ export function BotManagementPanel({
   isHost,
   busy,
   onAdd,
+  onFill,
   onRemove,
 }: Props) {
   const { t } = useTranslation()
@@ -50,6 +53,7 @@ export function BotManagementPanel({
   const [displayName, setDisplayName] = useState('')
   const bots = game.players.filter((player) => player.is_bot)
   const roomIsFull = game.players.length >= maximumPlayers
+  const remainingSlots = Math.max(0, maximumPlayers - game.players.length)
 
   return (
     <Box>
@@ -87,6 +91,23 @@ export function BotManagementPanel({
       )}
       {isHost ? (
         <Stack spacing={1}>
+          <Button
+            fullWidth
+            variant="contained"
+            color="secondary"
+            startIcon={<GroupAddRoundedIcon />}
+            disabled={busy || roomIsFull}
+            onClick={() => void onFill()}
+          >
+            {roomIsFull
+              ? t('roomFull')
+              : t('fillWithRandomBots', { count: remainingSlots })}
+          </Button>
+          {!roomIsFull && (
+            <Typography variant="caption" color="text.secondary">
+              {t('fillWithRandomBotsHint')}
+            </Typography>
+          )}
           <FormControl size="small" sx={{ width: '100%', minWidth: 0 }}>
             <InputLabel>{t('botController')}</InputLabel>
             <Select
@@ -122,6 +143,7 @@ export function BotManagementPanel({
             fullWidth
             size="small"
             label={t('botNameOptional')}
+            helperText={t('botNameOptionalHint')}
             value={displayName}
             disabled={busy || roomIsFull}
             inputProps={{ maxLength: 40 }}

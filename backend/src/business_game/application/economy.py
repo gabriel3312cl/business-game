@@ -7,11 +7,14 @@ from business_game.domain.models import (
     BankCreditProfileState,
     ContentPack,
     GameState,
+    GameStatus,
     InvestmentInstrumentState,
     MarketOrderSide,
     PlayerState,
     TileKind,
 )
+
+MARKET_BASELINE_PLAYERS = 6
 
 
 @dataclass(frozen=True)
@@ -31,27 +34,82 @@ class MarketQuote:
     price_impact_percent: float
 
 
-def derived_money_supply(pack: ContentPack) -> int:
+def scale_market_capacity(base_capacity: int, player_count: int) -> int:
+    active_players = max(1, player_count)
+    return max(
+        base_capacity,
+        (base_capacity * active_players + MARKET_BASELINE_PLAYERS - 1)
+        // MARKET_BASELINE_PLAYERS,
+    )
+
+
+def derived_money_supply(
+    pack: ContentPack,
+    player_count: int = MARKET_BASELINE_PLAYERS,
+) -> int:
     configured = pack.manifest.bank_money_supply
-    if configured is not None:
-        return configured
     purchase_total = sum(tile.price or 0 for tile in pack.board.tiles)
     board_based_supply = purchase_total * 18 // 5
-    player_based_floor = (
-        pack.manifest.starting_balance * pack.manifest.max_players
+    baseline_supply = configured or max(
+        board_based_supply,
+        pack.manifest.starting_balance * MARKET_BASELINE_PLAYERS,
     )
-    return max(player_based_floor, board_based_supply, 1)
+    scaled_supply = scale_market_capacity(baseline_supply, player_count)
+    player_cash_floor = pack.manifest.starting_balance * max(1, player_count)
+    return max(scaled_supply, player_cash_floor, 1)
+
+
+def market_share_supply(pack: ContentPack, player_count: int) -> int:
+    return scale_market_capacity(
+        pack.manifest.investment_share_count,
+        player_count,
+    )
+
+
+def synchronize_trade_volumes(game: GameState) -> None:
+    event_volume: dict[str, int] = {}
+    for event in game.events:
+        instrument_id = event.data.get("instrument_id")
+        quantity = event.data.get("quantity")
+        if (
+            not isinstance(instrument_id, str)
+            or not isinstance(quantity, int)
+            or isinstance(quantity, bool)
+            or quantity <= 0
+        ):
+            continue
+        if event.type in {"investment.shares_bought", "investment.shares_sold"} or (
+            event.type == "investment.order_filled"
+            and event.data.get("buy_order_id") is not None
+            and event.data.get("sell_order_id") is not None
+        ):
+            event_volume[instrument_id] = event_volume.get(instrument_id, 0) + quantity
+    for instrument in game.bank.investments:
+        instrument.trade_volume = max(
+            instrument.trade_volume,
+            event_volume.get(instrument.id, 0),
+        )
 
 
 def initialize_bank(game: GameState, pack: ContentPack) -> None:
     was_initialized = game.bank.initialized
+    player_count = sum(not player.bankrupt for player in game.players)
     if not game.bank.initialized:
         game.bank.initialized = True
-        game.bank.monetary_base = derived_money_supply(pack)
         game.bank.minimum_reserve_percent = (
             pack.manifest.bank_minimum_reserve_percent
         )
-    ensure_investments(game, pack)
+    if game.status is GameStatus.LOBBY:
+        game.bank.monetary_base = derived_money_supply(pack, player_count)
+        game.bank.emergency_issuance = 0
+    elif not was_initialized:
+        game.bank.monetary_base = derived_money_supply(pack, player_count)
+    ensure_investments(
+        game,
+        pack,
+        player_count=player_count if game.status is GameStatus.LOBBY else None,
+    )
+    synchronize_trade_volumes(game)
     if not was_initialized:
         reconcile_bank(game)
     refresh_credit_profiles(game, pack)
@@ -147,9 +205,19 @@ def _collateral_value(game: GameState, pack: ContentPack, player_id: UUID) -> in
     return property_collateral + building_collateral + investment_collateral
 
 
-def ensure_investments(game: GameState, pack: ContentPack) -> None:
+def ensure_investments(
+    game: GameState,
+    pack: ContentPack,
+    *,
+    player_count: int | None = None,
+) -> None:
     if not game.settings.rules.stock_market_enabled:
         return
+    share_supply = (
+        market_share_supply(pack, player_count)
+        if player_count is not None
+        else pack.manifest.investment_share_count
+    )
     existing_ids = {item.id for item in game.bank.investments}
     for tile in pack.board.tiles:
         if (
@@ -166,8 +234,8 @@ def ensure_investments(game: GameState, pack: ContentPack) -> None:
                 id=f"market:{tile.id}",
                 tile_id=tile.id,
                 name_key=tile.name_key,
-                total_shares=pack.manifest.investment_share_count,
-                available_shares=pack.manifest.investment_share_count,
+                total_shares=share_supply,
+                available_shares=share_supply,
                 base_price=share_price,
                 current_price=share_price,
                 dividend_percent=pack.manifest.investment_dividend_percent,
@@ -228,8 +296,8 @@ def ensure_investments(game: GameState, pack: ContentPack) -> None:
                 tile_id=tile_id,
                 name_key=name_key,
                 instrument_kind=instrument_kind,
-                total_shares=pack.manifest.investment_share_count,
-                available_shares=pack.manifest.investment_share_count,
+                total_shares=share_supply,
+                available_shares=share_supply,
                 base_price=base_price,
                 current_price=base_price,
                 dividend_percent=pack.manifest.investment_dividend_percent,
@@ -251,8 +319,8 @@ def ensure_investments(game: GameState, pack: ContentPack) -> None:
                 tile_id="institution:bgx",
                 name_key="marketPanel.indexFundName",
                 instrument_kind="index",
-                total_shares=pack.manifest.investment_share_count,
-                available_shares=pack.manifest.investment_share_count,
+                total_shares=share_supply,
+                available_shares=share_supply,
                 base_price=100,
                 current_price=100,
                 dividend_percent=pack.manifest.investment_dividend_percent,
@@ -267,6 +335,9 @@ def ensure_investments(game: GameState, pack: ContentPack) -> None:
             )
         )
     for instrument in game.bank.investments:
+        if player_count is not None:
+            instrument.total_shares = share_supply
+            instrument.available_shares = share_supply
         instrument.dividend_percent = pack.manifest.investment_dividend_percent
         instrument.transaction_fee_percent = (
             pack.manifest.investment_transaction_fee_percent

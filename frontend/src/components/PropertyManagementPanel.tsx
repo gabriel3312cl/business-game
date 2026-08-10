@@ -23,7 +23,7 @@ import type {
   User,
 } from '../types'
 import { BoardTileDialog } from './BoardTileDialog'
-import { playerColors } from './gameColors'
+import { playerColor } from './gameColors'
 import {
   buildGroupRoundAvailability,
   sellGroupRoundAvailability,
@@ -36,6 +36,7 @@ interface Props {
   user: User
   busy: boolean
   onCommand: (command: GameCommand) => Promise<boolean>
+  onTrade?: (ownerId: string, propertyId: string) => void
   onHoveredPropertyChange?: (propertyId: string | null) => void
   embedded?: boolean
 }
@@ -56,6 +57,7 @@ export function PropertyManagementPanel({
   user,
   busy,
   onCommand,
+  onTrade,
   onHoveredPropertyChange,
   embedded = false,
 }: Props) {
@@ -316,8 +318,7 @@ export function PropertyManagementPanel({
                                     height: 7,
                                     flex: '0 0 auto',
                                     borderRadius: '50%',
-                                    bgcolor:
-                                      playerColors[ownerIndex % playerColors.length],
+                                    bgcolor: playerColor(owner, ownerIndex),
                                   }}
                                 />
                               )}
@@ -426,6 +427,7 @@ export function PropertyManagementPanel({
         onClose={() => setSelectedTileId(null)}
         onSelectTile={setSelectedTileId}
         onCommand={onCommand}
+        onTrade={onTrade}
       />
     </Box>
   )

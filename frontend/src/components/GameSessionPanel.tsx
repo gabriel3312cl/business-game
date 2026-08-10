@@ -2,6 +2,8 @@ import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded'
 import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded'
 import AccountCircleRoundedIcon from '@mui/icons-material/AccountCircleRounded'
 import AnalyticsRoundedIcon from '@mui/icons-material/AnalyticsRounded'
+import ChevronLeftRoundedIcon from '@mui/icons-material/ChevronLeftRounded'
+import ChevronRightRoundedIcon from '@mui/icons-material/ChevronRightRounded'
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import ForumRoundedIcon from '@mui/icons-material/ForumRounded'
@@ -16,6 +18,7 @@ import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import ReceiptLongRoundedIcon from '@mui/icons-material/ReceiptLongRounded'
 import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded'
 import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded'
+import TuneRoundedIcon from '@mui/icons-material/TuneRounded'
 import VerticalAlignCenterRoundedIcon from '@mui/icons-material/VerticalAlignCenterRounded'
 import {
   Alert,
@@ -37,6 +40,8 @@ import {
   MenuItem,
   Select,
   Stack,
+  Tab,
+  Tabs,
   ToggleButton,
   ToggleButtonGroup,
   Tooltip,
@@ -69,6 +74,7 @@ import { chatApi } from '../chat/api'
 import { GameChatPanel } from '../chat/GameChatPanel'
 import type { ChatMessage } from '../chat/types'
 import { useGameChat } from '../chat/useGameChat'
+import { createCommandId } from '../commandId'
 import type {
   AutomationPreferenceSettings,
   BoardHistoricalStats,
@@ -81,6 +87,7 @@ import type {
   ManagementPanelId,
   PanelId,
   PanelLayoutPreferences,
+  PlayerSortOption,
   TokenAppearanceSettings,
   User,
   VisualEffectsIntensity,
@@ -118,8 +125,8 @@ import {
 } from './gameMotion'
 import { GamePlayersPanel } from './GamePlayersPanel'
 import { FloatingWorkspacePanel } from './FloatingWorkspacePanel'
-import { playerColors } from './gameColors'
-import { GameTradePanel } from './GameTradePanel'
+import { automaticPlayerAppearance } from './playerAppearance'
+import { GameTradePanel, type TradeDraft } from './GameTradePanel'
 import { LobbySettingsPanel } from './LobbySettingsPanel'
 import {
   clearManagementPanelHeights,
@@ -145,7 +152,6 @@ import {
   moveWorkspacePanel,
   normalizeWorkspacePanelLayout,
   placeWorkspacePanel,
-  WORKSPACE_PANEL_IDS,
 } from './workspacePanelLayout'
 
 const GameAnalyticsDashboard = lazy(() =>
@@ -213,6 +219,18 @@ const DEFAULT_PANEL_LAYOUT: PanelLayout = {
 const PANEL_LAYOUT_STORAGE_PREFIX = 'business-game:panel-layout:v1:'
 const TOKEN_APPEARANCE_STORAGE_PREFIX = 'business-game:token-appearance:v1:'
 const VISUAL_EFFECTS_STORAGE_PREFIX = 'business-game:visual-effects:v1:'
+const PLAYER_SORT_STORAGE_PREFIX = 'business-game:player-sort:v1:'
+const WORKSPACE_PANEL_GROUPS = [
+  { id: 'status', panelIds: ['room', 'players', 'chat'] },
+  {
+    id: 'management',
+    panelIds: ['properties', 'trades', 'debts', 'bank', 'market'],
+  },
+  { id: 'analysis', panelIds: ['heatmap'] },
+] satisfies Array<{
+  id: 'status' | 'management' | 'analysis'
+  panelIds: WorkspacePanelId[]
+}>
 const DEFAULT_VISUAL_EFFECTS: VisualEffectsPreferenceSettings = {
   intensity: 'full',
 }
@@ -340,6 +358,32 @@ function normalizeVisualEffects(
     : DEFAULT_VISUAL_EFFECTS
 }
 
+function readPlayerSort(userId: string): PlayerSortOption {
+  try {
+    const stored = localStorage.getItem(`${PLAYER_SORT_STORAGE_PREFIX}${userId}`)
+    return isPlayerSortOption(stored) ? stored : 'turnOrder'
+  } catch {
+    return 'turnOrder'
+  }
+}
+
+function writePlayerSort(userId: string, sortOption: PlayerSortOption): void {
+  try {
+    localStorage.setItem(`${PLAYER_SORT_STORAGE_PREFIX}${userId}`, sortOption)
+  } catch {
+    // PostgreSQL remains authoritative when browser storage is unavailable.
+  }
+}
+
+function isPlayerSortOption(value: unknown): value is PlayerSortOption {
+  return (
+    value === 'turnOrder' ||
+    value === 'netWorth' ||
+    value === 'cash' ||
+    value === 'name'
+  )
+}
+
 function isPanelId(value: unknown): value is PanelId {
   return typeof value === 'string' && PANEL_IDS.includes(value as PanelId)
 }
@@ -378,6 +422,7 @@ export function GameSessionPanel({
   const { t, i18n } = useTranslation()
   const theme = useTheme()
   const isTablet = useMediaQuery(theme.breakpoints.up('md'))
+  const isWideWorkspace = useMediaQuery(theme.breakpoints.up('lg'))
   const socketRef = useRef<Socket | null>(null)
   const refreshingSocketRef = useRef(false)
   const [busy, setBusy] = useState(false)
@@ -389,9 +434,14 @@ export function GameSessionPanel({
     game.status === 'finished',
   )
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null)
+  const [mobileManagementPanel, setMobileManagementPanel] =
+    useState<ManagementPanelId>('properties')
   const [panelLayout, setPanelLayout] = useState<PanelLayout>(() =>
     readPanelLayout(user.id),
   )
+  const [tabletWorkspacePanel, setTabletWorkspacePanel] =
+    useState<WorkspacePanelId>(() => panelLayout.rail.visible[0] ?? 'properties')
+  const [layoutEditing, setLayoutEditing] = useState(false)
   const [tokenAppearance, setTokenAppearance] =
     useState<TokenAppearanceSettings | null>(() => readTokenAppearance(user.id))
   const tokenAppearanceRef = useRef(tokenAppearance)
@@ -406,6 +456,11 @@ export function GameSessionPanel({
     useState<VisualEffectsPreferenceSettings>(() => readVisualEffects(user.id))
   const visualEffectsRef = useRef(visualEffects)
   const visualEffectsChangeRef = useRef(0)
+  const [playerSort, setPlayerSort] = useState<PlayerSortOption>(() =>
+    readPlayerSort(user.id),
+  )
+  const playerSortRef = useRef(playerSort)
+  const playerSortChangeRef = useRef(0)
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
   const [analyticsOpen, setAnalyticsOpen] = useState(false)
   const [highlightedPropertyId, setHighlightedPropertyId] = useState<
@@ -414,6 +469,7 @@ export function GameSessionPanel({
   const [highlightedPlayerId, setHighlightedPlayerId] = useState<string | null>(
     null,
   )
+  const [tradeDraft, setTradeDraft] = useState<TradeDraft | null>(null)
   const panelLayoutRef = useRef(panelLayout)
   const panelLayoutChangeRef = useRef(0)
   const preferenceSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
@@ -425,6 +481,12 @@ export function GameSessionPanel({
     useState<WorkspacePanelId | null>(null)
   const [draggedManagementPanel, setDraggedManagementPanel] =
     useState<ManagementPanelId | null>(null)
+  useEffect(() => {
+    if (!layoutEditing) {
+      setDraggedWorkspacePanel(null)
+      setDraggedManagementPanel(null)
+    }
+  }, [layoutEditing])
   const chat = useGameChat(game.id)
   const receiveChatMessage = chat.receive
   const receiveChatMessageWithAudio = useCallback(
@@ -678,6 +740,18 @@ export function GameSessionPanel({
     [],
   )
 
+  const savePlayerSortRemotely = useCallback((sortOption: PlayerSortOption) => {
+    preferenceSaveQueueRef.current = preferenceSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await api.updatePlayerSort(sortOption)
+        } catch {
+          // The per-user browser cache remains available until a later change retries.
+        }
+      })
+  }, [])
+
   useEffect(() => {
     gameAudio.useUser(user.id)
     const unsubscribe = gameAudio.subscribe(() => {
@@ -707,6 +781,7 @@ export function GameSessionPanel({
     const tokenChangesAtStart = tokenAppearanceChangeRef.current
     const automationChangesAtStart = automationSettingsChangeRef.current
     const visualEffectsChangesAtStart = visualEffectsChangeRef.current
+    const playerSortChangesAtStart = playerSortChangeRef.current
     void api
       .getUserPreferences()
       .then((preferences) => {
@@ -776,6 +851,19 @@ export function GameSessionPanel({
         } else if (!preferences.visual_effects) {
           saveVisualEffectsRemotely(visualEffectsRef.current)
         }
+        if (
+          preferences.player_sort &&
+          playerSortChangeRef.current === playerSortChangesAtStart
+        ) {
+          playerSortRef.current = preferences.player_sort
+          setPlayerSort(preferences.player_sort)
+          writePlayerSort(user.id, preferences.player_sort)
+        } else if (
+          playerSortChangeRef.current !== playerSortChangesAtStart ||
+          !preferences.player_sort
+        ) {
+          savePlayerSortRemotely(playerSortRef.current)
+        }
         setAutomationSettingsReady(true)
       })
       .catch(() => {
@@ -789,6 +877,7 @@ export function GameSessionPanel({
     saveAudioSettingsRemotely,
     saveAutomationSettingsRemotely,
     savePanelLayoutRemotely,
+    savePlayerSortRemotely,
     saveTokenAppearanceRemotely,
     saveVisualEffectsRemotely,
     user.id,
@@ -831,6 +920,17 @@ export function GameSessionPanel({
     [saveVisualEffectsRemotely, user.id],
   )
 
+  const updatePlayerSort = useCallback(
+    (sortOption: PlayerSortOption) => {
+      playerSortRef.current = sortOption
+      playerSortChangeRef.current += 1
+      setPlayerSort(sortOption)
+      writePlayerSort(user.id, sortOption)
+      savePlayerSortRemotely(sortOption)
+    },
+    [savePlayerSortRemotely, user.id],
+  )
+
   const updatePanelLayout = useCallback(
     (update: (current: PanelLayout) => PanelLayout) => {
       const next = update(panelLayoutRef.current)
@@ -856,6 +956,38 @@ export function GameSessionPanel({
     [updatePanelLayout],
   )
 
+  const toggleWorkspacePanel = useCallback(
+    (panelId: WorkspacePanelId) => {
+      if (!isWideWorkspace) {
+        setTabletWorkspacePanel(panelId)
+        return
+      }
+      updatePanelLayout((current) => {
+        const isVisible = current.rail.visible.includes(panelId)
+        const visible = isVisible
+          ? current.rail.visible.length > 1
+            ? current.rail.visible.filter((candidate) => candidate !== panelId)
+            : current.rail.visible
+          : [...current.rail.visible, panelId]
+        return {
+          ...current,
+          rail: { ...current.rail, visible },
+        }
+      })
+    },
+    [isWideWorkspace, updatePanelLayout],
+  )
+
+  const toggleWorkspaceRail = useCallback(() => {
+    updatePanelLayout((current) => ({
+      ...current,
+      rail: {
+        ...current.rail,
+        compact: !current.rail.compact,
+      },
+    }))
+  }, [updatePanelLayout])
+
   const startWorkspacePanelDrag = useCallback(
     (panelId: WorkspacePanelId, event: DragEvent<HTMLElement>) => {
       event.stopPropagation()
@@ -868,7 +1000,7 @@ export function GameSessionPanel({
 
   const dropWorkspacePanel = useCallback(
     (
-      event: DragEvent<HTMLDivElement>,
+      event: DragEvent<HTMLElement>,
       targetId: WorkspacePanelId | null,
       placement: Exclude<WorkspacePanelPlacement, 'floating'>,
     ) => {
@@ -1220,6 +1352,12 @@ export function GameSessionPanel({
     }
   }
 
+  const openAnalytics = () => {
+    setMobilePanel(null)
+    setAnalyticsOpen(true)
+    void run(() => api.getGame(game.id), true)
+  }
+
   const sendCommand = useCallback(
     async (command: GameCommand): Promise<boolean> => {
       const socket = socketRef.current
@@ -1245,9 +1383,9 @@ export function GameSessionPanel({
           setBusy(false)
         }
       }
+      const commandId = createCommandId()
       setBusy(true)
       setError(null)
-      const commandId = crypto.randomUUID()
       return new Promise<boolean>((resolve) => {
         socket.timeout(8000).emit(
           'game_command',
@@ -1398,22 +1536,15 @@ export function GameSessionPanel({
   const currentUserPlayerIndex = game.players.findIndex(
     (player) => player.user_id === user.id,
   )
+  const currentUserPlayer = game.players[currentUserPlayerIndex]
   const tokenDialogValue = useMemo<TokenAppearanceSettings>(
     () =>
-      tokenAppearance ?? {
-        color:
-          playerColors[
-            Math.max(0, currentUserPlayerIndex) % playerColors.length
-          ],
-        secondary_color: '#9d8cff',
-        fill: 'solid',
-        gradient_angle: 135,
-        pattern: 'dots',
-        shape: 'circle',
-        icon: 'number',
-        emoji: null,
-      },
-    [currentUserPlayerIndex, tokenAppearance],
+      tokenAppearance ??
+      automaticPlayerAppearance(
+        currentUserPlayer ?? { appearance_slot: null },
+        Math.max(0, currentUserPlayerIndex),
+      ),
+    [currentUserPlayer, currentUserPlayerIndex, tokenAppearance],
   )
   const roomContent = (
     <Stack spacing={1.5}>
@@ -1553,10 +1684,7 @@ export function GameSessionPanel({
               size="small"
               color="secondary"
               startIcon={<AnalyticsRoundedIcon />}
-              onClick={() => {
-                setAnalyticsOpen(true)
-                void run(() => api.getGame(game.id), true)
-              }}
+              onClick={openAnalytics}
             >
               {t('analytics.open')}
             </Button>
@@ -1681,6 +1809,7 @@ export function GameSessionPanel({
                     api.addBot(game.id, controller, personality, displayName),
                   )
                 }
+                onFill={() => run(() => api.fillWithRandomBots(game.id))}
                 onRemove={(botId) => run(() => api.removeBot(game.id, botId))}
               />
             </Stack>
@@ -1722,13 +1851,46 @@ export function GameSessionPanel({
       game={game}
       pack={pack}
       user={user}
-      useAssetTokens={pack.board.tiles.some((tile) => tile.asset_path)}
       currentUserTokenAppearance={tokenAppearance}
+      sortOption={playerSort}
       showTitle={false}
       motionIntensity={motionIntensity}
+      onSortOptionChange={updatePlayerSort}
       onHoveredPlayerChange={setHighlightedPlayerId}
     />
   )
+
+  const startTradeFromProperty = useCallback(
+    (recipientId: string, requestedPropertyId: string) => {
+      setTradeDraft({ recipientId, requestedPropertyId })
+      setMobileManagementPanel('trades')
+      if (isTablet) {
+        setTabletWorkspacePanel('trades')
+        updatePanelLayout((current) => ({
+          ...current,
+          rail: {
+            ...current.rail,
+            visible: current.rail.visible.includes('trades')
+              ? current.rail.visible
+              : [...current.rail.visible, 'trades'],
+          },
+        }))
+        return
+      }
+      updatePanelLayout((current) => ({
+        ...current,
+        management: {
+          ...current.management,
+          visible: current.management.visible.includes('trades')
+            ? current.management.visible
+            : [...current.management.visible, 'trades'],
+        },
+      }))
+      setMobilePanel('manage')
+    },
+    [isTablet, updatePanelLayout],
+  )
+  const consumeTradeDraft = useCallback(() => setTradeDraft(null), [])
 
   const propertiesContent = (
     <PropertyManagementPanel
@@ -1738,6 +1900,7 @@ export function GameSessionPanel({
       user={user}
       busy={busy}
       onCommand={sendCommand}
+      onTrade={startTradeFromProperty}
       onHoveredPropertyChange={setHighlightedPropertyId}
     />
   )
@@ -1750,6 +1913,8 @@ export function GameSessionPanel({
       busy={busy}
       error={error}
       boardHistory={boardHistory}
+      draft={tradeDraft}
+      onDraftConsumed={consumeTradeDraft}
       onCommand={sendCommand}
     />
   )
@@ -1916,6 +2081,56 @@ export function GameSessionPanel({
     </Stack>
   )
 
+  const mobileManagementContent = (
+    <Stack spacing={1.25} sx={{ minWidth: 0 }}>
+      <Tabs
+        value={mobileManagementPanel}
+        onChange={(_, panelId: ManagementPanelId) =>
+          setMobileManagementPanel(panelId)
+        }
+        variant="scrollable"
+        scrollButtons="auto"
+        allowScrollButtonsMobile
+        aria-label={t('layout.managementViews')}
+        sx={{
+          minHeight: 48,
+          borderBottom: '1px solid rgba(255,255,255,.1)',
+          '& .MuiTab-root': {
+            minHeight: 48,
+            minWidth: 'auto',
+            px: 1.5,
+          },
+        }}
+      >
+        {MANAGEMENT_PANEL_IDS.map((panelId) => {
+          const title = managementPanelTitle(panelId)
+          return (
+            <Tab
+              key={panelId}
+              id={`mobile-management-tab-${panelId}`}
+              value={panelId}
+              icon={managementPanelIcon(panelId)}
+              iconPosition="start"
+              label={title}
+              aria-controls={`mobile-management-panel-${panelId}`}
+            />
+          )
+        })}
+      </Tabs>
+      <Box
+        id={`mobile-management-panel-${mobileManagementPanel}`}
+        role="tabpanel"
+        aria-labelledby={`mobile-management-tab-${mobileManagementPanel}`}
+        sx={{ minWidth: 0 }}
+      >
+        {managementPanelContent(mobileManagementPanel)}
+      </Box>
+    </Stack>
+  )
+  const responsiveManagementContent = isTablet
+    ? managementContent
+    : mobileManagementContent
+
   const criticalAlerts = (
     <>
       {error && (
@@ -1928,6 +2143,11 @@ export function GameSessionPanel({
           severity="error"
           sx={{
             flexDirection: { xs: 'column', sm: 'row' },
+            maxHeight: { xs: 'min(58dvh, 520px)', sm: 'none' },
+            overflowY: { xs: 'auto', sm: 'visible' },
+            overscrollBehaviorY: { xs: 'contain', sm: 'auto' },
+            touchAction: { xs: 'pan-y', sm: 'auto' },
+            WebkitOverflowScrolling: { xs: 'touch', sm: 'auto' },
             '& .MuiAlert-action': {
               ml: { xs: 0, sm: 2 },
               mt: { xs: 1, sm: 0 },
@@ -2033,32 +2253,52 @@ export function GameSessionPanel({
         key={panelId}
         id={`workspace-panel-${panelId}`}
         title={title}
-        personalizable
-        height={panelLayout.rail.heights[panelId]}
+        personalizable={layoutEditing}
+        height={layoutEditing ? panelLayout.rail.heights[panelId] : undefined}
         fillAvailableHeight
         dragging={draggedWorkspacePanel === panelId}
         dragLabel={t('layout.dragPanel', { panel: title })}
         resizeLabel={t('layout.resizePanel', { panel: title })}
         headerActions={
-          <Tooltip title={t('layout.floatPanel', { panel: title })}>
-            <IconButton
-              size="small"
-              aria-label={t('layout.floatPanel', { panel: title })}
-              onClick={() => placeWorkspacePanelIn(panelId, 'floating')}
-            >
-              <OpenInNewRoundedIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+          layoutEditing ? (
+            <Tooltip title={t('layout.floatPanel', { panel: title })}>
+              <IconButton
+                size="small"
+                aria-label={t('layout.floatPanel', { panel: title })}
+                onClick={() => placeWorkspacePanelIn(panelId, 'floating')}
+              >
+                <OpenInNewRoundedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          ) : undefined
         }
-        onDragStart={(event) => startWorkspacePanelDrag(panelId, event)}
-        onDragEnd={() => setDraggedWorkspacePanel(null)}
-        onDragOver={(event) => {
-          event.preventDefault()
-          event.stopPropagation()
-          event.dataTransfer.dropEffect = 'move'
-        }}
-        onDrop={(event) => dropWorkspacePanel(event, panelId, placement)}
-        onHeightChange={(height) => resizeWorkspacePanel(panelId, height)}
+        onDragStart={
+          layoutEditing
+            ? (event) => startWorkspacePanelDrag(panelId, event)
+            : undefined
+        }
+        onDragEnd={
+          layoutEditing ? () => setDraggedWorkspacePanel(null) : undefined
+        }
+        onDragOver={
+          layoutEditing
+            ? (event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                event.dataTransfer.dropEffect = 'move'
+              }
+            : undefined
+        }
+        onDrop={
+          layoutEditing
+            ? (event) => dropWorkspacePanel(event, panelId, placement)
+            : undefined
+        }
+        onHeightChange={
+          layoutEditing
+            ? (height) => resizeWorkspacePanel(panelId, height)
+            : undefined
+        }
         motionIntensity={motionIntensity}
       >
         {workspacePanelContent(panelId)}
@@ -2109,7 +2349,7 @@ export function GameSessionPanel({
           : panelId === 'players'
             ? playersContent
             : panelId === 'management'
-              ? managementContent
+              ? responsiveManagementContent
               : (
                   <GameChatPanel
                     game={game}
@@ -2122,43 +2362,66 @@ export function GameSessionPanel({
                 )
 
     return (
-      <PersonalizablePanel
+      <Box
         key={panelId}
-        id={`mobile-panel-${panelId}`}
-        title={title}
-        motionIntensity={motionIntensity}
+        component="section"
+        aria-label={title}
+        sx={{ minWidth: 0 }}
       >
         {content}
-      </PersonalizablePanel>
+      </Box>
     )
   }
 
+  const mobilePanelTitle =
+    mobilePanel === null
+      ? ''
+      : panelTitle(mobilePanel === 'manage' ? 'management' : mobilePanel)
+
   const leftDockColumn =
     leftWorkspacePanels.length > 0
-      ? 'clamp(260px, 24vw, 380px)'
+      ? 'clamp(240px, 20vw, 340px)'
       : draggedWorkspacePanel
         ? '96px'
         : '0px'
   const rightDockColumn =
     rightWorkspacePanels.length > 0
-      ? 'clamp(260px, 24vw, 380px)'
+      ? 'clamp(240px, 20vw, 340px)'
       : draggedWorkspacePanel
         ? '96px'
         : '0px'
+  const tabletDockColumn = 'clamp(280px, 34vw, 360px)'
+  const showWorkspaceRailLabels =
+    isWideWorkspace && !panelLayout.rail.compact
 
   const renderWorkspaceDock = (
     placement: Exclude<WorkspacePanelPlacement, 'floating'>,
     panelIds: WorkspacePanelId[],
   ) => (
     <Stack
+      component="aside"
+      aria-label={t('layout.dockLabel', {
+        side:
+          placement === 'left'
+            ? t('layout.leftSide')
+            : t('layout.rightSide'),
+      })}
       gridArea={placement}
       spacing={1}
-      onDragOver={(event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        event.dataTransfer.dropEffect = 'move'
-      }}
-      onDrop={(event) => dropWorkspacePanel(event, null, placement)}
+      onDragOver={
+        layoutEditing
+          ? (event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              event.dataTransfer.dropEffect = 'move'
+            }
+          : undefined
+      }
+      onDrop={
+        layoutEditing
+          ? (event) => dropWorkspacePanel(event, null, placement)
+          : undefined
+      }
       sx={{
         width: '100%',
         height: '100%',
@@ -2169,23 +2432,25 @@ export function GameSessionPanel({
         overscrollBehaviorY: 'contain',
         touchAction: 'pan-y',
         WebkitOverflowScrolling: 'touch',
-        p: panelIds.length > 0 || draggedWorkspacePanel ? 1 : 0,
+        p: panelIds.length > 0 || (layoutEditing && draggedWorkspacePanel) ? 1 : 0,
         borderRight:
-          placement === 'left' && (panelIds.length > 0 || draggedWorkspacePanel)
+          placement === 'left' &&
+          (panelIds.length > 0 || (layoutEditing && draggedWorkspacePanel))
             ? '1px solid rgba(255,255,255,.08)'
             : undefined,
         borderLeft:
-          placement === 'right' && (panelIds.length > 0 || draggedWorkspacePanel)
+          placement === 'right' &&
+          (panelIds.length > 0 || (layoutEditing && draggedWorkspacePanel))
             ? '1px solid rgba(255,255,255,.08)'
             : undefined,
         bgcolor:
-          panelIds.length === 0 && draggedWorkspacePanel
+          panelIds.length === 0 && layoutEditing && draggedWorkspacePanel
             ? 'rgba(184,255,61,.06)'
             : undefined,
         transition: 'background-color 120ms ease',
       }}
     >
-      {panelIds.length === 0 && draggedWorkspacePanel && (
+      {panelIds.length === 0 && layoutEditing && draggedWorkspacePanel && (
         <Typography
           variant="caption"
           color="primary.main"
@@ -2205,7 +2470,12 @@ export function GameSessionPanel({
 
   return (
     <Box
+      component="main"
+      aria-label={t('layout.gameWorkspace')}
       data-testid="game-workspace"
+      data-workspace-mode={
+        !isTablet ? 'mobile' : isWideWorkspace ? 'desktop' : 'tablet'
+      }
       data-motion-intensity={motionIntensity}
       sx={{
         width: '100vw',
@@ -2225,6 +2495,28 @@ export function GameSessionPanel({
       }}
     >
       <Box
+        component="a"
+        href="#turn-actions"
+        sx={{
+          position: 'fixed',
+          top: 8,
+          left: 8,
+          zIndex: 2000,
+          px: 1.5,
+          py: 1,
+          borderRadius: 2,
+          bgcolor: 'primary.main',
+          color: 'primary.contrastText',
+          fontWeight: 850,
+          textDecoration: 'none',
+          transform: 'translateY(-160%)',
+          transition: 'transform 120ms ease',
+          '&:focus': { transform: 'translateY(0)' },
+        }}
+      >
+        {t('layout.skipToTurnActions')}
+      </Box>
+      <Box
         sx={{
           display: 'grid',
           width: '100%',
@@ -2233,17 +2525,26 @@ export function GameSessionPanel({
           gridTemplateRows: 'minmax(0, 1fr)',
           gridTemplateColumns: {
             xs: 'minmax(0, 1fr)',
-            md: `${leftDockColumn} minmax(0, 1fr) ${rightDockColumn} 56px`,
+            md: `minmax(0, 1fr) ${tabletDockColumn} 64px`,
+            lg: `${leftDockColumn} minmax(0, 1fr) ${rightDockColumn} ${showWorkspaceRailLabels ? 'clamp(148px, 12vw, 176px)' : '64px'}`,
+            xl: `${leftDockColumn} minmax(0, 1fr) ${rightDockColumn} ${showWorkspaceRailLabels ? 'clamp(176px, 12vw, 204px)' : '64px'}`,
           },
           gridTemplateAreas: {
             xs: '"board"',
-            md: '"left board right rail"',
+            md: '"board tablet rail"',
+            lg: '"left board right rail"',
           },
           gap: 0,
           alignItems: 'stretch',
+          transition:
+            motionIntensity === 'off'
+              ? 'none'
+              : 'grid-template-columns 180ms ease',
         }}
       >
         <Stack
+          component="section"
+          aria-label={t('layout.boardArea')}
           gridArea="board"
           spacing={0}
           sx={{
@@ -2278,6 +2579,14 @@ export function GameSessionPanel({
               height: '100%',
               minWidth: 0,
               overflow: 'auto',
+              pb: {
+                xs: 'calc(72px + env(safe-area-inset-bottom))',
+                md: 0,
+              },
+              scrollPaddingBottom: {
+                xs: 'calc(72px + env(safe-area-inset-bottom))',
+                md: 0,
+              },
               display: 'flex',
               justifyContent: zoom > 1 ? 'flex-start' : 'center',
               alignItems: 'flex-start',
@@ -2296,6 +2605,7 @@ export function GameSessionPanel({
               motionPending={motionPending}
               busy={busy}
               onCommand={sendCommand}
+              onTrade={startTradeFromProperty}
               heatmap={boardHeatmap}
               actionEvents={visibleEvents}
               motionIntensity={motionIntensity}
@@ -2325,79 +2635,327 @@ export function GameSessionPanel({
           </Box>
         </Stack>
 
-        {isTablet && (
+        {isTablet && !isWideWorkspace && (
+          <Box
+            component="aside"
+            aria-label={t('layout.activePanel', {
+              panel: workspacePanelTitle(tabletWorkspacePanel),
+            })}
+            gridArea="tablet"
+            sx={{
+              height: '100%',
+              minHeight: 0,
+              minWidth: 0,
+              overflow: 'hidden',
+              p: 1,
+              borderLeft: '1px solid rgba(255,255,255,.08)',
+              bgcolor: 'rgba(12,10,21,.94)',
+            }}
+          >
+            <PersonalizablePanel
+              id={`tablet-workspace-panel-${tabletWorkspacePanel}`}
+              title={workspacePanelTitle(tabletWorkspacePanel)}
+              fillAvailableHeight
+              motionIntensity={motionIntensity}
+            >
+              {workspacePanelContent(tabletWorkspacePanel)}
+            </PersonalizablePanel>
+          </Box>
+        )}
+
+        {isWideWorkspace && (
           <>
             {renderWorkspaceDock('left', leftWorkspacePanels)}
             {renderWorkspaceDock('right', rightWorkspacePanels)}
-            <Stack
-              gridArea="rail"
-              alignItems="center"
-              sx={{
-                height: '100%',
-                minHeight: 0,
-                py: 1,
-                px: 0.5,
-                borderLeft: '1px solid rgba(255,255,255,.1)',
-                bgcolor: 'rgba(10,8,18,.96)',
-                position: 'relative',
-                zIndex: 500,
-              }}
-            >
-              <ToggleButtonGroup
-                orientation="vertical"
-                value={panelLayout.rail.visible}
-                onChange={(_, nextVisible) =>
-                  selectWorkspacePanels(nextVisible)
+          </>
+        )}
+
+        {isTablet && (
+          <Stack
+            component="nav"
+            aria-label={t('layout.workspaceViews')}
+            data-compact={!showWorkspaceRailLabels}
+            gridArea="rail"
+            sx={{
+              height: '100%',
+              minHeight: 0,
+              py: 1,
+              px: 0.75,
+              borderLeft: '1px solid rgba(255,255,255,.1)',
+              bgcolor: 'rgba(10,8,18,.97)',
+              position: 'relative',
+              zIndex: 500,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              scrollbarWidth: 'thin',
+            }}
+          >
+            {isWideWorkspace && (
+              <Tooltip
+                title={
+                  panelLayout.rail.compact
+                    ? t('layout.expandNavigation')
+                    : t('layout.collapseNavigation')
                 }
-                size="small"
-                aria-label={t('layout.workspaceViews')}
+                placement="left"
+              >
+                <IconButton
+                  aria-label={
+                    panelLayout.rail.compact
+                      ? t('layout.expandNavigation')
+                      : t('layout.collapseNavigation')
+                  }
+                  aria-expanded={!panelLayout.rail.compact}
+                  aria-controls="workspace-navigation-groups"
+                  onClick={toggleWorkspaceRail}
+                  sx={{
+                    width: 48,
+                    height: 48,
+                    mb: 0.5,
+                    alignSelf: showWorkspaceRailLabels ? 'flex-end' : 'center',
+                    color: 'text.secondary',
+                    border: '1px solid rgba(255,255,255,.08)',
+                    borderRadius: 2,
+                  }}
+                >
+                  {panelLayout.rail.compact ? (
+                    <ChevronLeftRoundedIcon />
+                  ) : (
+                    <ChevronRightRoundedIcon />
+                  )}
+                </IconButton>
+              </Tooltip>
+            )}
+            <Stack
+              id="workspace-navigation-groups"
+              spacing={1}
+              sx={{ width: '100%' }}
+            >
+              {WORKSPACE_PANEL_GROUPS.map((group, groupIndex) => (
+                <Box
+                  component="section"
+                  key={group.id}
+                  aria-label={t(`layout.groups.${group.id}`)}
+                  sx={{
+                    pt: groupIndex === 0 ? 0 : 1,
+                    borderTop:
+                      groupIndex === 0
+                        ? 'none'
+                        : '1px solid rgba(255,255,255,.08)',
+                  }}
+                >
+                  <Typography
+                    variant="overline"
+                    color="text.secondary"
+                    sx={{
+                      display: showWorkspaceRailLabels ? 'block' : 'none',
+                      px: 0.75,
+                      pb: 0.35,
+                      fontSize: '0.68rem',
+                      letterSpacing: '.09em',
+                    }}
+                  >
+                    {t(`layout.groups.${group.id}`)}
+                  </Typography>
+                  <Stack
+                    role="group"
+                    aria-label={t(`layout.groups.${group.id}`)}
+                    spacing={0.5}
+                  >
+                    {group.panelIds.map((panelId) => {
+                      const title = workspacePanelTitle(panelId)
+                      const selected = isWideWorkspace
+                        ? panelLayout.rail.visible.includes(panelId)
+                        : tabletWorkspacePanel === panelId
+                      return (
+                        <Tooltip key={panelId} title={title} placement="left">
+                          <ToggleButton
+                            value={panelId}
+                            selected={selected}
+                            aria-label={title}
+                            aria-pressed={selected}
+                            onClick={() => toggleWorkspacePanel(panelId)}
+                            sx={{
+                              width: '100%',
+                              minWidth: 0,
+                              minHeight: 48,
+                              px: showWorkspaceRailLabels ? 1 : 0.5,
+                              gap: 1,
+                              justifyContent: showWorkspaceRailLabels
+                                ? 'flex-start'
+                                : 'center',
+                              border: '1px solid transparent',
+                              borderRadius: '10px !important',
+                              '&.Mui-selected': {
+                                color: 'primary.main',
+                                bgcolor: 'rgba(184,255,61,.14)',
+                                borderColor: 'rgba(184,255,61,.32)',
+                              },
+                            }}
+                          >
+                            {workspacePanelIcon(panelId)}
+                            <Typography
+                              component="span"
+                              variant="body2"
+                              fontWeight={750}
+                              noWrap
+                              sx={{
+                                display: showWorkspaceRailLabels
+                                  ? 'block'
+                                  : 'none',
+                              }}
+                            >
+                              {title}
+                            </Typography>
+                          </ToggleButton>
+                        </Tooltip>
+                      )
+                    })}
+                  </Stack>
+                </Box>
+              ))}
+
+              <Box
+                component="section"
+                aria-label={t('layout.groups.tools')}
                 sx={{
-                  width: '100%',
-                  '& .MuiToggleButton-root': {
-                    width: '100%',
-                    minWidth: 0,
-                    minHeight: 42,
-                    px: 0.5,
-                  },
-                  '& .MuiToggleButton-root.Mui-selected': {
-                    color: 'primary.main',
-                    bgcolor: 'rgba(184,255,61,.14)',
-                  },
+                  pt: 1,
+                  borderTop: '1px solid rgba(255,255,255,.08)',
                 }}
               >
-                {WORKSPACE_PANEL_IDS.map((panelId) => {
-                  const title = workspacePanelTitle(panelId)
-                  return (
-                    <ToggleButton
-                      key={panelId}
-                      value={panelId}
-                      aria-label={title}
-                      title={title}
+                <Typography
+                  variant="overline"
+                  color="text.secondary"
+                  sx={{
+                    display: showWorkspaceRailLabels ? 'block' : 'none',
+                    px: 0.75,
+                    pb: 0.35,
+                    fontSize: '0.68rem',
+                  }}
+                >
+                  {t('layout.groups.tools')}
+                </Typography>
+                <Stack spacing={0.5}>
+                  <Tooltip title={t('analytics.open')} placement="left">
+                    <Button
+                      color="secondary"
+                      aria-label={t('analytics.open')}
+                      onClick={openAnalytics}
+                      startIcon={<AnalyticsRoundedIcon fontSize="small" />}
+                      sx={{
+                        width: '100%',
+                        minWidth: 0,
+                        minHeight: 48,
+                        px: showWorkspaceRailLabels ? 1 : 0.5,
+                        justifyContent: showWorkspaceRailLabels
+                          ? 'flex-start'
+                          : 'center',
+                        border: '1px solid rgba(167,139,250,.34)',
+                        bgcolor: 'rgba(167,139,250,.1)',
+                        '& .MuiButton-startIcon': {
+                          m: showWorkspaceRailLabels ? '0 8px 0 0' : 0,
+                        },
+                      }}
                     >
-                      {workspacePanelIcon(panelId)}
-                    </ToggleButton>
-                  )
-                })}
-              </ToggleButtonGroup>
-              <Box sx={{ flex: 1 }} />
-              <Tooltip title={t('layout.redistributeHeights')} placement="left">
-                <span>
-                  <IconButton
-                    size="small"
-                    disabled={!hasCustomWorkspaceHeights}
-                    aria-label={t('layout.redistributeHeights')}
-                    onClick={redistributeWorkspacePanelHeights}
-                  >
-                    <VerticalAlignCenterRoundedIcon fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
+                      <Box
+                        component="span"
+                        sx={{
+                          display: showWorkspaceRailLabels ? 'inline' : 'none',
+                        }}
+                      >
+                        {t('analytics.open')}
+                      </Box>
+                    </Button>
+                  </Tooltip>
+                  {isWideWorkspace && (
+                    <Tooltip
+                      title={
+                        layoutEditing
+                          ? t('layout.finishEditing')
+                          : t('layout.editLayout')
+                      }
+                      placement="left"
+                    >
+                      <Button
+                        color={layoutEditing ? 'primary' : 'inherit'}
+                        variant={layoutEditing ? 'outlined' : 'text'}
+                        aria-pressed={layoutEditing}
+                        onClick={() => setLayoutEditing((editing) => !editing)}
+                        startIcon={<TuneRoundedIcon fontSize="small" />}
+                        sx={{
+                          width: '100%',
+                          minWidth: 0,
+                          minHeight: 48,
+                          px: showWorkspaceRailLabels ? 1 : 0.5,
+                          justifyContent: showWorkspaceRailLabels
+                            ? 'flex-start'
+                            : 'center',
+                          '& .MuiButton-startIcon': {
+                            m: showWorkspaceRailLabels ? '0 8px 0 0' : 0,
+                          },
+                        }}
+                      >
+                        <Box
+                          component="span"
+                          sx={{
+                            display: showWorkspaceRailLabels ? 'inline' : 'none',
+                          }}
+                        >
+                          {layoutEditing
+                            ? t('layout.finishEditing')
+                            : t('layout.editLayout')}
+                        </Box>
+                      </Button>
+                    </Tooltip>
+                  )}
+                  {isWideWorkspace && layoutEditing && (
+                    <Tooltip
+                      title={t('layout.redistributeHeights')}
+                      placement="left"
+                    >
+                      <Box component="span" sx={{ display: 'block', width: '100%' }}>
+                        <Button
+                          disabled={!hasCustomWorkspaceHeights}
+                          aria-label={t('layout.redistributeHeights')}
+                          onClick={redistributeWorkspacePanelHeights}
+                          startIcon={
+                            <VerticalAlignCenterRoundedIcon fontSize="small" />
+                          }
+                          sx={{
+                            width: '100%',
+                            minWidth: 0,
+                            minHeight: 48,
+                            px: showWorkspaceRailLabels ? 1 : 0.5,
+                            justifyContent: showWorkspaceRailLabels
+                              ? 'flex-start'
+                              : 'center',
+                            '& .MuiButton-startIcon': {
+                              m: showWorkspaceRailLabels ? '0 8px 0 0' : 0,
+                            },
+                          }}
+                        >
+                          <Box
+                            component="span"
+                            sx={{
+                              display: showWorkspaceRailLabels
+                                ? 'inline'
+                                : 'none',
+                            }}
+                          >
+                            {t('layout.redistributeHeights')}
+                          </Box>
+                        </Button>
+                      </Box>
+                    </Tooltip>
+                  )}
+                </Stack>
+              </Box>
             </Stack>
-          </>
+          </Stack>
         )}
       </Box>
 
-      {isTablet && floatingWorkspacePanels.map(renderFloatingWorkspacePanel)}
+      {isWideWorkspace && floatingWorkspacePanels.map(renderFloatingWorkspacePanel)}
 
       {analyticsOpen && (
         <Suspense fallback={null}>
@@ -2405,6 +2963,8 @@ export function GameSessionPanel({
             open
             game={game}
             pack={pack}
+            boardHistory={boardHistory}
+            boardHistoryLoading={boardHistoryLoading}
             onClose={() => setAnalyticsOpen(false)}
           />
         </Suspense>
@@ -2413,6 +2973,10 @@ export function GameSessionPanel({
       {!isTablet && (
         <>
           <BottomNavigation
+            component="nav"
+            aria-label={t('mobileNavigation', {
+              defaultValue: 'Navegación del juego',
+            })}
             showLabels
             value={mobilePanel}
             sx={{
@@ -2424,6 +2988,14 @@ export function GameSessionPanel({
               borderRadius: 3,
               border: '1px solid rgba(255,255,255,.1)',
               boxShadow: '0 12px 36px rgba(0,0,0,.5)',
+              '& .MuiBottomNavigationAction-root': {
+                minWidth: 0,
+                minHeight: 56,
+                px: 0.5,
+              },
+              '& .MuiBottomNavigationAction-label': {
+                fontSize: '0.68rem',
+              },
             }}
           >
             <BottomNavigationAction
@@ -2451,6 +3023,12 @@ export function GameSessionPanel({
               onClick={() => setMobilePanel('heatmap')}
             />
             <BottomNavigationAction
+              value="analytics"
+              label={t('analytics.open')}
+              icon={<AnalyticsRoundedIcon />}
+              onClick={openAnalytics}
+            />
+            <BottomNavigationAction
               value="chat"
               label={t('chat.short')}
               icon={<ForumRoundedIcon />}
@@ -2470,28 +3048,79 @@ export function GameSessionPanel({
             onClose={() => setMobilePanel(null)}
             slotProps={{
               paper: {
+                role: 'dialog',
+                'aria-modal': true,
+                'aria-labelledby': 'mobile-panel-title',
                 sx: {
-                  maxHeight: 'min(78dvh, 720px)',
+                  height: 'min(86dvh, 780px)',
+                  maxHeight:
+                    'calc(100dvh - env(safe-area-inset-top, 0px) - 8px)',
                   borderRadius: '20px 20px 0 0',
-                  p: 1.5,
-                  pb: 'max(16px, env(safe-area-inset-bottom))',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
                 },
               },
             }}
           >
             <Stack
               direction="row"
-              justifyContent="flex-end"
-              sx={{ position: 'sticky', top: 0, zIndex: 1 }}
+              alignItems="center"
+              spacing={1}
+              sx={{
+                position: 'relative',
+                flexShrink: 0,
+                minHeight: 60,
+                px: 1.5,
+                pt: 0.75,
+                borderBottom: '1px solid rgba(255,255,255,.1)',
+                bgcolor: 'background.paper',
+              }}
             >
+              <Box
+                aria-hidden="true"
+                sx={{
+                  position: 'absolute',
+                  top: 6,
+                  left: '50%',
+                  width: 36,
+                  height: 4,
+                  borderRadius: 99,
+                  bgcolor: 'rgba(255,255,255,.28)',
+                  transform: 'translateX(-50%)',
+                }}
+              />
+              <Typography
+                id="mobile-panel-title"
+                variant="h6"
+                fontWeight={900}
+                noWrap
+                sx={{ flex: 1, minWidth: 0, pt: 0.5 }}
+              >
+                {mobilePanelTitle}
+              </Typography>
               <IconButton
                 aria-label={t('close')}
                 onClick={() => setMobilePanel(null)}
+                sx={{ width: 48, height: 48, flexShrink: 0 }}
               >
                 <CloseRoundedIcon />
               </IconButton>
             </Stack>
-            <Box sx={{ overflow: 'auto' }}>
+            <Box
+              sx={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                overscrollBehaviorY: 'contain',
+                touchAction: 'pan-y',
+                WebkitOverflowScrolling: 'touch',
+                px: 1.5,
+                pt: 1.25,
+                pb: 'max(16px, env(safe-area-inset-bottom))',
+              }}
+            >
               {mobilePanel === 'room' &&
                 renderMobilePanel('room')}
               {mobilePanel === 'players' &&

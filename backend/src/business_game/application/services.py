@@ -10,6 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from business_game.application.board_service import PackResolver
 from business_game.application.card_collections import select_deck_collections
+from business_game.application.economic_simulation import (
+    advance_economic_week,
+    initialize_economic_simulation,
+)
 from business_game.application.economy import (
     available_bank_cash,
     credit_offer,
@@ -20,6 +24,7 @@ from business_game.application.economy import (
     reconcile_bank,
     refresh_credit_profiles,
     refresh_market_index,
+    synchronize_trade_volumes,
 )
 from business_game.application.pack_loader import PackLoader
 from business_game.application.relationships import (
@@ -65,6 +70,7 @@ from business_game.domain.models import (
     DeclareBankruptcyCommand,
     DeclinePropertyCommand,
     DemandRentDebtCommand,
+    EconomicDifficulty,
     EndTurnCommand,
     EqualizeCashCardEffect,
     ForgiveRentDebtCommand,
@@ -155,6 +161,69 @@ GLOBAL_FINANCIAL_RULES = {
     RuleOptionName.STOCK_MARKET_ENABLED.value,
     RuleOptionName.CUSTOM_RENT_DEBTS_ENABLED.value,
 }
+FUN_BOT_NAMES_BY_PERSONALITY: dict[BotPersonality, tuple[str, ...]] = {
+    BotPersonality.CONSERVATIVE: (
+        "Doña Alcancía",
+        "Capitán Ahorro",
+        "Conde Caja Fuerte",
+        "Reina del Vuelto",
+        "Maestro Centavito",
+        "Señor Presupuesto",
+        "La Guardiana del Peso",
+        "Barón Bajo Riesgo",
+        "Doña Reserva",
+        "Don Colchón",
+        "Capitana Prudencia",
+        "El Ermitaño del Efectivo",
+    ),
+    BotPersonality.BALANCED: (
+        "Señor Mitad y Mitad",
+        "Doña Balanza",
+        "Capitán Promedio",
+        "Maestro Equilibrio",
+        "La Jefa del Punto Medio",
+        "Don Plan B",
+        "Reina del Balance",
+        "Barón Moderado",
+        "Doctor Diversifica",
+        "Señor Tranquilo",
+        "Capitana Cartera",
+        "La Maestra del Empate",
+    ),
+    BotPersonality.AGGRESSIVE: (
+        "Don Todo o Nada",
+        "Tiburón del Mapocho",
+        "Reina del Remate",
+        "Capitán Riesgo",
+        "La Tormenta Bursátil",
+        "Barón Compra Todo",
+        "Doña Apuesta Fuerte",
+        "El Martillo",
+        "Comandante Plusvalía",
+        "Señor Sin Frenos",
+        "La Fiera del Mercado",
+        "Don Dados Calientes",
+    ),
+    BotPersonality.NEGOTIATOR: (
+        "Maestro Regateo",
+        "Doña Contraoferta",
+        "El Rey del Trato",
+        "Capitana Cláusula",
+        "Señor Permuta",
+        "La Dama del Acuerdo",
+        "Don Último Precio",
+        "Barón del Trueque",
+        "Doctor Comisión",
+        "Reina del Contrato",
+        "El Susurrador de Ofertas",
+        "Doña Firma Aquí",
+    ),
+}
+FUN_BOT_NAMES = tuple(
+    name
+    for personality_names in FUN_BOT_NAMES_BY_PERSONALITY.values()
+    for name in personality_names
+)
 DUMMY_PASSWORD_HASH = hash_password("business-game-invalid-account")
 
 
@@ -290,7 +359,61 @@ class GameService:
         )
         self._clock = clock or (lambda: datetime.now(UTC))
         self._outcome_roller = outcome_roller or secure_random.randrange
+        self._appearance_slot_picker = secure_random.choice
+        self._bot_personality_picker = secure_random.choice
+        self._bot_name_picker = secure_random.choice
         self._remaining_effects = MAX_EFFECTS_PER_COMMAND
+
+    def _next_appearance_slot(self, game: GameState) -> int:
+        used_slots = {
+            player.appearance_slot
+            for player in game.players
+            if player.appearance_slot is not None
+        }
+        available_slots = [slot for slot in range(20) if slot not in used_slots]
+        if not available_slots:
+            raise ConflictError("the game is full")
+        return self._appearance_slot_picker(available_slots)
+
+    def _append_bot(
+        self,
+        game: GameState,
+        pack: ContentPack,
+        data: AddBotRequest,
+    ) -> None:
+        display_name = (data.display_name or "").strip()
+        if not display_name:
+            used_names = {player.display_name.casefold() for player in game.players}
+            preferred_names = [
+                name
+                for name in FUN_BOT_NAMES_BY_PERSONALITY[data.personality]
+                if name.casefold() not in used_names
+            ]
+            available_names = preferred_names or [
+                name for name in FUN_BOT_NAMES if name.casefold() not in used_names
+            ]
+            display_name = self._bot_name_picker(available_names)
+        bot = PlayerState(
+            user_id=uuid4(),
+            display_name=display_name,
+            appearance_slot=self._next_appearance_slot(game),
+            is_bot=True,
+            bot_personality=data.personality,
+            bot_controller=data.controller,
+            balance=pack.manifest.starting_balance,
+        )
+        game.players.append(bot)
+        self._append_event(
+            game,
+            "player.joined",
+            {
+                "player_id": str(bot.user_id),
+                "display_name": bot.display_name,
+                "is_bot": True,
+                "bot_personality": data.personality.value,
+                "bot_controller": data.controller.value,
+            },
+        )
 
     def _ensure_economy(self, game: GameState) -> None:
         initialize_bank(game, self._pack(game))
@@ -314,6 +437,7 @@ class GameService:
         actor: User,
         version: str | None = None,
         deck_collection_ids: dict[str, list[str]] | None = None,
+        economic_difficulty: EconomicDifficulty = EconomicDifficulty.STANDARD,
     ) -> GameState:
         async with self._session.begin():
             pack = (
@@ -337,17 +461,21 @@ class GameService:
                 deck_collection_ids=selected_collections,
                 settings=GameSettings(
                     max_players=pack.manifest.max_players,
+                    economic_difficulty=economic_difficulty,
                     rules=pack.manifest.default_rules.model_copy(deep=True),
                 ),
                 houses_remaining=pack.manifest.house_supply,
                 hotels_remaining=pack.manifest.hotel_supply,
-                players=[
-                    PlayerState(
-                        user_id=actor.id,
-                        display_name=actor.display_name,
-                        balance=pack.manifest.starting_balance,
-                    )
-                ],
+            )
+            game.economy.current_date = self._clock().date()
+            initialize_economic_simulation(game)
+            game.players.append(
+                PlayerState(
+                    user_id=actor.id,
+                    display_name=actor.display_name,
+                    appearance_slot=self._next_appearance_slot(game),
+                    balance=pack.manifest.starting_balance,
+                )
             )
             self._append_event(game, "game.created", {"pack_id": pack_id})
             self._append_event(game, "player.joined", {"player_id": str(actor.id)})
@@ -358,6 +486,7 @@ class GameService:
     async def get(self, game_id: UUID, actor_id: UUID) -> GameState:
         game = await self._games.get(game_id)
         self._require_member(game, actor_id)
+        synchronize_trade_volumes(game)
         return game
 
     async def list_active(self, actor_id: UUID) -> list[GameState]:
@@ -407,6 +536,7 @@ class GameService:
                 PlayerState(
                     user_id=actor.id,
                     display_name=actor.display_name,
+                    appearance_slot=self._next_appearance_slot(game),
                     balance=pack.manifest.starting_balance,
                 )
             )
@@ -433,44 +563,39 @@ class GameService:
             if len(game.players) >= player_limit:
                 raise ConflictError("the game is full")
             previous_sequence = game.event_sequence
-            display_name = (data.display_name or "").strip()
-            if not display_name:
-                if data.controller is BotController.AI:
-                    base_name = "Bot IA"
-                else:
-                    labels = {
-                        BotPersonality.CONSERVATIVE: "Bot Conservador",
-                        BotPersonality.BALANCED: "Bot Equilibrado",
-                        BotPersonality.AGGRESSIVE: "Bot Agresivo",
-                        BotPersonality.NEGOTIATOR: "Bot Negociador",
-                    }
-                    base_name = labels[data.personality]
-                used_names = {player.display_name for player in game.players}
-                display_name = base_name
-                suffix = 2
-                while display_name in used_names:
-                    display_name = f"{base_name} {suffix}"
-                    suffix += 1
-            bot = PlayerState(
-                user_id=uuid4(),
-                display_name=display_name,
-                is_bot=True,
-                bot_personality=data.personality,
-                bot_controller=data.controller,
-                balance=pack.manifest.starting_balance,
-            )
-            game.players.append(bot)
-            self._append_event(
-                game,
-                "player.joined",
-                {
-                    "player_id": str(bot.user_id),
-                    "display_name": bot.display_name,
-                    "is_bot": True,
-                    "bot_personality": data.personality.value,
-                    "bot_controller": data.controller.value,
-                },
-            )
+            self._append_bot(game, pack, data)
+            self._ensure_economy(game)
+            self._sync_bank(game)
+            await self._games.save(game, previous_sequence)
+            return game
+
+    async def fill_with_random_bots(
+        self,
+        game_id: UUID,
+        actor_id: UUID,
+    ) -> GameState:
+        async with self._session.begin():
+            game = await self._games.get(game_id, for_update=True)
+            if game.host_user_id != actor_id:
+                raise ForbiddenError("only the host can add bots")
+            if game.status is not GameStatus.LOBBY:
+                raise ConflictError("bots can only be added in the lobby")
+            pack = self._pack(game)
+            player_limit = game.settings.max_players or pack.manifest.max_players
+            remaining_slots = player_limit - len(game.players)
+            if remaining_slots <= 0:
+                raise ConflictError("the game is full")
+            previous_sequence = game.event_sequence
+            personalities = list(BotPersonality)
+            for _ in range(remaining_slots):
+                self._append_bot(
+                    game,
+                    pack,
+                    AddBotRequest(
+                        controller=BotController.STANDARD,
+                        personality=self._bot_personality_picker(personalities),
+                    ),
+                )
             self._ensure_economy(game)
             self._sync_bank(game)
             await self._games.save(game, previous_sequence)
@@ -598,6 +723,9 @@ class GameService:
                 changes["auction_minimum_bid_percent"] = (
                     data.auction_minimum_bid_percent
                 )
+            if data.economic_difficulty is not None:
+                game.settings.economic_difficulty = data.economic_difficulty
+                changes["economic_difficulty"] = data.economic_difficulty.value
             if data.rules is not None:
                 allowed_rules = {
                     rule.value for rule in pack.manifest.configurable_rules
@@ -617,6 +745,27 @@ class GameService:
             self._append_event(game, "game.settings_updated", changes)
             self._ensure_economy(game)
             self._sync_bank(game)
+            await self._games.save(game, previous_sequence)
+            return game
+
+    async def configure_economic_simulation(
+        self,
+        game_id: UUID,
+        difficulty: EconomicDifficulty,
+    ) -> GameState:
+        """Maintenance path for configuring an existing local game."""
+        async with self._session.begin():
+            game = await self._games.get(game_id, for_update=True)
+            previous_sequence = game.event_sequence
+            game.settings.economic_difficulty = difficulty
+            if game.economy.elapsed_weeks == 0:
+                game.economy.current_date = self._clock().date()
+                initialize_economic_simulation(game)
+            self._append_event(
+                game,
+                "game.settings_updated",
+                {"economic_difficulty": difficulty.value},
+            )
             await self._games.save(game, previous_sequence)
             return game
 
@@ -833,6 +982,7 @@ class GameService:
                 raise ConflictError(
                     f"at least {pack.manifest.min_players} players are required"
                 )
+            self._ensure_economy(game)
             game.status = GameStatus.PLAYING
             game.phase = TurnPhase.WAITING_FOR_ROLL
             for deck in pack.board.decks:
@@ -840,8 +990,19 @@ class GameService:
                     [card.id for card in deck.cards]
                 )
                 game.deck_cursors[deck.id] = 0
-            self._append_event(game, "game.started")
-            self._ensure_economy(game)
+            self._append_event(
+                game,
+                "game.started",
+                {
+                    "player_count": len(game.players),
+                    "bank_monetary_base": game.bank.monetary_base,
+                    "market_share_supply": (
+                        game.bank.investments[0].total_shares
+                        if game.bank.investments
+                        else 0
+                    ),
+                },
+            )
             self._sync_bank(game)
             await self._games.save(game, previous_sequence)
             return game
@@ -883,13 +1044,20 @@ class GameService:
                     BuildGroupRoundCommand,
                     SellBuildingCommand,
                     SellGroupRoundCommand,
-                    RequestLoanCommand,
                     RepayLoanCommand,
                     BuySharesCommand,
                     SellSharesCommand,
                     PlaceLimitOrderCommand,
                     CancelMarketOrderCommand,
                 ),
+            ):
+                current_player = game.current_player
+                if current_player is None or current_player.user_id != actor_id:
+                    raise ConflictError("it is not this player's turn")
+
+            if (
+                isinstance(command, RequestLoanCommand)
+                and game.active_auction is None
             ):
                 current_player = game.current_player
                 if current_player is None or current_player.user_id != actor_id:
@@ -919,6 +1087,15 @@ class GameService:
                     self._bid(game, actor_id, command.amount)
                 elif isinstance(command, PassAuctionCommand):
                     self._pass_auction(game, actor_id)
+                elif isinstance(command, RequestLoanCommand):
+                    if (
+                        actor_id not in game.active_auction.eligible_player_ids
+                        or actor_id in game.active_auction.passed_player_ids
+                    ):
+                        raise ConflictError(
+                            "only an active auction participant can request a loan"
+                        )
+                    self._request_loan(game, actor_id, command.amount)
                 else:
                     raise ConflictError("the auction must finish before continuing")
             elif game.pending_auction_selector_id is not None:
@@ -3679,6 +3856,7 @@ class GameService:
         )
         instrument.buy_volume += quantity
         instrument.sell_volume += quantity
+        instrument.trade_volume += quantity
         instrument.trade_count += 1
         instrument.last_trade_price = price
         instrument.session_high = max(instrument.session_high, price)
@@ -3829,6 +4007,7 @@ class GameService:
             )
             instrument.current_price = bank_quote.new_price
             instrument.buy_volume += remaining
+            instrument.trade_volume += remaining
             instrument.trade_count += 1
             instrument.last_trade_price = bank_quote.average_price
             instrument.session_high = max(
@@ -3979,6 +4158,7 @@ class GameService:
             instrument.available_shares += remaining_to_sell
             instrument.current_price = bank_quote.new_price
             instrument.sell_volume += remaining_to_sell
+            instrument.trade_volume += remaining_to_sell
             instrument.trade_count += 1
             instrument.last_trade_price = bank_quote.average_price
             instrument.session_high = max(
@@ -5384,6 +5564,9 @@ class GameService:
             )
             if not game.players[game.current_player_index].bankrupt:
                 if game.current_player_index <= previous_index:
+                    week_event = advance_economic_week(game, self._pack(game))
+                    refresh_market_index(game)
+                    self._append_event(game, "economy.week_advanced", week_event)
                     self._settle_market_dividends(game)
                 game.phase = TurnPhase.WAITING_FOR_ROLL
                 game.consecutive_doubles = 0

@@ -204,16 +204,25 @@ export function MarketPanel({ game, pack, user, busy, onCommand }: Props) {
           const history = buildInstrumentHistory(instrument, game.events)
           const changePercent = priceChangePercent(instrument)
           const owned = instrument.holdings[user.id] ?? 0
+          const quickOrderAvailability = getQuickOrderAvailability(
+            game,
+            pack,
+            user.id,
+            instrument,
+          )
           return (
-            <ButtonBase
+            <Paper
               key={instrument.id}
-              onClick={() => {
-                setSelectedInstrumentId(instrument.id)
-                setQuantity('1')
-              }}
-              sx={{ borderRadius: 1, display: 'block', textAlign: 'initial' }}
+              variant="outlined"
+              sx={{ height: '100%', overflow: 'hidden' }}
             >
-              <Paper variant="outlined" sx={{ p: 1.25, height: '100%' }}>
+              <ButtonBase
+                onClick={() => {
+                  setSelectedInstrumentId(instrument.id)
+                  setQuantity('1')
+                }}
+                sx={{ display: 'block', p: 1.25, width: '100%', textAlign: 'initial' }}
+              >
                 <Stack spacing={0.8}>
                   <Stack
                     direction="row"
@@ -245,7 +254,7 @@ export function MarketPanel({ game, pack, user, busy, onCommand }: Props) {
                   <Stack direction="row" justifyContent="space-between" spacing={1}>
                     <Typography variant="caption" color="text.secondary">
                       {t('marketPanel.volume', {
-                        count: instrument.buy_volume + instrument.sell_volume,
+                        count: instrument.trade_volume,
                       })}
                     </Typography>
                     <Typography variant="caption" color="secondary.light">
@@ -253,8 +262,53 @@ export function MarketPanel({ game, pack, user, busy, onCommand }: Props) {
                     </Typography>
                   </Stack>
                 </Stack>
-              </Paper>
-            </ButtonBase>
+              </ButtonBase>
+              <Divider />
+              <Stack direction="row" spacing={1} sx={{ p: 1 }}>
+                <Button
+                  fullWidth
+                  size="small"
+                  variant="contained"
+                  color="success"
+                  aria-label={`${t('marketPanel.quickBuy')}: ${instrumentName(
+                    instrument,
+                    pack,
+                    t,
+                  )}`}
+                  disabled={busy || !quickOrderAvailability.canBuy}
+                  onClick={() =>
+                    void onCommand({
+                      action: 'buy_shares',
+                      instrument_id: instrument.id,
+                      quantity: 1,
+                    })
+                  }
+                >
+                  {t('marketPanel.quickBuy')}
+                </Button>
+                <Button
+                  fullWidth
+                  size="small"
+                  variant="outlined"
+                  color="warning"
+                  aria-label={`${t('marketPanel.quickSell')}: ${instrumentName(
+                    instrument,
+                    pack,
+                    t,
+                  )}`}
+                  disabled={busy || !quickOrderAvailability.canSell}
+                  onClick={() =>
+                    void onCommand({
+                      action: 'sell_shares',
+                      instrument_id: instrument.id,
+                      quantity: 1,
+                    })
+                  }
+                >
+                  {t('marketPanel.quickSell')}
+                </Button>
+              </Stack>
+            </Paper>
           )
         })}
       </Box>
@@ -286,6 +340,110 @@ export function MarketPanel({ game, pack, user, busy, onCommand }: Props) {
       )}
     </Stack>
   )
+}
+
+function getQuickOrderAvailability(
+  game: GameState,
+  pack: ContentPack,
+  userId: string,
+  instrument: InvestmentInstrumentState,
+) {
+  const player = game.players.find((item) => item.user_id === userId)
+  const currentPlayer = game.players[game.current_player_index]
+  const canUseTurnActions =
+    game.status === 'playing' &&
+    currentPlayer?.user_id === userId &&
+    player !== undefined &&
+    !player.bankrupt &&
+    game.active_auction === null &&
+    game.pending_auction_selector_id === null
+  const instrumentOrders = game.bank.market_orders.filter(
+    (order) => order.instrument_id === instrument.id,
+  )
+  const sellDepth = instrumentOrders
+    .filter((order) => order.side === 'sell' && order.player_id !== userId)
+    .reduce((total, order) => total + order.remaining_quantity, 0)
+  const buyDepth = instrumentOrders
+    .filter((order) => order.side === 'buy' && order.player_id !== userId)
+    .reduce((total, order) => total + order.remaining_quantity, 0)
+  const pendingBuys = instrumentOrders
+    .filter((order) => order.side === 'buy' && order.player_id === userId)
+    .reduce((total, order) => total + order.remaining_quantity, 0)
+  const reservedSells = instrumentOrders
+    .filter((order) => order.side === 'sell' && order.player_id === userId)
+    .reduce((total, order) => total + order.remaining_quantity, 0)
+  const owned = instrument.holdings[userId] ?? 0
+  const maximumHolding = Math.max(
+    1,
+    Math.floor(
+      (instrument.total_shares * instrument.max_ownership_percent) / 100,
+    ),
+  )
+  const buyQuote = marketOrderQuote(instrument, 1, true, sellDepth)
+  const sellQuote = marketOrderQuote(instrument, 1, false, buyDepth)
+  const activeLoan = game.bank.loans.find((loan) => loan.player_id === userId)
+  const loanReserve = activeLoan
+    ? activeLoan.installment_amount *
+        pack.manifest.loan_investment_installment_reserve +
+      Math.floor(
+        (pack.manifest.pass_start_salary *
+          pack.manifest.loan_investment_reserve_salary_percent) /
+          100,
+      )
+    : 0
+  const investmentExposure = game.bank.investments.reduce(
+    (total, item) =>
+      total + item.current_price * (item.holdings[userId] ?? 0),
+    0,
+  ) +
+    game.bank.market_orders.reduce((total, order) => {
+      if (order.player_id !== userId) return total
+      if (order.side === 'buy') {
+        return total + order.limit_price * order.remaining_quantity
+      }
+      const orderInstrument = game.bank.investments.find(
+        (item) => item.id === order.instrument_id,
+      )
+      return (
+        total +
+        (orderInstrument?.current_price ?? 0) * order.remaining_quantity
+      )
+    }, 0)
+  const leveragedExposureLimit = Math.max(
+    0,
+    Math.floor(
+      (playerNetWorth(game, pack, userId) *
+        pack.manifest.loan_investment_max_net_worth_percent) /
+        100,
+    ),
+  )
+  const creditScore = game.bank.credit_profiles[userId]?.score ?? 600
+  const leveragedInvestmentAllowed =
+    !activeLoan ||
+    (creditScore >= 600 &&
+      (player?.balance ?? 0) - buyQuote.settlement >= loanReserve &&
+      investmentExposure + buyQuote.gross <= leveragedExposureLimit)
+  const reserveFloor = Math.ceil(
+    (game.bank.monetary_base * game.bank.minimum_reserve_percent) / 100,
+  )
+
+  return {
+    canBuy:
+      canUseTurnActions &&
+      game.active_debt === null &&
+      instrument.available_shares + sellDepth >= 1 &&
+      owned + reservedSells + pendingBuys < maximumHolding &&
+      (player?.balance ?? 0) >= buyQuote.settlement &&
+      leveragedInvestmentAllowed,
+    canSell:
+      canUseTurnActions &&
+      (game.active_debt === null || game.active_debt.debtor_id === userId) &&
+      owned >= 1 &&
+      game.bank.cash -
+        game.bank.dividend_cash_reserve -
+        sellQuote.settlement >=
+        reserveFloor,
+  }
 }
 
 function PortfolioPerformancePanel({
@@ -970,7 +1128,7 @@ function InstrumentDialog({
             />
             <MarketMetric
               label={t('marketPanel.totalVolume')}
-              value={String(instrument.buy_volume + instrument.sell_volume)}
+              value={String(instrument.trade_volume)}
             />
             <MarketMetric
               label={t('marketPanel.revenue')}

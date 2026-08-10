@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
@@ -807,6 +807,7 @@ class WorkspacePanelWindowGeometry(ContentModel):
 
 
 class WorkspacePanelLayoutPreferences(ContentModel):
+    compact: bool = False
     order: list[WorkspacePanelId] = Field(min_length=9, max_length=9)
     visible: list[WorkspacePanelId] = Field(min_length=1, max_length=9)
     heights: dict[WorkspacePanelId, int] = Field(default_factory=dict)
@@ -951,12 +952,16 @@ class VisualEffectsPreferences(ContentModel):
     intensity: Literal["full", "soft", "off"] = "full"
 
 
+PlayerSortPreference = Literal["turnOrder", "netWorth", "cash", "name"]
+
+
 class UserPreferences(ContentModel):
     panel_layout: PanelLayoutPreferences | None = None
     audio_settings: AudioPreferences | None = None
     token_appearance: TokenAppearancePreferences | None = None
     automation_settings: AutomationPreferences | None = None
     visual_effects: VisualEffectsPreferences | None = None
+    player_sort: PlayerSortPreference | None = None
 
 
 class UserPreferencesUpdate(ContentModel):
@@ -965,6 +970,7 @@ class UserPreferencesUpdate(ContentModel):
     token_appearance: TokenAppearancePreferences | None = None
     automation_settings: AutomationPreferences | None = None
     visual_effects: VisualEffectsPreferences | None = None
+    player_sort: PlayerSortPreference | None = None
 
     @model_validator(mode="after")
     def validate_non_empty_update(self) -> UserPreferencesUpdate:
@@ -974,6 +980,7 @@ class UserPreferencesUpdate(ContentModel):
             and self.token_appearance is None
             and self.automation_settings is None
             and self.visual_effects is None
+            and self.player_sort is None
         ):
             raise ValueError("at least one preference must be provided")
         return self
@@ -1000,6 +1007,7 @@ class BotController(StrEnum):
 class PlayerState(BaseModel):
     user_id: UUID
     display_name: str
+    appearance_slot: int | None = Field(default=None, ge=0, le=19)
     is_bot: bool = False
     bot_personality: BotPersonality | None = None
     bot_controller: BotController | None = None
@@ -1028,11 +1036,88 @@ class SpectatorState(BaseModel):
     display_name: str
 
 
+class EconomicDifficulty(StrEnum):
+    NOVICE = "novice"
+    EASY = "easy"
+    STANDARD = "standard"
+    PRO = "pro"
+    REALISTIC = "realistic"
+
+
+class EconomicSeason(StrEnum):
+    SUMMER = "summer"
+    AUTUMN = "autumn"
+    WINTER = "winter"
+    SPRING = "spring"
+
+
+class WeatherCondition(StrEnum):
+    CLEAR = "clear"
+    RAIN = "rain"
+    STORM = "storm"
+    HEATWAVE = "heatwave"
+    COLD_WAVE = "cold_wave"
+    DROUGHT = "drought"
+
+
+class EconomicCycle(StrEnum):
+    EXPANSION = "expansion"
+    SLOWDOWN = "slowdown"
+    RECESSION = "recession"
+    RECOVERY = "recovery"
+
+
+class EconomicEventState(BaseModel):
+    kind: Literal[
+        "innovation_boom",
+        "supply_shock",
+        "credit_tightening",
+        "consumer_boom",
+        "labor_dispute",
+        "fiscal_stimulus",
+    ]
+    remaining_weeks: int = Field(ge=1, le=12)
+    intensity: int = Field(ge=1, le=3)
+
+
+class MarketMovementState(BaseModel):
+    instrument_id: str = Field(min_length=1, max_length=160)
+    previous_price: int = Field(gt=0)
+    current_price: int = Field(gt=0)
+    change_basis_points: int = Field(ge=-3000, le=3000)
+    primary_cause: str = Field(min_length=1, max_length=80)
+
+
+class EconomicSimulationState(BaseModel):
+    current_date: date = Field(
+        default_factory=lambda: datetime.now(UTC).date(),
+    )
+    elapsed_weeks: int = Field(default=0, ge=0)
+    season: EconomicSeason = EconomicSeason.SUMMER
+    weather: WeatherCondition = WeatherCondition.CLEAR
+    weather_intensity: int = Field(default=1, ge=1, le=3)
+    cycle: EconomicCycle = EconomicCycle.EXPANSION
+    annual_growth_basis_points: int = Field(default=220, ge=-1500, le=2000)
+    annual_inflation_basis_points: int = Field(default=300, ge=0, le=5000)
+    policy_rate_basis_points: int = Field(default=450, ge=0, le=5000)
+    unemployment_basis_points: int = Field(default=650, ge=100, le=5000)
+    consumer_confidence: int = Field(default=100, ge=0, le=200)
+    market_sentiment: int = Field(default=5, ge=-100, le=100)
+    active_events: list[EconomicEventState] = Field(default_factory=list, max_length=5)
+    last_market_movements: list[MarketMovementState] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    last_company_action: str | None = Field(default=None, max_length=80)
+    last_company_instrument_id: str | None = Field(default=None, max_length=160)
+
+
 class GameSettings(BaseModel):
     max_players: int | None = Field(default=None, ge=2, le=20)
     allow_spectators: bool = True
     auction_deposit_percent: int = Field(default=10, ge=0, le=100)
-    auction_minimum_bid_percent: int = Field(default=50, ge=0, le=100)
+    auction_minimum_bid_percent: int = Field(default=70, ge=0, le=100)
+    economic_difficulty: EconomicDifficulty = EconomicDifficulty.STANDARD
     rules: OptionalRules = Field(default_factory=OptionalRules)
 
 
@@ -1286,6 +1371,7 @@ class InvestmentInstrumentState(BaseModel):
     last_settlement_sequence: int = Field(default=0, ge=0)
     buy_volume: int = Field(default=0, ge=0)
     sell_volume: int = Field(default=0, ge=0)
+    trade_volume: int = Field(default=0, ge=0)
     trade_count: int = Field(default=0, ge=0)
     last_trade_price: int | None = Field(default=None, gt=0)
     session_high: int = Field(default=0, ge=0)
@@ -1388,6 +1474,9 @@ class GameState(BaseModel):
     players: list[PlayerState] = Field(default_factory=list)
     spectators: list[SpectatorState] = Field(default_factory=list, max_length=50)
     settings: GameSettings = Field(default_factory=GameSettings)
+    economy: EconomicSimulationState = Field(
+        default_factory=EconomicSimulationState,
+    )
     current_player_index: int = 0
     phase: TurnPhase = TurnPhase.WAITING_FOR_ROLL
     owners: dict[str, UUID] = Field(default_factory=dict)
@@ -1442,6 +1531,23 @@ class GameState(BaseModel):
 
     @model_validator(mode="after")
     def validate_economic_state(self) -> GameState:
+        used_appearance_slots: set[int] = set()
+        for player in self.players:
+            if (
+                player.appearance_slot is None
+                or player.appearance_slot in used_appearance_slots
+            ):
+                player.appearance_slot = next(
+                    (
+                        slot
+                        for slot in range(20)
+                        if slot not in used_appearance_slots
+                    ),
+                    None,
+                )
+                if player.appearance_slot is None:
+                    raise ValueError("games support at most 20 player appearances")
+            used_appearance_slots.add(player.appearance_slot)
         if self.events:
             sequences = [event.sequence for event in self.events]
             if sequences != list(range(sequences[0], sequences[0] + len(sequences))):
@@ -1909,6 +2015,7 @@ class CreateGameRequest(BaseModel):
         pattern=r"^\d+\.\d+\.\d+$",
     )
     deck_collection_ids: dict[str, list[str]] = Field(default_factory=dict)
+    economic_difficulty: EconomicDifficulty = EconomicDifficulty.STANDARD
 
     @model_validator(mode="after")
     def validate_deck_collections(self) -> CreateGameRequest:
@@ -1940,6 +2047,7 @@ class UpdateGameSettingsRequest(BaseModel):
     allow_spectators: bool | None = None
     auction_deposit_percent: int | None = Field(default=None, ge=0, le=100)
     auction_minimum_bid_percent: int | None = Field(default=None, ge=0, le=100)
+    economic_difficulty: EconomicDifficulty | None = None
     rules: OptionalRulesUpdate | None = None
 
     @model_validator(mode="after")
@@ -1949,6 +2057,7 @@ class UpdateGameSettingsRequest(BaseModel):
             and self.allow_spectators is None
             and self.auction_deposit_percent is None
             and self.auction_minimum_bid_percent is None
+            and self.economic_difficulty is None
             and self.rules is None
         ):
             raise ValueError("at least one setting must be provided")

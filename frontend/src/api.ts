@@ -5,11 +5,13 @@ import type {
   BotController,
   BotPersonality,
   ContentPack,
+  EconomicDifficulty,
   GameCommand,
   GameState,
   OptionalRules,
   PanelLayoutPreferences,
   PackManifest,
+  PlayerSortOption,
   TokenAppearanceSettings,
   TokenResponse,
   TradeAnalysis,
@@ -17,6 +19,7 @@ import type {
   UserPreferences,
   VisualEffectsPreferenceSettings,
 } from './types'
+import { createCommandId } from './commandId'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api/v1'
 const TOKEN_KEY = 'business_game_access_token'
@@ -222,10 +225,20 @@ export const api = {
       },
       true,
     ),
+  updatePlayerSort: (playerSort: PlayerSortOption) =>
+    request<UserPreferences>(
+      '/users/me/preferences',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ player_sort: playerSort }),
+      },
+      true,
+    ),
   createGame: (
     packId: string,
     version?: string,
     deckCollectionIds: Record<string, string[]> = {},
+    economicDifficulty: EconomicDifficulty = 'standard',
   ) =>
     request<GameState>(
       '/games',
@@ -235,6 +248,7 @@ export const api = {
           pack_id: packId,
           ...(version ? { version } : {}),
           deck_collection_ids: deckCollectionIds,
+          economic_difficulty: economicDifficulty,
         }),
       },
       true,
@@ -270,6 +284,12 @@ export const api = {
       },
       true,
     ),
+  fillWithRandomBots: (gameId: string) =>
+    request<GameState>(
+      `/games/${gameId}/bots/fill`,
+      { method: 'POST' },
+      true,
+    ),
   removeBot: (gameId: string, botId: string) =>
     request<GameState>(
       `/games/${gameId}/bots/${botId}`,
@@ -285,6 +305,7 @@ export const api = {
       allow_spectators?: boolean
       auction_deposit_percent?: number
       auction_minimum_bid_percent?: number
+      economic_difficulty?: EconomicDifficulty
       rules?: Partial<OptionalRules>
     },
   ) =>
@@ -305,7 +326,7 @@ export const api = {
     gameId: string,
     command: GameCommand,
     expectedSequence: number,
-    commandId = crypto.randomUUID(),
+    commandId = createCommandId(),
   ) =>
     request<GameState>(
       `/games/${gameId}/commands`,

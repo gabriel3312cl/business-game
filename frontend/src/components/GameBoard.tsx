@@ -1,8 +1,15 @@
 import CasinoRoundedIcon from '@mui/icons-material/CasinoRounded'
 import { Box, Button, Chip, Stack, Typography } from '@mui/material'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
 import { useTranslation } from 'react-i18next'
-import { santiagoTokenAssets } from '../assets/monopolySantiago'
 import type {
   ContentPack,
   GameCommand,
@@ -22,8 +29,8 @@ import { BoardTileDialog } from './BoardTileDialog'
 import { affectedTileIds } from './boardActionPulse'
 import { perimeterPosition } from './boardGeometry'
 import type { BoardHeatmap } from './boardHeatmap'
-import { playerColors } from './gameColors'
 import { tokenAssetPath } from './tokenAppearance'
+import { automaticPlayerAppearance } from './playerAppearance'
 import {
   type MotionAudioCue,
   type MotionSettlement,
@@ -46,6 +53,7 @@ interface GameBoardProps {
   fitAvailableHeight?: boolean
   busy?: boolean
   onCommand?: (command: GameCommand) => Promise<boolean>
+  onTrade?: (ownerId: string, propertyId: string) => void
   heatmap?: BoardHeatmap | null
   actionEvents?: GameEvent[]
   motionIntensity?: VisualEffectsIntensity
@@ -79,6 +87,7 @@ export function GameBoard({
   fitAvailableHeight = false,
   busy = false,
   onCommand,
+  onTrade,
   heatmap = null,
   actionEvents = [],
   motionIntensity = 'full',
@@ -87,10 +96,14 @@ export function GameBoard({
 }: GameBoardProps) {
   const { t, i18n } = useTranslation()
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null)
+  const [focusableTileId, setFocusableTileId] = useState<string | null>(
+    () => pack.board.tiles[0]?.id ?? null,
+  )
+  const tileButtonRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const keyboardInstructionsId = useId()
   const side = pack.manifest.side_length
   const compact = side > 11
   const currentPlayer = game?.players[game.current_player_index]
-  const useAssetTokens = pack.board.tiles.some((tile) => tile.asset_path)
   const visualPositions = useVisualPlayerPositions(
     game,
     pack.manifest.tile_count,
@@ -105,14 +118,16 @@ export function GameBoard({
   game?.players.forEach((player, index) => {
     const currentUser = player.user_id === currentUserId
     const customAppearance = currentUser ? currentUserTokenAppearance : null
+    const automaticAppearance = automaticPlayerAppearance(player, index)
+    const appearance = customAppearance ?? automaticAppearance
     const presentation = {
       playerNumber: index + 1,
       displayName: player.display_name,
-      color: customAppearance?.color ?? playerColors[index % playerColors.length],
+      color: appearance.color,
     }
     ownersById.set(player.user_id, {
       ...presentation,
-      appearance: customAppearance ?? undefined,
+      appearance,
       ariaLabel: `${t('player')} ${index + 1}: ${player.display_name}`,
     })
     if (player.bankrupt) return
@@ -121,17 +136,13 @@ export function GameBoard({
     tokens.push({
       playerId: player.user_id,
       ...presentation,
-      shape: customAppearance?.shape,
-      appearance: customAppearance ?? undefined,
+      shape: appearance.shape,
+      appearance,
       emoji:
-        customAppearance?.icon === 'emoji'
-          ? customAppearance.emoji ?? undefined
+        appearance.icon === 'emoji'
+          ? appearance.emoji ?? undefined
           : undefined,
-      assetPath: customAppearance
-        ? tokenAssetPath(customAppearance.icon)
-        : useAssetTokens
-          ? santiagoTokenAssets[index % santiagoTokenAssets.length]?.path
-          : undefined,
+      assetPath: tokenAssetPath(appearance.icon),
       active: index === game.current_player_index,
       currentUser,
       highlighted: player.user_id === highlightedPlayerId,
@@ -145,6 +156,12 @@ export function GameBoard({
     ? `min(${zoom * 100}%, calc(100dvh * ${zoom}))`
     : `min(${zoom * 100}%, ${maximumSize * zoom}px, calc((100dvh - 160px) * ${zoom}))`
   const fittedHeight = `min(${Math.min(zoom, 1) * 100}%, ${maximumSize * zoom}px)`
+  const requestedFocusableTileIndex = pack.board.tiles.findIndex(
+    (tile) => tile.id === focusableTileId,
+  )
+  const focusableTileIndex = requestedFocusableTileIndex >= 0
+    ? requestedFocusableTileIndex
+    : 0
   const selectedTile =
     pack.board.tiles.find((tile) => tile.id === selectedTileId) ?? null
   const tileIds = useMemo(
@@ -173,6 +190,41 @@ export function GameBoard({
     gameId: game?.id ?? null,
     sequences: new Map(),
   }))
+
+  const focusTileAt = (index: number) => {
+    const tileCount = pack.board.tiles.length
+    if (tileCount === 0) return
+    const nextIndex = (index + tileCount) % tileCount
+    setFocusableTileId(pack.board.tiles[nextIndex].id)
+    tileButtonRefs.current[nextIndex]?.focus()
+  }
+
+  const handleTileKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    let nextIndex: number
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        nextIndex = index + 1
+        break
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        nextIndex = index - 1
+        break
+      case 'Home':
+        nextIndex = 0
+        break
+      case 'End':
+        nextIndex = pack.board.tiles.length - 1
+        break
+      default:
+        return
+    }
+    event.preventDefault()
+    focusTileAt(nextIndex)
+  }
 
   useEffect(() => {
     const gameId = game?.id ?? null
@@ -219,8 +271,12 @@ export function GameBoard({
     <Box
       data-testid="game-board"
       data-effect-anchor="bank"
+      role="group"
+      aria-label={t('board')}
+      aria-describedby={keyboardInstructionsId}
       aria-busy={motionPending}
       sx={{
+        position: 'relative',
         display: 'grid',
         gridTemplateColumns: trackTemplate,
         gridTemplateRows: trackTemplate,
@@ -237,6 +293,23 @@ export function GameBoard({
         boxShadow: '0 26px 80px rgba(0,0,0,.45)',
       }}
     >
+      <Box
+        component="span"
+        id={keyboardInstructionsId}
+        sx={{
+          position: 'absolute',
+          width: 1,
+          height: 1,
+          p: 0,
+          m: -1,
+          overflow: 'hidden',
+          clip: 'rect(0 0 0 0)',
+          whiteSpace: 'nowrap',
+          border: 0,
+        }}
+      >
+        {t('boardKeyboardInstructions')}
+      </Box>
       {pack.board.tiles.map((tile, index) => {
         const position = perimeterPosition(index, side)
         const name = pack.messages[tile.name_key] ?? tile.id
@@ -283,6 +356,12 @@ export function GameBoard({
             tokens={tokensByPosition.get(index)}
             owner={owner}
             heatmap={tileHeatmap}
+            buttonRef={(node) => {
+              tileButtonRefs.current[index] = node
+            }}
+            tabIndex={index === focusableTileIndex ? 0 : -1}
+            onFocus={() => setFocusableTileId(tile.id)}
+            onKeyDown={(event) => handleTileKeyDown(event, index)}
             tooltip={
               <Stack spacing={0.25}>
                 <Typography variant="subtitle2" fontWeight={850}>
@@ -320,7 +399,10 @@ export function GameBoard({
                 )}
               </Stack>
             }
-            onClick={() => setSelectedTileId(tile.id)}
+            onClick={() => {
+              setFocusableTileId(tile.id)
+              setSelectedTileId(tile.id)
+            }}
           />
         )
       })}
@@ -405,28 +487,31 @@ export function GameBoard({
                   justifyContent="center"
                   sx={{ display: { xs: 'none', md: 'flex' } }}
                 >
-                  {game.players.map((player, index) => (
-                    <Chip
-                      key={player.user_id}
-                      size="small"
-                      disabled={player.bankrupt}
-                      label={`${index + 1} · ${player.display_name}`}
-                      sx={{
-                        '&::before': {
-                          content: '""',
-                          width: 8,
-                          height: 8,
-                          borderRadius: '50%',
-                          bgcolor:
-                            player.user_id === currentUserId
-                              ? currentUserTokenAppearance?.color ??
-                                playerColors[index % playerColors.length]
-                              : playerColors[index % playerColors.length],
-                          ml: 1,
-                        },
-                      }}
-                    />
-                  ))}
+                  {game.players.map((player, index) => {
+                    const appearance =
+                      player.user_id === currentUserId
+                        ? currentUserTokenAppearance ??
+                          automaticPlayerAppearance(player, index)
+                        : automaticPlayerAppearance(player, index)
+                    return (
+                      <Chip
+                        key={player.user_id}
+                        size="small"
+                        disabled={player.bankrupt}
+                        label={`${index + 1} · ${player.display_name}`}
+                        sx={{
+                          '&::before': {
+                            content: '""',
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            bgcolor: appearance.color,
+                            ml: 1,
+                          },
+                        }}
+                      />
+                    )
+                  })}
                 </Stack>
               </>
             ) : (
@@ -469,6 +554,7 @@ export function GameBoard({
         onClose={() => setSelectedTileId(null)}
         onSelectTile={setSelectedTileId}
         onCommand={onCommand}
+        onTrade={onTrade}
       />
     </Box>
   )

@@ -67,6 +67,46 @@ export interface GameAnalytics {
   lastEventSequence: number | null
 }
 
+export interface DiceRollAnalytics {
+  sequence: number
+  occurredAt: string
+  playerId: string | null
+  dice: [number, number]
+  total: number
+  isDouble: boolean
+  fromPosition: number | null
+  toPosition: number | null
+  steps: number | null
+  tileId: string | null
+  jailAttempt: boolean
+  source: 'movement' | 'utility'
+}
+
+export interface DicePlayerAnalytics {
+  playerId: string
+  rolls: number
+  average: number
+  doubles: number
+}
+
+export interface DiceLandingAnalytics {
+  position: number
+  tileId: string | null
+  count: number
+}
+
+export interface DiceAnalytics {
+  rolls: DiceRollAnalytics[]
+  utilityRolls: DiceRollAnalytics[]
+  history: DiceRollAnalytics[]
+  average: number
+  doubles: number
+  faceCounts: number[]
+  totalCounts: number[]
+  landings: DiceLandingAnalytics[]
+  players: DicePlayerAnalytics[]
+}
+
 const PLAYER_ID_KEYS = [
   'player_id',
   'user_id',
@@ -170,6 +210,91 @@ export function buildActivityBuckets(
     })
   }
   return buckets
+}
+
+export function buildDiceAnalytics(events: GameEvent[]): DiceAnalytics {
+  const movementRolls: DiceRollAnalytics[] = []
+  const utilityRolls: DiceRollAnalytics[] = []
+
+  for (const event of events) {
+    if (event.type !== 'dice.rolled' && event.type !== 'card.utility_dice_rolled') {
+      continue
+    }
+    const dice = parseDice(event.data.dice)
+    if (!dice) continue
+    const roll: DiceRollAnalytics = {
+      sequence: event.sequence,
+      occurredAt: event.occurred_at,
+      playerId:
+        typeof event.data.player_id === 'string' ? event.data.player_id : null,
+      dice,
+      total: dice[0] + dice[1],
+      isDouble: dice[0] === dice[1],
+      fromPosition: integerOrNull(event.data.from_position),
+      toPosition: integerOrNull(event.data.to_position),
+      steps: integerOrNull(event.data.steps),
+      tileId: typeof event.data.tile_id === 'string' ? event.data.tile_id : null,
+      jailAttempt: event.data.jail_attempt === true,
+      source: event.type === 'dice.rolled' ? 'movement' : 'utility',
+    }
+    if (roll.source === 'movement') movementRolls.push(roll)
+    else utilityRolls.push(roll)
+  }
+
+  const faceCounts = Array.from({ length: 6 }, () => 0)
+  const totalCounts = Array.from({ length: 11 }, () => 0)
+  const landings = new Map<number, DiceLandingAnalytics>()
+  const players = new Map<string, { rolls: number; total: number; doubles: number }>()
+
+  for (const roll of movementRolls) {
+    faceCounts[roll.dice[0] - 1] += 1
+    faceCounts[roll.dice[1] - 1] += 1
+    totalCounts[roll.total - 2] += 1
+    if (roll.playerId) {
+      const player = players.get(roll.playerId) ?? { rolls: 0, total: 0, doubles: 0 }
+      player.rolls += 1
+      player.total += roll.total
+      if (roll.isDouble) player.doubles += 1
+      players.set(roll.playerId, player)
+    }
+    if (roll.toPosition !== null && roll.steps !== null && roll.steps > 0) {
+      const landing = landings.get(roll.toPosition) ?? {
+        position: roll.toPosition,
+        tileId: roll.tileId,
+        count: 0,
+      }
+      landing.count += 1
+      if (!landing.tileId) landing.tileId = roll.tileId
+      landings.set(roll.toPosition, landing)
+    }
+  }
+
+  return {
+    rolls: movementRolls.sort((left, right) => left.sequence - right.sequence),
+    utilityRolls: utilityRolls.sort((left, right) => left.sequence - right.sequence),
+    history: [...movementRolls, ...utilityRolls].sort(
+      (left, right) => right.sequence - left.sequence,
+    ),
+    average:
+      movementRolls.length === 0
+        ? 0
+        : movementRolls.reduce((total, roll) => total + roll.total, 0) /
+          movementRolls.length,
+    doubles: movementRolls.filter((roll) => roll.isDouble).length,
+    faceCounts,
+    totalCounts,
+    landings: [...landings.values()].sort(
+      (left, right) => right.count - left.count || left.position - right.position,
+    ),
+    players: [...players.entries()]
+      .map(([playerId, stats]) => ({
+        playerId,
+        rolls: stats.rolls,
+        average: stats.total / stats.rolls,
+        doubles: stats.doubles,
+      }))
+      .sort((left, right) => right.rolls - left.rolls),
+  }
 }
 
 export function buildGameAnalytics(
@@ -306,6 +431,23 @@ function emptyActivityCounts(): Record<ActivityCategory, number> {
     negotiation: 0,
     game: 0,
   }
+}
+
+function parseDice(value: unknown): [number, number] | null {
+  if (
+    !Array.isArray(value) ||
+    value.length !== 2 ||
+    !value.every(
+      (die) => Number.isInteger(die) && Number(die) >= 1 && Number(die) <= 6,
+    )
+  ) {
+    return null
+  }
+  return [Number(value[0]), Number(value[1])]
+}
+
+function integerOrNull(value: unknown): number | null {
+  return Number.isInteger(value) ? Number(value) : null
 }
 
 function sum(

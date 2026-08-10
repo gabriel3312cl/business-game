@@ -5,19 +5,26 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
   FormControlLabel,
+  InputLabel,
+  MenuItem,
+  Select,
   Stack,
   Typography,
 } from '@mui/material'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ContentPack } from '../types'
+import type { ContentPack, EconomicDifficulty } from '../types'
 
 interface GameCreationDialogProps {
   open: boolean
   pack: ContentPack
   onClose: () => void
-  onConfirm: (deckCollectionIds: Record<string, string[]>) => void
+  onConfirm: (
+    deckCollectionIds: Record<string, string[]>,
+    difficulty: EconomicDifficulty,
+  ) => void
 }
 
 export function GameCreationDialog({
@@ -37,9 +44,13 @@ export function GameCreationDialog({
     [pack],
   )
   const [selection, setSelection] = useState<Record<string, string[]>>(defaults)
+  const [difficulty, setDifficulty] = useState<EconomicDifficulty>('standard')
 
   useEffect(() => {
-    if (open) setSelection(defaults)
+    if (open) {
+      setSelection(defaults)
+      setDifficulty('standard')
+    }
   }, [defaults, open])
 
   const selectableDecks = pack.board.decks.filter((deck) => deck.collections.length > 0)
@@ -57,8 +68,29 @@ export function GameCreationDialog({
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>{t('deckSelection.title')}</DialogTitle>
+      <DialogTitle>{t('gameSetup.title')}</DialogTitle>
       <DialogContent>
+        <FormControl fullWidth size="small" sx={{ mt: 0.5, mb: 1 }}>
+          <InputLabel>{t('economy.difficultyLabel')}</InputLabel>
+          <Select
+            value={difficulty}
+            label={t('economy.difficultyLabel')}
+            onChange={(event) =>
+              setDifficulty(event.target.value as EconomicDifficulty)
+            }
+          >
+            {(['novice', 'easy', 'standard', 'pro', 'realistic'] as const).map(
+              (option) => (
+                <MenuItem key={option} value={option}>
+                  {t(`economy.difficulty.${option}`)}
+                </MenuItem>
+              ),
+            )}
+          </Select>
+        </FormControl>
+        <Typography color="text.secondary" sx={{ mb: 2 }}>
+          {t(`economy.difficultyDescription.${difficulty}`)}
+        </Typography>
         <Typography color="text.secondary" sx={{ mb: 2 }}>
           {t('deckSelection.help')}
         </Typography>
@@ -106,7 +138,10 @@ export function GameCreationDialog({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>{t('cancel')}</Button>
-        <Button variant="contained" onClick={() => onConfirm(selection)}>
+        <Button
+          variant="contained"
+          onClick={() => onConfirm(selection, difficulty)}
+        >
           {t('createGame')}
         </Button>
       </DialogActions>

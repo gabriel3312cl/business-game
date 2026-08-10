@@ -4,6 +4,7 @@ import KeyboardDoubleArrowLeftRoundedIcon from '@mui/icons-material/KeyboardDoub
 import KeyboardDoubleArrowRightRoundedIcon from '@mui/icons-material/KeyboardDoubleArrowRightRounded'
 import { Box, IconButton, Paper, Stack, Tooltip, Typography } from '@mui/material'
 import {
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useEffect,
@@ -11,6 +12,13 @@ import {
   useState,
 } from 'react'
 import type { WorkspacePanelWindowGeometry } from '../types'
+
+const MIN_WINDOW_WIDTH = 280
+const MIN_WINDOW_HEIGHT = 180
+const WORKSPACE_RAIL_WIDTH = 64
+const VISIBLE_HEADER_HEIGHT = 48
+const KEYBOARD_RESIZE_STEP = 16
+const KEYBOARD_RESIZE_LARGE_STEP = 64
 
 interface Props {
   title: string
@@ -64,6 +72,23 @@ export function FloatingWorkspacePanel({
     draftRef.current = fitted
     setDraft(fitted)
   }, [geometry])
+
+  useEffect(() => {
+    const fitDraftToViewport = () => {
+      const fitted = fitGeometryToViewport(draftRef.current)
+      draftRef.current = fitted
+      setDraft((current) =>
+        sameGeometry(current, fitted) ? current : fitted,
+      )
+    }
+
+    window.addEventListener('resize', fitDraftToViewport)
+    window.addEventListener('orientationchange', fitDraftToViewport)
+    return () => {
+      window.removeEventListener('resize', fitDraftToViewport)
+      window.removeEventListener('orientationchange', fitDraftToViewport)
+    }
+  }, [])
 
   const updateDraft = (next: WorkspacePanelWindowGeometry) => {
     draftRef.current = next
@@ -133,6 +158,48 @@ export function FloatingWorkspacePanel({
     })
   }
 
+  const resizeWithKeyboard = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const step = event.shiftKey
+      ? KEYBOARD_RESIZE_LARGE_STEP
+      : KEYBOARD_RESIZE_STEP
+    const current = draftRef.current
+    let width = current.width
+    let height = current.height
+
+    if (event.key === 'ArrowLeft') width -= step
+    else if (event.key === 'ArrowRight') width += step
+    else if (event.key === 'ArrowUp') height -= step
+    else if (event.key === 'ArrowDown') height += step
+    else return
+
+    event.preventDefault()
+    event.stopPropagation()
+    onActivate()
+
+    const maximumWidth = Math.max(
+      MIN_WINDOW_WIDTH,
+      window.innerWidth - current.x - WORKSPACE_RAIL_WIDTH,
+    )
+    const maximumHeight = Math.max(
+      MIN_WINDOW_HEIGHT,
+      window.innerHeight - current.y,
+    )
+    const next = fitGeometryToViewport({
+      ...current,
+      width: Math.min(maximumWidth, Math.max(MIN_WINDOW_WIDTH, width)),
+      height: Math.min(maximumHeight, Math.max(MIN_WINDOW_HEIGHT, height)),
+    })
+    if (sameGeometry(current, next)) return
+
+    updateDraft(next)
+    onGeometryChange(roundGeometry(next))
+  }
+
+  const maximumKeyboardWidth = Math.max(
+    MIN_WINDOW_WIDTH,
+    window.innerWidth - draft.x - WORKSPACE_RAIL_WIDTH,
+  )
+
   return (
     <Paper
       role="dialog"
@@ -148,8 +215,8 @@ export function FloatingWorkspacePanel({
         zIndex,
         display: 'flex',
         flexDirection: 'column',
-        minWidth: 280,
-        minHeight: 180,
+        minWidth: MIN_WINDOW_WIDTH,
+        minHeight: MIN_WINDOW_HEIGHT,
         overflow: 'hidden',
         border: '1px solid rgba(184,255,61,.32)',
         boxShadow: '0 22px 70px rgba(0,0,0,.65)',
@@ -225,19 +292,33 @@ export function FloatingWorkspacePanel({
       <Box
         role="separator"
         aria-label={resizeLabel}
+        aria-orientation="horizontal"
+        aria-valuemin={MIN_WINDOW_WIDTH}
+        aria-valuemax={Math.round(maximumKeyboardWidth)}
+        aria-valuenow={Math.round(draft.width)}
+        aria-valuetext={`${Math.round(draft.width)} × ${Math.round(draft.height)} px`}
+        aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown"
         title={resizeLabel}
+        tabIndex={0}
         onPointerDown={(event) => startInteraction('resize', event)}
         onPointerMove={moveInteraction}
         onPointerUp={finishInteraction}
         onPointerCancel={finishInteraction}
+        onKeyDown={resizeWithKeyboard}
         sx={{
           position: 'absolute',
           right: 0,
           bottom: 0,
-          width: 20,
-          height: 20,
+          width: 32,
+          height: 32,
           cursor: 'nwse-resize',
           touchAction: 'none',
+          borderRadius: '8px 0 0 0',
+          '&:focus-visible': {
+            outline: '3px solid',
+            outlineColor: 'primary.main',
+            outlineOffset: -3,
+          },
           '&::after': {
             content: '""',
             position: 'absolute',
@@ -257,12 +338,47 @@ export function FloatingWorkspacePanel({
 function fitGeometryToViewport(
   geometry: WorkspacePanelWindowGeometry,
 ): WorkspacePanelWindowGeometry {
-  const width = Math.min(geometry.width, Math.max(280, window.innerWidth - 64))
-  const height = Math.min(geometry.height, Math.max(180, window.innerHeight))
+  const width = Math.min(
+    geometry.width,
+    Math.max(MIN_WINDOW_WIDTH, window.innerWidth - WORKSPACE_RAIL_WIDTH),
+  )
+  const height = Math.min(
+    geometry.height,
+    Math.max(MIN_WINDOW_HEIGHT, window.innerHeight),
+  )
   return {
-    x: Math.min(Math.max(0, geometry.x), Math.max(0, window.innerWidth - width - 64)),
-    y: Math.min(Math.max(0, geometry.y), Math.max(0, window.innerHeight - 48)),
+    x: Math.min(
+      Math.max(0, geometry.x),
+      Math.max(0, window.innerWidth - width - WORKSPACE_RAIL_WIDTH),
+    ),
+    y: Math.min(
+      Math.max(0, geometry.y),
+      Math.max(0, window.innerHeight - VISIBLE_HEADER_HEIGHT),
+    ),
     width,
     height,
   }
+}
+
+function roundGeometry(
+  geometry: WorkspacePanelWindowGeometry,
+): WorkspacePanelWindowGeometry {
+  return {
+    x: Math.round(geometry.x),
+    y: Math.round(geometry.y),
+    width: Math.round(geometry.width),
+    height: Math.round(geometry.height),
+  }
+}
+
+function sameGeometry(
+  first: WorkspacePanelWindowGeometry,
+  second: WorkspacePanelWindowGeometry,
+): boolean {
+  return (
+    first.x === second.x &&
+    first.y === second.y &&
+    first.width === second.width &&
+    first.height === second.height
+  )
 }

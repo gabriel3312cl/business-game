@@ -3,6 +3,7 @@ import type { ContentPack, GameEvent, GameState } from '../types'
 import {
   activityCategory,
   buildActivityBuckets,
+  buildDiceAnalytics,
   buildGameAnalytics,
   eventPlayerIds,
 } from './gameAnalytics'
@@ -122,5 +123,57 @@ describe('game analytics', () => {
         game,
       ),
     ).toEqual([firstId, secondId])
+  })
+
+  it('builds dice distributions, landing history, and player summaries', () => {
+    const result = buildDiceAnalytics([
+      event(1, 'dice.rolled', {
+        player_id: firstId,
+        dice: [3, 4],
+        from_position: 0,
+        to_position: 7,
+        steps: 7,
+        tile_id: 'seven',
+      }),
+      event(2, 'dice.rolled', {
+        player_id: firstId,
+        dice: [6, 6],
+        from_position: 7,
+        to_position: 19,
+        steps: 12,
+        tile_id: 'nineteen',
+      }),
+      event(3, 'dice.rolled', {
+        player_id: secondId,
+        dice: [2, 2],
+        from_position: 10,
+        to_position: 10,
+        steps: 0,
+        jail_attempt: true,
+        tile_id: 'jail',
+      }),
+      event(4, 'card.utility_dice_rolled', {
+        player_id: secondId,
+        dice: [1, 5],
+      }),
+      event(5, 'dice.rolled', { player_id: secondId, dice: [0, 8] }),
+    ])
+
+    expect(result.rolls).toHaveLength(3)
+    expect(result.utilityRolls).toHaveLength(1)
+    expect(result.average).toBeCloseTo(23 / 3)
+    expect(result.doubles).toBe(2)
+    expect(result.faceCounts).toEqual([0, 2, 1, 1, 0, 2])
+    expect(result.totalCounts[5]).toBe(1)
+    expect(result.totalCounts[10]).toBe(1)
+    expect(result.landings).toEqual([
+      { position: 7, tileId: 'seven', count: 1 },
+      { position: 19, tileId: 'nineteen', count: 1 },
+    ])
+    expect(result.players).toEqual([
+      { playerId: firstId, rolls: 2, average: 9.5, doubles: 1 },
+      { playerId: secondId, rolls: 1, average: 4, doubles: 1 },
+    ])
+    expect(result.history.map((roll) => roll.sequence)).toEqual([4, 3, 2, 1])
   })
 })

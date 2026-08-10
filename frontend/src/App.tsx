@@ -32,6 +32,7 @@ import { mergeGameState } from './gameState'
 import type {
   BoardMode,
   ContentPack,
+  EconomicDifficulty,
   GameState,
   PackManifest,
   User,
@@ -282,6 +283,7 @@ export default function App() {
 
   const createGame = async (
     deckCollectionIds: Record<string, string[]> = {},
+    economicDifficulty: EconomicDifficulty = 'standard',
   ) => {
     setCreatedGame(null)
     setGamePack(null)
@@ -298,6 +300,7 @@ export default function App() {
         pack.manifest.id,
         pack.manifest.version,
         deckCollectionIds,
+        economicDifficulty,
       )
       setGameCreationOpen(false)
       activeGameSession.set(game.id)
@@ -764,7 +767,9 @@ export default function App() {
           open={gameCreationOpen}
           pack={pack}
           onClose={() => setGameCreationOpen(false)}
-          onConfirm={(deckCollectionIds) => void createGame(deckCollectionIds)}
+          onConfirm={(deckCollectionIds, difficulty) =>
+            void createGame(deckCollectionIds, difficulty)
+          }
         />
       )}
       <AuthDialog

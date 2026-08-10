@@ -265,7 +265,7 @@ async def test_declined_property_is_sold_by_authoritative_auction(
     )
     assert game.active_auction is not None
     assert game.active_auction.property_id == "property_03"
-    assert game.active_auction.minimum_bid == 30
+    assert game.active_auction.minimum_bid == 42
     assert game.active_auction.deposit_amount == 6
 
     game = await games.execute(
@@ -320,15 +320,16 @@ async def test_auction_refunds_deposit_to_unsuccessful_bidder(
     await games.join(game.id, third)
     await games.start(game.id, first.id)
     await games.execute(game.id, first.id, RollCommand(action="roll"))
-    await games.execute(
+    game = await games.execute(
         game.id,
         first.id,
         DeclinePropertyCommand(action="decline_property"),
     )
+    assert game.active_auction is not None
     game = await games.execute(
         game.id,
         second.id,
-        BidCommand(action="bid", amount=40),
+        BidCommand(action="bid", amount=game.active_auction.minimum_bid),
     )
     assert game.active_auction is not None
     assert game.active_auction.deposits == {second.id: 6}
@@ -2394,12 +2395,12 @@ async def test_extended_board_auction_taxes_and_discounted_card_purchase(
     assert game.pending_auction_selector_id == first_id
     games._select_auction_property(game, first_id, "property_07")
     assert game.active_auction is not None
-    assert game.active_auction.minimum_bid == 50
+    assert game.active_auction.minimum_bid == 70
     assert game.active_auction.deposit_amount == 10
     with pytest.raises(ConflictError, match="below the auction minimum"):
-        games._bid(game, first_id, 49)
-    games._bid(game, first_id, 50)
-    assert game.active_auction.current_bid == 50
+        games._bid(game, first_id, 69)
+    games._bid(game, first_id, 70)
+    assert game.active_auction.current_bid == 70
     assert first.balance == 2790
 
     games._refund_all_auction_deposits(game, reason="test_cleanup")

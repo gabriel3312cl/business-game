@@ -244,6 +244,7 @@ export interface ManagementPanelLayoutPreferences {
 }
 
 export interface WorkspacePanelLayoutPreferences {
+  compact: boolean
   order: WorkspacePanelId[]
   visible: WorkspacePanelId[]
   heights: Partial<Record<WorkspacePanelId, number>>
@@ -307,12 +308,15 @@ export interface VisualEffectsPreferenceSettings {
   intensity: VisualEffectsIntensity
 }
 
+export type PlayerSortOption = 'turnOrder' | 'netWorth' | 'cash' | 'name'
+
 export interface UserPreferences {
   panel_layout: PanelLayoutPreferences | null
   audio_settings: AudioPreferenceSettings | null
   token_appearance: TokenAppearanceSettings | null
   automation_settings: AutomationPreferenceSettings | null
   visual_effects: VisualEffectsPreferenceSettings | null
+  player_sort: PlayerSortOption | null
 }
 
 export interface TokenResponse {
@@ -332,6 +336,7 @@ export type BotController = 'standard' | 'ai'
 export interface PlayerState {
   user_id: string
   display_name: string
+  appearance_slot?: number | null
   is_bot: boolean
   bot_personality: BotPersonality | null
   bot_controller: BotController | null
@@ -360,11 +365,68 @@ export interface OptionalRules {
 
 export type RuleOptionName = keyof OptionalRules
 
+export type EconomicDifficulty =
+  | 'novice'
+  | 'easy'
+  | 'standard'
+  | 'pro'
+  | 'realistic'
+
+export type EconomicSeason = 'summer' | 'autumn' | 'winter' | 'spring'
+export type WeatherCondition =
+  | 'clear'
+  | 'rain'
+  | 'storm'
+  | 'heatwave'
+  | 'cold_wave'
+  | 'drought'
+export type EconomicCycle = 'expansion' | 'slowdown' | 'recession' | 'recovery'
+
+export interface EconomicEventState {
+  kind:
+    | 'innovation_boom'
+    | 'supply_shock'
+    | 'credit_tightening'
+    | 'consumer_boom'
+    | 'labor_dispute'
+    | 'fiscal_stimulus'
+  remaining_weeks: number
+  intensity: number
+}
+
+export interface MarketMovementState {
+  instrument_id: string
+  previous_price: number
+  current_price: number
+  change_basis_points: number
+  primary_cause: string
+}
+
+export interface EconomicSimulationState {
+  current_date: string
+  elapsed_weeks: number
+  season: EconomicSeason
+  weather: WeatherCondition
+  weather_intensity: number
+  cycle: EconomicCycle
+  annual_growth_basis_points: number
+  annual_inflation_basis_points: number
+  policy_rate_basis_points: number
+  unemployment_basis_points: number
+  consumer_confidence: number
+  market_sentiment: number
+  active_events: EconomicEventState[]
+  last_market_movements: MarketMovementState[]
+  last_company_action: string | null
+  last_company_instrument_id: string | null
+}
+
 export interface GameSettings {
   max_players: number | null
   allow_spectators: boolean
   auction_deposit_percent: number
   auction_minimum_bid_percent: number
+  economic_difficulty: EconomicDifficulty
   rules: OptionalRules
 }
 
@@ -505,6 +567,7 @@ export interface InvestmentInstrumentState {
   last_settlement_sequence: number
   buy_volume: number
   sell_volume: number
+  trade_volume: number
   trade_count: number
   last_trade_price: number | null
   session_high: number
@@ -668,6 +731,7 @@ export type GameEventType =
   | 'debt.plan_proposed'
   | 'debt.plan_rejected'
   | 'dice.rolled'
+  | 'economy.week_advanced'
   | 'game.cancelled'
   | 'game.created'
   | 'game.finished'
@@ -803,6 +867,7 @@ export interface GameState {
   players: PlayerState[]
   spectators: SpectatorState[]
   settings: GameSettings
+  economy: EconomicSimulationState
   current_player_index: number
   phase: 'waiting_for_roll' | 'buy_decision' | 'waiting_for_end'
   owners: Record<string, string>

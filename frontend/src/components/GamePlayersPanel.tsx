@@ -19,6 +19,7 @@ import {
   List,
   ListItem,
   ListItemAvatar,
+  ListItemButton,
   ListItemText,
   MenuItem,
   Paper,
@@ -29,35 +30,35 @@ import {
 } from '@mui/material'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { santiagoTokenAssets } from '../assets/monopolySantiago'
 import type {
   ContentPack,
   GameEvent,
   GameState,
+  PlayerSortOption,
   TokenAppearanceSettings,
   User,
   VisualEffectsIntensity,
 } from '../types'
 import { AssetGlyph } from './AssetVisual'
-import { playerColors } from './gameColors'
 import {
   buildPlayerListEntries,
-  type PlayerSortOption,
 } from './playerOrdering'
 import {
   tokenAssetPath,
   tokenFillStyle,
   tokenShapeStyle,
 } from './tokenAppearance'
+import { automaticPlayerAppearance } from './playerAppearance'
 
 interface Props {
   game: GameState
   pack: ContentPack
   user: User
-  useAssetTokens?: boolean
   currentUserTokenAppearance?: TokenAppearanceSettings | null
+  sortOption: PlayerSortOption
   showTitle?: boolean
   motionIntensity?: VisualEffectsIntensity
+  onSortOptionChange: (sortOption: PlayerSortOption) => void
   onHoveredPlayerChange?: (playerId: string | null) => void
 }
 
@@ -65,15 +66,19 @@ export function GamePlayersPanel({
   game,
   pack,
   user,
-  useAssetTokens = false,
   currentUserTokenAppearance = null,
+  sortOption,
   showTitle = true,
   motionIntensity = 'full',
+  onSortOptionChange,
   onHoveredPlayerChange,
 }: Props) {
   const { t, i18n } = useTranslation()
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null)
-  const [sortOption, setSortOption] = useState<PlayerSortOption>('turnOrder')
+  const [pinnedPlayerId, setPinnedPlayerId] = useState<string | null>(null)
+  const pinnedPlayerIdRef = useRef<string | null>(null)
+  const hoveredPlayerIdRef = useRef<string | null>(null)
+  const focusedPlayerIdRef = useRef<string | null>(null)
   const players = useMemo(
     () => buildPlayerListEntries(game, pack, sortOption, i18n.language),
     [game, pack, sortOption, i18n.language],
@@ -93,6 +98,14 @@ export function GamePlayersPanel({
     ? relationshipInteractions(game.events, selectedBot.user_id, user.id)
     : []
   const adviceKeys = relationshipAdviceKeys(selectedInteractions)
+
+  const togglePinnedPlayer = (playerId: string) => {
+    const nextPlayerId = pinnedPlayerIdRef.current === playerId ? null : playerId
+    pinnedPlayerIdRef.current = nextPlayerId
+    setPinnedPlayerId(nextPlayerId)
+    // The activated row keeps its temporary focus highlight until focus leaves it.
+    onHoveredPlayerChange?.(playerId)
+  }
 
   useEffect(
     () => () => onHoveredPlayerChange?.(null),
@@ -118,7 +131,7 @@ export function GamePlayersPanel({
             value={sortOption}
             label={t('playerSort.label')}
             onChange={(event) =>
-              setSortOption(event.target.value as PlayerSortOption)
+              onSortOptionChange(event.target.value as PlayerSortOption)
             }
           >
             <MenuItem value="turnOrder">{t('playerSort.turnOrder')}</MenuItem>
@@ -128,21 +141,24 @@ export function GamePlayersPanel({
           </Select>
         </FormControl>
       </Stack>
-      <List dense disablePadding sx={{ mt: 0.5 }}>
+      <List
+        component="ul"
+        aria-label={t('playersPanel')}
+        dense
+        disablePadding
+        sx={{ mt: 0.5 }}
+      >
         {players.map(({ player, playerIndex, estimatedNetWorth }) => {
           const active = playerIndex === game.current_player_index
           const customAppearance =
             player.user_id === user.id ? currentUserTokenAppearance : null
-          const color =
-            customAppearance?.color ??
-            playerColors[playerIndex % playerColors.length]
-          const assetPath = customAppearance
-            ? tokenAssetPath(customAppearance.icon)
-            : useAssetTokens
-              ? santiagoTokenAssets[
-                  playerIndex % santiagoTokenAssets.length
-                ].path
-              : undefined
+          const automaticAppearance = automaticPlayerAppearance(
+            player,
+            playerIndex,
+          )
+          const appearance = customAppearance ?? automaticAppearance
+          const color = appearance.color
+          const assetPath = tokenAssetPath(appearance.icon)
           const relationship = player.is_bot
             ? game.bot_relationships.find(
                 (item) =>
@@ -152,16 +168,42 @@ export function GamePlayersPanel({
           const relationshipPresentation = relationshipLevel(
             relationship?.score ?? 0,
           )
+          const pinned = pinnedPlayerId === player.user_id
           return (
             <ListItem
               key={player.user_id}
+              component="li"
+              disablePadding
               data-player-effect-id={player.user_id}
-              onMouseEnter={() => onHoveredPlayerChange?.(player.user_id)}
-              onMouseLeave={() => onHoveredPlayerChange?.(null)}
+              onMouseEnter={() => {
+                hoveredPlayerIdRef.current = player.user_id
+                onHoveredPlayerChange?.(player.user_id)
+              }}
+              onMouseLeave={() => {
+                hoveredPlayerIdRef.current = null
+                onHoveredPlayerChange?.(
+                  focusedPlayerIdRef.current ?? pinnedPlayerIdRef.current,
+                )
+              }}
+              onFocusCapture={() => {
+                focusedPlayerIdRef.current = player.user_id
+                onHoveredPlayerChange?.(player.user_id)
+              }}
+              onBlurCapture={(event) => {
+                if (
+                  !event.currentTarget.contains(event.relatedTarget as Node | null)
+                ) {
+                  focusedPlayerIdRef.current = null
+                  onHoveredPlayerChange?.(
+                    hoveredPlayerIdRef.current ?? pinnedPlayerIdRef.current,
+                  )
+                }
+              }}
               sx={{
                 borderRadius: 2,
                 mb: 0.5,
-                px: 1,
+                minHeight: 44,
+                overflow: 'hidden',
                 borderLeft: active
                   ? `4px solid ${color}`
                   : '4px solid transparent',
@@ -186,154 +228,172 @@ export function GamePlayersPanel({
                 },
               }}
             >
-              <ListItemAvatar sx={{ minWidth: 42 }}>
-                <Avatar
-                  sx={{
-                    width: 32,
-                    height: 32,
-                    ...(customAppearance
-                      ? tokenFillStyle(customAppearance)
-                      : { bgcolor: color }),
-                    color: '#0b0912',
-                    fontWeight: 900,
-                    fontSize: 14,
-                    ...(customAppearance
-                      ? tokenShapeStyle(customAppearance.shape)
-                      : {}),
-                  }}
-                >
-                  {customAppearance?.icon === 'emoji' && customAppearance.emoji ? (
-                    customAppearance.emoji
-                  ) : assetPath ? (
-                    <AssetGlyph path={assetPath} size="72%" />
-                  ) : (
-                    playerIndex + 1
-                  )}
-                </Avatar>
-              </ListItemAvatar>
-              <ListItemText
-                primary={
-                  <Box
-                    component="span"
-                    sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
+              <ListItemButton
+                selected={pinned}
+                aria-pressed={pinned}
+                onClick={() => togglePinnedPlayer(player.user_id)}
+                sx={{
+                  minWidth: 0,
+                  minHeight: 44,
+                  px: 1,
+                  py: 0.5,
+                  borderRadius: 1.5,
+                  '&.Mui-focusVisible': {
+                    outline: `2px solid ${color}`,
+                    outlineOffset: -2,
+                  },
+                }}
+              >
+                <ListItemAvatar sx={{ minWidth: 42 }}>
+                  <Avatar
+                    sx={{
+                      width: 32,
+                      height: 32,
+                      ...tokenFillStyle(appearance),
+                      color: '#0b0912',
+                      fontWeight: 900,
+                      fontSize: 14,
+                      ...tokenShapeStyle(appearance.shape),
+                    }}
                   >
+                    {appearance.icon === 'emoji' && appearance.emoji ? (
+                      appearance.emoji
+                    ) : assetPath ? (
+                      <AssetGlyph path={assetPath} size="72%" />
+                    ) : (
+                      playerIndex + 1
+                    )}
+                  </Avatar>
+                </ListItemAvatar>
+                <ListItemText
+                  primary={
                     <Box
                       component="span"
-                      sx={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        fontWeight: active ? 800 : 600,
-                      }}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
                     >
-                      {player.display_name}
-                    </Box>
-                    {player.is_bot && (
-                      <SmartToyRoundedIcon
-                        color="secondary"
-                        sx={{ fontSize: 16 }}
-                        aria-label={t('bot')}
-                      />
-                    )}
-                    {player.is_bot && (
-                      <Tooltip
-                        arrow
-                        title={
-                          <Stack spacing={0.35} sx={{ py: 0.25 }}>
-                            <Typography variant="caption" fontWeight={800}>
-                              {t('relationships.tooltipWhy', {
-                                reason: relationship?.last_reason
-                                  ? t(
-                                      `relationships.reasons.${relationship.last_reason}`,
-                                      {
-                                        defaultValue: relationship.last_reason,
-                                      },
-                                    )
-                                  : t('relationships.noInteractions'),
-                              })}
-                            </Typography>
-                            <Typography variant="caption">
-                              {t('relationships.details', {
-                                score: relationship?.score ?? 0,
-                                count: relationship?.interaction_count ?? 0,
-                              })}
-                            </Typography>
-                            <Typography variant="caption" color="inherit">
-                              {t('relationships.tooltipAction')}
-                            </Typography>
-                          </Stack>
-                        }
+                      <Box
+                        component="span"
+                        sx={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          fontWeight: active ? 800 : 600,
+                        }}
                       >
-                        <Chip
-                          size="small"
-                          clickable
-                          onClick={() => setSelectedBotId(player.user_id)}
-                          label={t(
-                            `relationships.levels.${relationshipPresentation.level}`,
-                          )}
-                          aria-label={t('relationships.ariaLabel', {
-                            bot: player.display_name,
-                            level: t(
-                              `relationships.levels.${relationshipPresentation.level}`,
-                            ),
-                          })}
-                          sx={{
-                            height: 19,
-                            bgcolor: relationshipPresentation.background,
-                            color: relationshipPresentation.color,
-                            border: `1px solid ${relationshipPresentation.border}`,
-                            '&:hover': {
-                              bgcolor: relationshipPresentation.background,
-                              filter: 'brightness(1.2)',
-                            },
-                            '& .MuiChip-label': {
-                              px: 0.65,
-                              fontSize: '0.62rem',
-                              fontWeight: 850,
-                            },
-                          }}
+                        {player.display_name}
+                      </Box>
+                      {player.is_bot && (
+                        <SmartToyRoundedIcon
+                          color="secondary"
+                          sx={{ fontSize: 16 }}
+                          aria-label={t('bot')}
                         />
-                      </Tooltip>
+                      )}
+                      {player.user_id === game.host_user_id && (
+                        <CrownRoundedIcon
+                          color="primary"
+                          sx={{ fontSize: 16 }}
+                          aria-label={t('host')}
+                        />
+                      )}
+                    </Box>
+                  }
+                  secondary={
+                    player.bankrupt
+                      ? t('bankrupt')
+                      : (
+                          <Box component="span">
+                            <AnimatedBalance
+                              value={
+                                sortOption === 'netWorth'
+                                  ? estimatedNetWorth
+                                  : player.balance
+                              }
+                              intensity={motionIntensity}
+                            />
+                            {sortOption === 'netWorth'
+                              ? ` ${t('playerSort.netWorthValue')}`
+                              : ''}
+                            {player.in_jail ? ` · ${t('detained')}` : ''}
+                            {player.is_bot
+                              ? ` · ${t(
+                                  `botControllers.${player.bot_controller ?? 'standard'}`,
+                                )} · ${t(
+                                  `botPersonalities.${player.bot_personality ?? 'balanced'}`,
+                                )}`
+                              : ''}
+                          </Box>
+                        )
+                  }
+                />
+                {active && (
+                  <Chip size="small" color="secondary" label={t('turn')} />
+                )}
+              </ListItemButton>
+              {player.is_bot && (
+                <Tooltip
+                  arrow
+                  title={
+                    <Stack spacing={0.35} sx={{ py: 0.25 }}>
+                      <Typography variant="caption" fontWeight={800}>
+                        {t('relationships.tooltipWhy', {
+                          reason: relationship?.last_reason
+                            ? t(
+                                `relationships.reasons.${relationship.last_reason}`,
+                                {
+                                  defaultValue: relationship.last_reason,
+                                },
+                              )
+                            : t('relationships.noInteractions'),
+                        })}
+                      </Typography>
+                      <Typography variant="caption">
+                        {t('relationships.details', {
+                          score: relationship?.score ?? 0,
+                          count: relationship?.interaction_count ?? 0,
+                        })}
+                      </Typography>
+                      <Typography variant="caption" color="inherit">
+                        {t('relationships.tooltipAction')}
+                      </Typography>
+                    </Stack>
+                  }
+                >
+                  <Chip
+                    size="small"
+                    clickable
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setSelectedBotId(player.user_id)
+                    }}
+                    label={t(
+                      `relationships.levels.${relationshipPresentation.level}`,
                     )}
-                    {player.user_id === game.host_user_id && (
-                      <CrownRoundedIcon
-                        color="primary"
-                        sx={{ fontSize: 16 }}
-                        aria-label={t('host')}
-                      />
-                    )}
-                  </Box>
-                }
-                secondary={
-                  player.bankrupt
-                    ? t('bankrupt')
-                    : (
-                        <Box component="span">
-                          <AnimatedBalance
-                            value={
-                              sortOption === 'netWorth'
-                                ? estimatedNetWorth
-                                : player.balance
-                            }
-                            intensity={motionIntensity}
-                          />
-                          {sortOption === 'netWorth'
-                            ? ` ${t('playerSort.netWorthValue')}`
-                            : ''}
-                          {player.in_jail ? ` · ${t('detained')}` : ''}
-                          {player.is_bot
-                            ? ` · ${t(
-                                `botControllers.${player.bot_controller ?? 'standard'}`,
-                              )} · ${t(
-                                `botPersonalities.${player.bot_personality ?? 'balanced'}`,
-                              )}`
-                            : ''}
-                        </Box>
-                      )
-                }
-              />
-              {active && (
-                <Chip size="small" color="secondary" label={t('turn')} />
+                    aria-label={t('relationships.ariaLabel', {
+                      bot: player.display_name,
+                      level: t(
+                        `relationships.levels.${relationshipPresentation.level}`,
+                      ),
+                    })}
+                    sx={{
+                      height: 32,
+                      mx: 0.75,
+                      flexShrink: 0,
+                      bgcolor: relationshipPresentation.background,
+                      color: relationshipPresentation.color,
+                      border: `1px solid ${relationshipPresentation.border}`,
+                      '&:hover': {
+                        bgcolor: relationshipPresentation.background,
+                        filter: 'brightness(1.2)',
+                      },
+                      '& .MuiChip-label': {
+                        px: 0.8,
+                        fontSize: '0.75rem',
+                        fontWeight: 850,
+                      },
+                    }}
+                  />
+                </Tooltip>
               )}
             </ListItem>
           )

@@ -1,5 +1,5 @@
 import { Box, Tooltip, Typography } from '@mui/material'
-import type { ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import type {
   TileDefinition,
   TokenAppearanceSettings,
@@ -32,6 +32,10 @@ interface BoardTileProps {
   owner?: BoardOwner
   heatmap?: BoardTileHeatmap
   tooltip: ReactNode
+  buttonRef?: (node: HTMLButtonElement | null) => void
+  tabIndex?: number
+  onFocus?: () => void
+  onKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void
   onClick: () => void
 }
 
@@ -87,6 +91,10 @@ export function BoardTile({
   owner,
   heatmap,
   tooltip,
+  buttonRef,
+  tabIndex,
+  onFocus,
+  onKeyDown,
   onClick,
 }: BoardTileProps) {
   const accent = tile.color ?? defaultTileColor(tile.kind)
@@ -107,11 +115,15 @@ export function BoardTile({
       leaveTouchDelay={2500}
     >
     <Box
+      ref={buttonRef}
       component="button"
       type="button"
+      tabIndex={tabIndex}
       data-board-tile-id={tile.id}
       data-highlighted={highlighted || undefined}
       aria-label={`${name}${priceLabel}${ownerLabel}${buildingsLabel}${mortgagedLabel}${heatmapLabel}`}
+      onFocus={onFocus}
+      onKeyDown={onKeyDown}
       onClick={onClick}
       sx={{
         gridColumn,

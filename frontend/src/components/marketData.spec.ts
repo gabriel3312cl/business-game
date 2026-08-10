@@ -33,6 +33,7 @@ const instrument = (
   last_settlement_sequence: 0,
   buy_volume: 0,
   sell_volume: 0,
+  trade_volume: 0,
   trade_count: 0,
   last_trade_price: null,
   session_high: currentPrice,

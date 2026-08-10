@@ -9,7 +9,9 @@ import {
   DialogContent,
   DialogTitle,
   LinearProgress,
+  Paper,
   Stack,
+  TextField,
   Typography,
   useMediaQuery,
   useTheme,
@@ -22,14 +24,13 @@ import type {
   GameCommand,
   GameEvent,
   GameState,
+  TileDefinition,
   User,
   VisualEffectsIntensity,
 } from '../types'
-import { playerColors } from './gameColors'
-import {
-  boardPerimeterPosition,
-  compareAuctionPrice,
-} from './auctionPresentation'
+import { playerColor } from './gameColors'
+import { compareAuctionPrice } from './auctionPresentation'
+import { perimeterPosition } from './boardGeometry'
 import {
   assessHistoricalProperty,
   historicalProperty,
@@ -73,6 +74,7 @@ export function GameAuctionDialog({
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const deadline = game.active_auction?.bid_deadline ?? null
   const [now, setNow] = useState(() => Date.now())
+  const [quickLoanAmount, setQuickLoanAmount] = useState('')
   const warnedDeadlineRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -90,6 +92,10 @@ export function GameAuctionDialog({
 
     return () => window.clearInterval(interval)
   }, [deadline])
+
+  useEffect(() => {
+    setQuickLoanAmount('')
+  }, [game.id, game.active_auction?.property_id])
 
   const deadlineMs = parseDeadline(deadline)
   const remainingMs =
@@ -147,7 +153,14 @@ export function GameAuctionDialog({
   )
   const bidder = bidderIndex >= 0 ? game.players[bidderIndex] : undefined
   const bidderName = bidder?.display_name ?? t('auctionNoLeader')
+  const bidderOwnedInGroup = bidder
+    ? ownedGroupProperties(groupTiles, game, bidder.user_id)
+    : 0
   const currentUser = game.players.find((player) => player.user_id === user.id)
+  const activeLoan = game.bank.loans.some((loan) => loan.player_id === user.id)
+  const creditProfile = game.bank.credit_profiles[user.id]
+  const maximumLoan = creditProfile?.current_limit ?? 0
+  const parsedQuickLoanAmount = Number(quickLoanAmount)
   const heldDeposit = auction.deposits[user.id] ?? 0
   const availableBidCash = (currentUser?.balance ?? 0) + heldDeposit
   const canPlaceDeposit =
@@ -157,6 +170,12 @@ export function GameAuctionDialog({
   const canBid =
     auction.eligible_player_ids.includes(user.id) &&
     !auction.passed_player_ids.includes(user.id)
+  const showQuickLoan =
+    game.settings.rules.loans_enabled &&
+    canBid &&
+    currentUser !== undefined &&
+    !currentUser.bankrupt &&
+    !activeLoan
   const bidAmounts =
     auction.current_bid === 0
       ? [
@@ -244,7 +263,16 @@ export function GameAuctionDialog({
               {propertyName}
             </Typography>
 
-            <Box aria-live="polite">
+            <Paper
+              aria-live="polite"
+              variant="outlined"
+              sx={{
+                p: 1.5,
+                borderRadius: 2.5,
+                bgcolor: 'rgba(75,81,133,.22)',
+                borderColor: 'rgba(157,140,255,.22)',
+              }}
+            >
               <Typography color="secondary.light" fontWeight={700}>
                 {t('auctionLeader')}
               </Typography>
@@ -252,8 +280,8 @@ export function GameAuctionDialog({
                 <Avatar
                   sx={{
                     bgcolor:
-                      bidderIndex >= 0
-                        ? playerColors[bidderIndex % playerColors.length]
+                      bidderIndex >= 0 && bidder
+                        ? playerColor(bidder, bidderIndex)
                         : 'secondary.main',
                     color: '#0b0912',
                     fontWeight: 900,
@@ -326,9 +354,38 @@ export function GameAuctionDialog({
                       />
                     )}
                   </Stack>
+                  {bidder && (
+                    <Stack
+                      direction="row"
+                      spacing={0.75}
+                      useFlexGap
+                      flexWrap="wrap"
+                      mt={0.75}
+                    >
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={t('auctionCurrentBalance', {
+                          amount: bidder.balance,
+                        })}
+                      />
+                      {groupTiles.length > 0 && (
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label={t('auctionGroupOwnership', {
+                            group: groupName,
+                            owned: bidderOwnedInGroup,
+                            total: groupTiles.length,
+                          })}
+                          sx={{ borderColor: `${groupColor}88` }}
+                        />
+                      )}
+                    </Stack>
+                  )}
                 </Box>
               </Stack>
-            </Box>
+            </Paper>
 
             <Box>
               <Typography
@@ -369,7 +426,35 @@ export function GameAuctionDialog({
               />
             </Box>
 
-            <Box>
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 1.5,
+                borderRadius: 2.5,
+                bgcolor: 'rgba(11,9,18,.24)',
+                borderColor: 'rgba(255,255,255,.1)',
+              }}
+            >
+              {currentUser && (
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                    gap: 1.5,
+                    mb: 1.25,
+                  }}
+                >
+                  <AuctionMoneyValue
+                    label={t('auctionYourBalance')}
+                    amount={currentUser.balance}
+                  />
+                  <AuctionMoneyValue
+                    label={t('auctionAvailableToBid')}
+                    amount={availableBidCash}
+                    align="right"
+                  />
+                </Box>
+              )}
               <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                 <Chip
                   size="small"
@@ -399,7 +484,66 @@ export function GameAuctionDialog({
                   {t('auctionDepositHint')}
                 </Typography>
               )}
-            </Box>
+            </Paper>
+
+            {showQuickLoan && (
+              <Box
+                sx={{
+                  p: 1.5,
+                  borderRadius: 2,
+                  border: '1px solid rgba(157,140,255,.28)',
+                  bgcolor: 'rgba(157,140,255,.08)',
+                }}
+              >
+                <Typography fontWeight={850} mb={0.5}>
+                  {t('auctionQuickLoan')}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {t('auctionQuickLoanHelp', {
+                    amount: maximumLoan,
+                    interest:
+                      creditProfile?.current_interest_percent ??
+                      pack.manifest.loan_interest_percent,
+                  })}
+                </Typography>
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  spacing={1}
+                  mt={1}
+                >
+                  <TextField
+                    size="small"
+                    type="number"
+                    label={t('bankPanel.loanAmount')}
+                    value={quickLoanAmount}
+                    slotProps={{
+                      htmlInput: { min: 1, max: maximumLoan, step: 1 },
+                    }}
+                    onChange={(event) => setQuickLoanAmount(event.target.value)}
+                    sx={{ flex: 1 }}
+                  />
+                  <Button
+                    variant="contained"
+                    disabled={
+                      busy ||
+                      !Number.isInteger(parsedQuickLoanAmount) ||
+                      parsedQuickLoanAmount <= 0 ||
+                      parsedQuickLoanAmount > maximumLoan
+                    }
+                    onClick={() =>
+                      void onCommand({
+                        action: 'request_loan',
+                        amount: parsedQuickLoanAmount,
+                      }).then((success) => {
+                        if (success) setQuickLoanAmount('')
+                      })
+                    }
+                  >
+                    {t('auctionQuickLoanAction')}
+                  </Button>
+                </Stack>
+              </Box>
+            )}
 
             {canBid ? (
               <Box>
@@ -456,6 +600,9 @@ export function GameAuctionDialog({
             <AuctionBidHistory
               bids={bids}
               game={game}
+              groupTiles={groupTiles}
+              groupName={groupName}
+              groupColor={groupColor}
               motionIntensity={motionIntensity}
             />
           </Stack>
@@ -469,43 +616,55 @@ export function GameAuctionDialog({
               minHeight: { md: 360 },
             }}
           >
-            <Box textAlign="center">
-              <Typography variant="h5" fontWeight={900}>
-                {propertyName}
-              </Typography>
-              <Typography color="text.secondary" mt={1}>
-                {t(tile?.kind ?? 'property')}
-              </Typography>
-              <Stack
-                direction="row"
-                spacing={1}
-                justifyContent="center"
-                useFlexGap
-                flexWrap="wrap"
-                mt={1.25}
-              >
-                <Chip
-                  size="small"
-                  label={groupName}
-                  sx={{
-                    borderLeft: `5px solid ${groupColor}`,
-                    bgcolor: `${groupColor}1f`,
-                    fontWeight: 800,
-                  }}
-                />
-                <Chip
-                  size="small"
-                  variant="outlined"
-                  label={t('auctionBoardPosition', {
-                    position: tileIndex + 1,
-                    total: pack.manifest.tile_count,
-                  })}
-                />
-              </Stack>
-              <Typography color="text.secondary" mt={2}>
-                {t('price')}
-              </Typography>
-              <Typography variant="h5">${tile?.price ?? 0}</Typography>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 1fr) auto',
+                gap: 2,
+                alignItems: 'start',
+              }}
+            >
+              <Box minWidth={0}>
+                <Typography variant="h5" fontWeight={900}>
+                  {propertyName}
+                </Typography>
+                <Typography color="text.secondary" mt={0.25}>
+                  {t(tile?.kind ?? 'property')}
+                </Typography>
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  useFlexGap
+                  flexWrap="wrap"
+                  mt={1.25}
+                >
+                  <Chip
+                    size="small"
+                    label={groupName}
+                    sx={{
+                      borderLeft: `5px solid ${groupColor}`,
+                      bgcolor: `${groupColor}1f`,
+                      fontWeight: 800,
+                    }}
+                  />
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={t('auctionBoardPosition', {
+                      position: tileIndex + 1,
+                      total: pack.manifest.tile_count,
+                    })}
+                  />
+                </Stack>
+              </Box>
+              <Box textAlign="right">
+                <Typography variant="caption" color="text.secondary">
+                  {t('price')}
+                </Typography>
+                <Typography variant="h5" fontWeight={850}>
+                  ${tile?.price ?? 0}
+                </Typography>
+              </Box>
             </Box>
 
             <Box
@@ -517,10 +676,12 @@ export function GameAuctionDialog({
                   sm: 'minmax(150px,.75fr) minmax(0,1.25fr)',
                 },
                 gap: 1.5,
+                alignItems: 'start',
               }}
             >
               <AuctionBoardMap
                 tileCount={pack.manifest.tile_count}
+                sideLength={pack.manifest.side_length}
                 tileIndex={tileIndex}
                 propertyName={propertyName}
                 accent={groupColor}
@@ -613,10 +774,16 @@ export function GameAuctionDialog({
 function AuctionBidHistory({
   bids,
   game,
+  groupTiles,
+  groupName,
+  groupColor,
   motionIntensity,
 }: {
   bids: AuctionBid[]
   game: GameState
+  groupTiles: TileDefinition[]
+  groupName: string
+  groupColor: string
   motionIntensity: VisualEffectsIntensity
 }) {
   const { t } = useTranslation()
@@ -635,7 +802,7 @@ function AuctionBidHistory({
           component="ol"
           sx={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
             gap: 0.75,
             listStyle: 'none',
             p: 0,
@@ -649,6 +816,9 @@ function AuctionBidHistory({
             const player =
               playerIndex >= 0 ? game.players[playerIndex] : undefined
             const name = player?.display_name ?? t('bank')
+            const ownedInGroup = player
+              ? ownedGroupProperties(groupTiles, game, player.user_id)
+              : 0
             return (
               <Stack
                 component="li"
@@ -690,8 +860,8 @@ function AuctionBidHistory({
                     height: 28,
                     flexShrink: 0,
                     bgcolor:
-                      playerIndex >= 0
-                        ? playerColors[playerIndex % playerColors.length]
+                      playerIndex >= 0 && player
+                        ? playerColor(player, playerIndex)
                         : 'secondary.main',
                     color: '#0b0912',
                     fontSize: 12,
@@ -705,6 +875,25 @@ function AuctionBidHistory({
                     {name}
                   </Typography>
                   <Typography fontWeight={900}>${bid.amount}</Typography>
+                  {player && (
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      {t('auctionCurrentBalance', { amount: player.balance })}
+                    </Typography>
+                  )}
+                  {player && groupTiles.length > 0 && (
+                    <Typography
+                      variant="caption"
+                      display="block"
+                      noWrap
+                      sx={{ color: groupColor }}
+                    >
+                      {t('auctionGroupOwnership', {
+                        group: groupName,
+                        owned: ownedInGroup,
+                        total: groupTiles.length,
+                      })}
+                    </Typography>
+                  )}
                 </Box>
               </Stack>
             )
@@ -717,18 +906,19 @@ function AuctionBidHistory({
 
 function AuctionBoardMap({
   tileCount,
+  sideLength,
   tileIndex,
   propertyName,
   accent,
 }: {
   tileCount: number
+  sideLength: number
   tileIndex: number
   propertyName: string
   accent: string
 }) {
   const { t } = useTranslation()
-  if (tileCount < 4 || tileIndex < 0) return null
-  const side = Math.ceil(tileCount / 4) + 1
+  if (tileCount < 4 || sideLength < 2 || tileIndex < 0) return null
 
   return (
     <Box
@@ -749,8 +939,8 @@ function AuctionBoardMap({
         })}
         sx={{
           display: 'grid',
-          gridTemplateColumns: `repeat(${side}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${side}, minmax(0, 1fr))`,
+          gridTemplateColumns: `repeat(${sideLength}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${sideLength}, minmax(0, 1fr))`,
           gap: '2px',
           width: '100%',
           maxWidth: 220,
@@ -760,8 +950,8 @@ function AuctionBoardMap({
       >
         <Box
           sx={{
-            gridColumn: `3 / ${Math.max(4, side - 1)}`,
-            gridRow: `3 / ${Math.max(4, side - 1)}`,
+            gridColumn: `2 / ${sideLength}`,
+            gridRow: `2 / ${sideLength}`,
             alignSelf: 'center',
             justifySelf: 'center',
             textAlign: 'center',
@@ -776,7 +966,7 @@ function AuctionBoardMap({
           </Typography>
         </Box>
         {Array.from({ length: tileCount }, (_, index) => {
-          const position = boardPerimeterPosition(index, tileCount)
+          const position = perimeterPosition(index, sideLength)
           const selected = index === tileIndex
           return (
             <Box
@@ -801,6 +991,35 @@ function AuctionBoardMap({
       </Box>
     </Box>
   )
+}
+
+function AuctionMoneyValue({
+  label,
+  amount,
+  align = 'left',
+}: {
+  label: string
+  amount: number
+  align?: 'left' | 'right'
+}) {
+  return (
+    <Box minWidth={0} textAlign={align}>
+      <Typography variant="caption" color="text.secondary" display="block">
+        {label}
+      </Typography>
+      <Typography variant="h5" fontWeight={900} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+        ${amount}
+      </Typography>
+    </Box>
+  )
+}
+
+function ownedGroupProperties(
+  groupTiles: TileDefinition[],
+  game: GameState,
+  playerId: string,
+): number {
+  return groupTiles.filter((item) => game.owners[item.id] === playerId).length
 }
 
 function HistoricalValue({ label, value }: { label: string; value: string }) {

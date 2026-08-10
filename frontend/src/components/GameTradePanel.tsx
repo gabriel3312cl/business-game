@@ -31,7 +31,7 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { advisorApi } from '../advisor/api'
 import type { AdvisorResponse } from '../advisor/types'
@@ -48,10 +48,11 @@ import type {
   User,
 } from '../types'
 import { perimeterPosition } from './boardGeometry'
-import { playerColors } from './gameColors'
+import { playerColor } from './gameColors'
 import { groupPropertyIds } from './propertyGrouping'
 import { summarizeHistoricalProperties } from './propertyHistoricalAnalysis'
 import { defaultTileColor } from './tilePresentation'
+import { tradeCashSuggestions } from './tradeCashSuggestions'
 
 const AdvisorMarkdown = lazy(() => import('../advisor/AdvisorMarkdown'))
 
@@ -62,7 +63,14 @@ interface Props {
   busy: boolean
   error: string | null
   boardHistory: BoardHistoricalStats | null
+  draft?: TradeDraft | null
+  onDraftConsumed?: () => void
   onCommand: (command: GameCommand) => Promise<boolean>
+}
+
+export interface TradeDraft {
+  recipientId: string
+  requestedPropertyId: string
 }
 
 export function GameTradePanel({
@@ -72,6 +80,8 @@ export function GameTradePanel({
   busy,
   error,
   boardHistory,
+  draft = null,
+  onDraftConsumed,
   onCommand,
 }: Props) {
   const { t } = useTranslation()
@@ -91,13 +101,28 @@ export function GameTradePanel({
   const [requestedCash, setRequestedCash] = useState(0)
   const [offeredPropertyIds, setOfferedPropertyIds] = useState<string[]>([])
   const [requestedPropertyIds, setRequestedPropertyIds] = useState<string[]>([])
+  const tradeUnavailablePropertyIds = game.trade_unavailable_property_ids
   const otherPlayers = game.players.filter(
     (player) => player.user_id !== user.id && !player.bankrupt,
+  )
+  const tradeablePlayers = useMemo(
+    () =>
+      game.players.filter(
+        (player) =>
+          player.user_id !== user.id &&
+          !player.bankrupt &&
+          Object.entries(game.owners).some(
+            ([propertyId, ownerId]) =>
+              ownerId === player.user_id &&
+              (game.building_levels[propertyId] ?? 0) === 0 &&
+              !tradeUnavailablePropertyIds.includes(propertyId),
+          ),
+      ),
+    [game.building_levels, game.owners, game.players, tradeUnavailablePropertyIds, user.id],
   )
   const canTrade = game.players.some(
     (player) => player.user_id === user.id && !player.bankrupt,
   )
-  const tradeUnavailablePropertyIds = game.trade_unavailable_property_ids
   const ownPropertyIds = Object.entries(game.owners)
     .filter(
       ([propertyId, ownerId]) =>
@@ -128,6 +153,34 @@ export function GameTradePanel({
       current.filter((propertyId) => !tradeUnavailablePropertyIds.includes(propertyId)),
     )
   }, [tradeUnavailablePropertyIds])
+  useEffect(() => {
+    if (!draft) return
+    const recipientIsAvailable = tradeablePlayers.some(
+      (player) => player.user_id === draft.recipientId,
+    )
+    const propertyIsAvailable =
+      game.owners[draft.requestedPropertyId] === draft.recipientId &&
+      (game.building_levels[draft.requestedPropertyId] ?? 0) === 0 &&
+      !tradeUnavailablePropertyIds.includes(draft.requestedPropertyId)
+    if (recipientIsAvailable && propertyIsAvailable) {
+      setCounteringTradeId(null)
+      setRecipientId(draft.recipientId)
+      setOfferedCash(0)
+      setRequestedCash(0)
+      setOfferedPropertyIds([])
+      setRequestedPropertyIds([draft.requestedPropertyId])
+      setDetailTradeId(null)
+      setOpen(true)
+    }
+    onDraftConsumed?.()
+  }, [
+    draft,
+    game.building_levels,
+    game.owners,
+    onDraftConsumed,
+    tradeablePlayers,
+    tradeUnavailablePropertyIds,
+  ])
   useEffect(() => {
     setSystemAnalysis(null)
     setSystemAnalysisError(false)
@@ -270,7 +323,7 @@ export function GameTradePanel({
           color="secondary"
           startIcon={<SwapHorizRoundedIcon />}
           disabled={
-            game.status !== 'playing' || !canTrade || otherPlayers.length === 0
+            game.status !== 'playing' || !canTrade || tradeablePlayers.length === 0
           }
           onClick={() => setOpen(true)}
         >
@@ -577,7 +630,7 @@ export function GameTradePanel({
               <Typography textAlign="center" fontWeight={750} mb={1}>
                 {t('selectTradePlayer')}
               </Typography>
-              {otherPlayers.map((player) => {
+              {tradeablePlayers.map((player) => {
                 const index = game.players.findIndex(
                   (candidate) => candidate.user_id === player.user_id,
                 )
@@ -592,7 +645,7 @@ export function GameTradePanel({
                         sx={{
                           width: 28,
                           height: 28,
-                          bgcolor: playerColors[index % playerColors.length],
+                          bgcolor: playerColor(player, index),
                           color: '#0b0912',
                           fontSize: 12,
                           fontWeight: 900,
@@ -619,10 +672,15 @@ export function GameTradePanel({
             >
               <TradeSide
                 title={user.display_name}
+                cashLabel={t('cashOffered')}
                 cash={offeredCash}
                 onCashChange={setOfferedCash}
+                availableCash={
+                  game.players.find((player) => player.user_id === user.id)?.balance ?? 0
+                }
                 propertyIds={ownPropertyIds}
                 selectedPropertyIds={offeredPropertyIds}
+                receivedPropertyIds={requestedPropertyIds}
                 onPropertyChange={setOfferedPropertyIds}
                 pack={pack}
                 game={game}
@@ -637,10 +695,16 @@ export function GameTradePanel({
                   otherPlayers.find((player) => player.user_id === recipientId)
                     ?.display_name ?? ''
                 }
+                cashLabel={t('cashRequested')}
                 cash={requestedCash}
                 onCashChange={setRequestedCash}
+                availableCash={
+                  game.players.find((player) => player.user_id === recipientId)?.balance ??
+                  0
+                }
                 propertyIds={recipientPropertyIds}
                 selectedPropertyIds={requestedPropertyIds}
+                receivedPropertyIds={offeredPropertyIds}
                 onPropertyChange={setRequestedPropertyIds}
                 pack={pack}
                 game={game}
@@ -1169,10 +1233,13 @@ function AnalysisValue({ label, value, warning = false }: AnalysisValueProps) {
 
 interface TradeSideProps {
   title: string
+  cashLabel: string
   cash: number
   onCashChange: (cash: number) => void
+  availableCash: number
   propertyIds: string[]
   selectedPropertyIds: string[]
+  receivedPropertyIds: string[]
   onPropertyChange: (propertyIds: string[]) => void
   pack: ContentPack
   game: GameState
@@ -1181,10 +1248,13 @@ interface TradeSideProps {
 
 function TradeSide({
   title,
+  cashLabel,
   cash,
   onCashChange,
+  availableCash,
   propertyIds,
   selectedPropertyIds,
+  receivedPropertyIds,
   onPropertyChange,
   pack,
   game,
@@ -1192,6 +1262,13 @@ function TradeSide({
 }: TradeSideProps) {
   const { t } = useTranslation()
   const propertyGroups = groupPropertyIds(pack, propertyIds)
+  const selectedOriginalValue = originalPropertyValue(pack, selectedPropertyIds)
+  const receivedOriginalValue = originalPropertyValue(pack, receivedPropertyIds)
+  const cashSuggestions = tradeCashSuggestions(
+    receivedOriginalValue,
+    selectedOriginalValue,
+    availableCash,
+  )
   return (
     <Stack spacing={2}>
       <Typography variant="h6" fontWeight={850} textAlign="center">
@@ -1199,11 +1276,41 @@ function TradeSide({
       </Typography>
       <TextField
         type="number"
-        label={t('cash')}
-        value={cash}
-        onChange={(event) => onCashChange(Math.max(0, Number(event.target.value)))}
-        slotProps={{ htmlInput: { min: 0, inputMode: 'numeric' } }}
+        label={cashLabel}
+        value={cash === 0 ? '' : cash}
+        placeholder={t('tradeCashPlaceholder')}
+        onChange={(event) => {
+          const nextCash = Number(event.target.value)
+          onCashChange(Number.isFinite(nextCash) ? Math.max(0, Math.floor(nextCash)) : 0)
+        }}
+        slotProps={{
+          htmlInput: { min: 0, max: availableCash, step: 1, inputMode: 'numeric' },
+        }}
       />
+      {cashSuggestions.length > 0 && (
+        <Box>
+          <Typography variant="overline" color="secondary.light">
+            {t('tradeCashSuggestions')}
+          </Typography>
+          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+            {cashSuggestions.map((suggestion) => (
+              <Button
+                key={`${suggestion.kind}:${suggestion.amount}`}
+                size="small"
+                variant={cash === suggestion.amount ? 'contained' : 'outlined'}
+                color="secondary"
+                onClick={() => onCashChange(suggestion.amount)}
+                sx={{ textTransform: 'none' }}
+              >
+                {t(`tradeCashSuggestion.${suggestion.kind}`)} · ${suggestion.amount}
+              </Button>
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.secondary" display="block" mt={0.75}>
+            {t('tradeCashSuggestionHelp')}
+          </Typography>
+        </Box>
+      )}
       <FormControl>
         <InputLabel>{t('properties')}</InputLabel>
         <Select
@@ -1298,6 +1405,14 @@ function TradeSide({
         </Select>
       </FormControl>
     </Stack>
+  )
+}
+
+function originalPropertyValue(pack: ContentPack, propertyIds: string[]): number {
+  const requested = new Set(propertyIds)
+  return pack.board.tiles.reduce(
+    (total, tile) => total + (requested.has(tile.id) ? (tile.price ?? 0) : 0),
+    0,
   )
 }
 

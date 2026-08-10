@@ -25,7 +25,7 @@ import type {
   SpectatorState,
   VisualEffectsIntensity,
 } from '../types'
-import { playerColors } from './gameColors'
+import { playerColor } from './gameColors'
 import {
   activityPresentation,
   type ActivityTone,
@@ -246,7 +246,7 @@ function decorateEventMessage(
   const people = [
     ...players.map((player, index) => ({
       name: player.display_name,
-      color: playerColors[index % playerColors.length],
+      color: playerColor(player, index),
     })),
     ...spectators.map((spectator) => ({
       name: spectator.display_name,
@@ -331,6 +331,22 @@ function eventMessage(
       : property || t('bankPanel.investment')
 
   switch (event.type) {
+    case 'economy.week_advanced': {
+      const dateValue = textValue(event, 'date')
+      const date = dateValue ? new Date(`${dateValue}T12:00:00`) : null
+      return t('activity.economyWeekAdvanced', {
+        date:
+          date && !Number.isNaN(date.getTime())
+            ? new Intl.DateTimeFormat(locale, {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+              }).format(date)
+            : dateValue,
+        weather: t(`economy.weather.${textValue(event, 'weather')}`),
+        cycle: t(`economy.cycle.${textValue(event, 'cycle')}`),
+      })
+    }
     case 'game.created':
       return t('activity.gameCreated')
     case 'player.joined':

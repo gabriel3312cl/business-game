@@ -12,6 +12,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import type {
   ContentPack,
+  EconomicDifficulty,
   GameState,
   OptionalRules,
   RuleOptionName,
@@ -23,7 +24,7 @@ const FINANCIAL_RULES: RuleOptionName[] = [
   'custom_rent_debts_enabled',
 ]
 const AUCTION_DEPOSIT_OPTIONS = [0, 5, 10, 15, 20, 25]
-const AUCTION_MINIMUM_OPTIONS = [0, 25, 50, 75, 100]
+const AUCTION_MINIMUM_OPTIONS = [0, 25, 50, 70, 75, 100]
 
 interface Props {
   game: GameState
@@ -35,6 +36,7 @@ interface Props {
     allow_spectators?: boolean
     auction_deposit_percent?: number
     auction_minimum_bid_percent?: number
+    economic_difficulty?: EconomicDifficulty
     rules?: Partial<OptionalRules>
   }) => void
 }
@@ -61,6 +63,32 @@ export function LobbySettingsPanel({
         {t('roomSettings')}
       </Typography>
       <Stack spacing={1.25}>
+        <FormControl size="small" sx={{ width: '100%', minWidth: 0 }}>
+          <InputLabel>{t('economy.difficultyLabel')}</InputLabel>
+          <Select
+            value={game.settings.economic_difficulty}
+            label={t('economy.difficultyLabel')}
+            disabled={!isHost || busy}
+            onChange={(event) =>
+              onUpdate({
+                economic_difficulty: event.target.value as EconomicDifficulty,
+              })
+            }
+          >
+            {(['novice', 'easy', 'standard', 'pro', 'realistic'] as const).map(
+              (difficulty) => (
+                <MenuItem key={difficulty} value={difficulty}>
+                  {t(`economy.difficulty.${difficulty}`)}
+                </MenuItem>
+              ),
+            )}
+          </Select>
+        </FormControl>
+        <Typography variant="caption" color="text.secondary">
+          {t(
+            `economy.difficultyDescription.${game.settings.economic_difficulty}`,
+          )}
+        </Typography>
         <FormControl size="small" sx={{ width: '100%', minWidth: 0 }}>
           <InputLabel>{t('maximumPlayers')}</InputLabel>
           <Select

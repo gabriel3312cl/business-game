@@ -79,6 +79,7 @@ def test_legacy_panel_layout_defaults_to_properties_view() -> None:
         }
     )
     assert prior_icon_rail.rail is not None
+    assert prior_icon_rail.rail.compact is False
     assert set(prior_icon_rail.rail.placements.values()) == {"right"}
     assert prior_icon_rail.rail.windows == {}
 
@@ -127,6 +128,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "token_appearance": None,
         "automation_settings": None,
         "visual_effects": None,
+        "player_sort": None,
     }
 
     panel_layout = {
@@ -145,6 +147,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
             "heights": {"bank": 360, "trades": 280},
         },
         "rail": {
+            "compact": True,
             "order": [
                 "room",
                 "bank",
@@ -186,6 +189,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "token_appearance": None,
         "automation_settings": None,
         "visual_effects": None,
+        "player_sort": None,
     }
 
     audio_settings = {
@@ -205,6 +209,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "token_appearance": None,
         "automation_settings": None,
         "visual_effects": None,
+        "player_sort": None,
     }
 
     token_appearance = {
@@ -229,6 +234,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "token_appearance": token_appearance,
         "automation_settings": None,
         "visual_effects": None,
+        "player_sort": None,
     }
 
     automation_settings = {
@@ -248,6 +254,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "token_appearance": token_appearance,
         "automation_settings": automation_settings,
         "visual_effects": None,
+        "player_sort": None,
     }
 
     visual_effects = {"intensity": "soft"}
@@ -263,6 +270,23 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "token_appearance": token_appearance,
         "automation_settings": automation_settings,
         "visual_effects": visual_effects,
+        "player_sort": None,
+    }
+
+    player_sort = "netWorth"
+    player_sort_updated = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=first_headers,
+        json={"player_sort": player_sort},
+    )
+    assert player_sort_updated.status_code == 200
+    assert player_sort_updated.json() == {
+        "panel_layout": panel_layout,
+        "audio_settings": audio_settings,
+        "token_appearance": token_appearance,
+        "automation_settings": automation_settings,
+        "visual_effects": visual_effects,
+        "player_sort": player_sort,
     }
 
     restored = await client.get(
@@ -276,6 +300,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "token_appearance": token_appearance,
         "automation_settings": automation_settings,
         "visual_effects": visual_effects,
+        "player_sort": player_sort,
     }
 
     first_user = await session.scalar(
@@ -288,6 +313,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "token_appearance": token_appearance,
         "automation_settings": automation_settings,
         "visual_effects": visual_effects,
+        "player_sort": player_sort,
     }
     await session.rollback()
 
@@ -303,6 +329,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "token_appearance": None,
         "automation_settings": None,
         "visual_effects": None,
+        "player_sort": None,
     }
 
 
@@ -415,6 +442,13 @@ async def test_rejects_invalid_or_unauthenticated_panel_preferences(
         json={"visual_effects": {"intensity": "extreme"}},
     )
     assert invalid_visual_effects.status_code == 422
+
+    invalid_player_sort = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=headers,
+        json={"player_sort": "mostProperties"},
+    )
+    assert invalid_player_sort.status_code == 422
 
 
 async def test_rejects_duplicate_email_and_invalid_password(
@@ -751,9 +785,10 @@ async def test_room_settings_and_spectator_permissions(
     assert settings.json()["settings"] == {
         "max_players": 3,
         "allow_spectators": False,
-        "auction_deposit_percent": 15,
-        "auction_minimum_bid_percent": 75,
-        "rules": {
+            "auction_deposit_percent": 15,
+            "auction_minimum_bid_percent": 75,
+            "economic_difficulty": "standard",
+            "rules": {
             "auction_unpurchased_properties": True,
             "free_parking_jackpot": True,
             "double_salary_on_start": False,

@@ -21,6 +21,7 @@ export const WORKSPACE_PANEL_IDS: WorkspacePanelId[] = [
 ]
 
 export const DEFAULT_WORKSPACE_PANEL_LAYOUT: WorkspacePanelLayoutPreferences = {
+  compact: false,
   order: WORKSPACE_PANEL_IDS,
   visible: ['properties'],
   heights: {},
@@ -64,6 +65,7 @@ export function normalizeWorkspacePanelLayout(
     if (geometry) windows[panelId] = geometry
   }
   return {
+    compact: stored.compact === true,
     order,
     visible: visible.length > 0 ? visible : ['properties'],
     heights,

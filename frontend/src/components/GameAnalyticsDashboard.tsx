@@ -1,8 +1,12 @@
 import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded'
 import AnalyticsRoundedIcon from '@mui/icons-material/AnalyticsRounded'
+import CasinoRoundedIcon from '@mui/icons-material/CasinoRounded'
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
+import FullscreenRoundedIcon from '@mui/icons-material/FullscreenRounded'
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
+import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded'
 import InsightsRoundedIcon from '@mui/icons-material/InsightsRounded'
+import WebAssetRoundedIcon from '@mui/icons-material/WebAssetRounded'
 import ReceiptLongRoundedIcon from '@mui/icons-material/ReceiptLongRounded'
 import StorageRoundedIcon from '@mui/icons-material/StorageRounded'
 import {
@@ -13,6 +17,7 @@ import {
   DialogContent,
   FormControl,
   IconButton,
+  InputLabel,
   MenuItem,
   Select,
   Stack,
@@ -25,21 +30,30 @@ import {
   TableRow,
   Tabs,
   Tooltip,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from '@mui/material'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ContentPack, GameEvent, GameState } from '../types'
-import { playerColors } from './gameColors'
+import type {
+  BoardHistoricalStats,
+  ContentPack,
+  GameEvent,
+  GameState,
+} from '../types'
+import { playerColor } from './gameColors'
 import {
   ACTIVITY_CATEGORIES,
   activityCategory,
   buildActivityBuckets,
+  buildDiceAnalytics,
   buildGameAnalytics,
   eventPlayerIds,
   eventRelatesToPlayer,
   type ActivityBucket,
   type ActivityCategory,
+  type DiceAnalytics,
   type PlayerAnalytics,
 } from './gameAnalytics'
 
@@ -47,10 +61,21 @@ interface Props {
   open: boolean
   game: GameState
   pack: ContentPack
+  boardHistory: BoardHistoricalStats | null
+  boardHistoryLoading: boolean
   onClose: () => void
 }
 
-type DashboardTab = 'overview' | 'players' | 'economy' | 'activity' | 'technical'
+type DashboardTab =
+  | 'overview'
+  | 'players'
+  | 'economy'
+  | 'activity'
+  | 'dice'
+  | 'technical'
+
+type DashboardView = 'fullscreen' | 'window'
+type AnalyticsSource = 'current' | 'historical'
 
 const CATEGORY_COLORS: Record<ActivityCategory, string> = {
   movement: '#6ea8fe',
@@ -67,10 +92,19 @@ const SURFACE_SX = {
   bgcolor: 'rgba(255,255,255,.035)',
 } as const
 
-export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
+export function GameAnalyticsDashboard({
+  open,
+  game,
+  pack,
+  boardHistory,
+  boardHistoryLoading,
+  onClose,
+}: Props) {
   const { t, i18n } = useTranslation()
   const [tab, setTab] = useState<DashboardTab>('overview')
   const [scope, setScope] = useState('global')
+  const [view, setView] = useState<DashboardView>('fullscreen')
+  const [source, setSource] = useState<AnalyticsSource>('current')
   const analytics = useMemo(() => buildGameAnalytics(game, pack), [game, pack])
   const selectedPlayer =
     scope === 'global'
@@ -97,6 +131,10 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
     for (const event of scopedEvents) counts[activityCategory(event.type)] += 1
     return counts
   }, [scopedEvents])
+  const diceAnalytics = useMemo(
+    () => buildDiceAnalytics(scopedEvents),
+    [scopedEvents],
+  )
   const money = (value: number) =>
     `$${new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 0 }).format(
       Math.round(value),
@@ -119,12 +157,16 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
 
   return (
     <Dialog
-      fullScreen
+      fullScreen={view === 'fullscreen'}
+      fullWidth
+      maxWidth="xl"
       open={open}
       onClose={onClose}
       sx={{ zIndex: 2000 }}
       PaperProps={{
         sx: {
+          height: view === 'window' ? { xs: '94dvh', md: '88dvh' } : undefined,
+          maxHeight: view === 'window' ? { xs: '94dvh', md: '88dvh' } : undefined,
           bgcolor: '#0b0d14',
           color: '#f5f7fb',
           backgroundImage:
@@ -145,7 +187,13 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
           zIndex: 3,
         }}
       >
-        <Stack direction="row" alignItems="center" spacing={1.5}>
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1.5}
+          useFlexGap
+          flexWrap="wrap"
+        >
           <Box
             sx={{
               display: 'grid',
@@ -155,11 +203,16 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
               borderRadius: 2,
               color: '#0b0d14',
               bgcolor: 'primary.main',
+              order: 0,
             }}
           >
             <AnalyticsRoundedIcon />
           </Box>
-          <Box minWidth={0} flex={1}>
+          <Box
+            minWidth={{ xs: 180, sm: 0 }}
+            flex={1}
+            sx={{ order: 1 }}
+          >
             <Typography variant="h6" fontWeight={900} noWrap>
               {t('analytics.title')}
             </Typography>
@@ -170,9 +223,22 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
               })}
             </Typography>
           </Box>
-          <FormControl size="small" sx={{ minWidth: { xs: 132, sm: 210 } }}>
+          <FormControl
+            size="small"
+            sx={{
+              minWidth: { xs: 190, sm: 230 },
+              flex: { xs: 1, sm: '0 0 auto' },
+              order: 3,
+            }}
+          >
+            <InputLabel id="analytics-scope-label">
+              {t('analytics.scopeLabel')}
+            </InputLabel>
             <Select
+              labelId="analytics-scope-label"
+              label={t('analytics.scopeLabel')}
               value={selectedPlayer ? scope : 'global'}
+              disabled={source === 'historical'}
               onChange={(event) => setScope(event.target.value)}
               aria-label={t('analytics.scopeLabel')}
             >
@@ -184,38 +250,110 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
               ))}
             </Select>
           </FormControl>
-          <IconButton aria-label={t('close')} onClick={onClose}>
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={view}
+            onChange={(_, nextView: DashboardView | null) => {
+              if (nextView) setView(nextView)
+            }}
+            aria-label={t('analytics.view.label')}
+            sx={{ order: 4 }}
+          >
+            <ToggleButton
+              value="window"
+              aria-label={t('analytics.view.window')}
+              title={t('analytics.view.window')}
+            >
+              <WebAssetRoundedIcon fontSize="small" />
+            </ToggleButton>
+            <ToggleButton
+              value="fullscreen"
+              aria-label={t('analytics.view.fullscreen')}
+              title={t('analytics.view.fullscreen')}
+            >
+              <FullscreenRoundedIcon fontSize="small" />
+            </ToggleButton>
+          </ToggleButtonGroup>
+          <IconButton
+            aria-label={t('close')}
+            onClick={onClose}
+            sx={{ order: { xs: 2, sm: 5 } }}
+          >
             <CloseRoundedIcon />
           </IconButton>
         </Stack>
-        <Tabs
-          value={tab}
-          onChange={(_, value: DashboardTab) => setTab(value)}
-          variant="scrollable"
-          scrollButtons="auto"
-          sx={{ mt: 1, minHeight: 38, '& .MuiTab-root': { minHeight: 38 } }}
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1}
+          useFlexGap
+          flexWrap="wrap"
+          sx={{ mt: 1 }}
         >
-          <Tab value="overview" icon={<InsightsRoundedIcon />} iconPosition="start" label={t('analytics.tabs.overview')} />
-          <Tab value="players" icon={<GroupsRoundedIcon />} iconPosition="start" label={t('analytics.tabs.players')} />
-          <Tab value="economy" icon={<AccountBalanceRoundedIcon />} iconPosition="start" label={t('analytics.tabs.economy')} />
-          <Tab value="activity" icon={<ReceiptLongRoundedIcon />} iconPosition="start" label={t('analytics.tabs.activity')} />
-          <Tab value="technical" icon={<StorageRoundedIcon />} iconPosition="start" label={t('analytics.tabs.technical')} />
-        </Tabs>
+          <Typography variant="caption" color="text.secondary">
+            {t('analytics.sourceLabel')}
+          </Typography>
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={source}
+            onChange={(_, nextSource: AnalyticsSource | null) => {
+              if (nextSource) setSource(nextSource)
+            }}
+            aria-label={t('analytics.sourceLabel')}
+          >
+            <ToggleButton value="current">
+              <InsightsRoundedIcon fontSize="small" sx={{ mr: 0.75 }} />
+              {t('analytics.sources.current')}
+            </ToggleButton>
+            <ToggleButton value="historical">
+              <HistoryRoundedIcon fontSize="small" sx={{ mr: 0.75 }} />
+              {t('analytics.sources.historical')}
+            </ToggleButton>
+          </ToggleButtonGroup>
+          {source === 'historical' && boardHistory && (
+            <Chip
+              size="small"
+              label={t('analytics.historical.gameCount', {
+                count: boardHistory.game_count,
+              })}
+            />
+          )}
+        </Stack>
+        {source === 'current' && (
+          <Tabs
+            value={tab}
+            onChange={(_, value: DashboardTab) => setTab(value)}
+            variant="scrollable"
+            scrollButtons="auto"
+            sx={{ mt: 1, minHeight: 38, '& .MuiTab-root': { minHeight: 38 } }}
+          >
+            <Tab value="overview" icon={<InsightsRoundedIcon />} iconPosition="start" label={t('analytics.tabs.overview')} />
+            <Tab value="players" icon={<GroupsRoundedIcon />} iconPosition="start" label={t('analytics.tabs.players')} />
+            <Tab value="economy" icon={<AccountBalanceRoundedIcon />} iconPosition="start" label={t('analytics.tabs.economy')} />
+            <Tab value="activity" icon={<ReceiptLongRoundedIcon />} iconPosition="start" label={t('analytics.tabs.activity')} />
+            <Tab value="dice" icon={<CasinoRoundedIcon />} iconPosition="start" label={t('analytics.tabs.dice')} />
+            <Tab value="technical" icon={<StorageRoundedIcon />} iconPosition="start" label={t('analytics.tabs.technical')} />
+          </Tabs>
+        )}
       </Box>
 
       <DialogContent sx={{ p: { xs: 1.5, md: 3 } }}>
-        {!game.events_complete && (
+        {source === 'current' && !game.events_complete && (
           <Alert severity="warning" sx={{ mb: 2 }}>
             {t('analytics.partialHistory', { count: game.events.length })}
           </Alert>
         )}
-        {game.events_complete && analytics.missingEventSequences > 0 && (
+        {source === 'current' &&
+          game.events_complete &&
+          analytics.missingEventSequences > 0 && (
           <Alert severity="warning" sx={{ mb: 2 }}>
             {t('analytics.sequenceGaps', { count: analytics.missingEventSequences })}
           </Alert>
         )}
 
-        {tab === 'overview' && (
+        {source === 'current' && tab === 'overview' && (
           <Stack spacing={2}>
             <MetricGrid>
               <MetricCard
@@ -279,7 +417,7 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
                     label: player.player.display_name,
                     value: player.estimatedNetWorth,
                     formattedValue: money(player.estimatedNetWorth),
-                    color: playerColors[index % playerColors.length],
+                    color: playerColor(player.player, index),
                     muted: player.player.bankrupt,
                   }))}
                 />
@@ -297,7 +435,7 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
           </Stack>
         )}
 
-        {tab === 'players' && (
+        {source === 'current' && tab === 'players' && (
           <Stack spacing={2}>
             <MetricGrid>
               {scopedPlayers.map((player, index) => (
@@ -307,7 +445,7 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
                   rank={analytics.players.findIndex(
                     (candidate) => candidate.player.user_id === player.player.user_id,
                   ) + 1}
-                  color={playerColors[index % playerColors.length]}
+                  color={playerColor(player.player, index)}
                   money={money}
                 />
               ))}
@@ -318,7 +456,7 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
           </Stack>
         )}
 
-        {tab === 'economy' && (
+        {source === 'current' && tab === 'economy' && (
           <Stack spacing={2}>
             <MetricGrid>
               <MetricCard label={t('analytics.economy.monetaryBase')} value={money(game.bank.monetary_base)} detail={t('analytics.economy.serverValue')} accent="#6ea8fe" />
@@ -330,7 +468,7 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
             </MetricGrid>
             <DashboardGrid>
               <Panel title={t('analytics.charts.cashRanking')} subtitle={t('analytics.charts.currentSnapshot')}>
-                <RankedBars rows={scopedPlayers.map((player, index) => ({ label: player.player.display_name, value: player.cash, formattedValue: money(player.cash), color: playerColors[index % playerColors.length], muted: player.player.bankrupt }))} />
+                <RankedBars rows={scopedPlayers.map((player, index) => ({ label: player.player.display_name, value: player.cash, formattedValue: money(player.cash), color: playerColor(player.player, index), muted: player.player.bankrupt }))} />
               </Panel>
               <Panel title={t('analytics.charts.debtRanking')} subtitle={t('analytics.charts.debtComposition')}>
                 <RankedBars rows={scopedPlayers.map((player) => ({ label: player.player.display_name, value: player.totalDebt, formattedValue: money(player.totalDebt), color: '#ff8fab', muted: player.player.bankrupt }))} />
@@ -345,7 +483,7 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
           </Stack>
         )}
 
-        {tab === 'activity' && (
+        {source === 'current' && tab === 'activity' && (
           <Stack spacing={2}>
             <MetricGrid>
               {ACTIVITY_CATEGORIES.map((category) => (
@@ -367,7 +505,16 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
           </Stack>
         )}
 
-        {tab === 'technical' && (
+        {source === 'current' && tab === 'dice' && (
+          <DiceDashboard
+            analytics={diceAnalytics}
+            game={game}
+            pack={pack}
+            number={number}
+          />
+        )}
+
+        {source === 'current' && tab === 'technical' && (
           <Stack spacing={2}>
             <MetricGrid>
               <MetricCard label={t('analytics.technical.snapshotSequence')} value={number(game.event_sequence)} detail={t('analytics.technical.authoritativeSnapshot')} accent="#b8ff3d" />
@@ -394,8 +541,20 @@ export function GameAnalyticsDashboard({ open, game, pack, onClose }: Props) {
           </Stack>
         )}
 
+        {source === 'historical' && (
+          <HistoricalBoardDashboard
+            history={boardHistory}
+            loading={boardHistoryLoading}
+            pack={pack}
+            money={money}
+            number={number}
+          />
+        )}
+
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 2 }}>
-          {t('analytics.methodology')}
+          {source === 'current'
+            ? t('analytics.methodology')
+            : t('analytics.historical.methodology')}
         </Typography>
       </DialogContent>
     </Dialog>
@@ -444,11 +603,11 @@ function RankedBars({ rows }: { rows: Array<{ label: string; value: number; form
   if (rows.length === 0) return <Empty />
   return (
     <Stack spacing={1.25}>
-      {rows.map((row) => {
+      {rows.map((row, index) => {
         const width =
           (Math.abs(row.value) * (hasNegative ? 50 : 100)) / max
         return (
-          <Box key={row.label} sx={{ opacity: row.muted ? 0.45 : 1 }}>
+          <Box key={`${row.label}-${index}`} sx={{ opacity: row.muted ? 0.45 : 1 }}>
             <Stack direction="row" justifyContent="space-between" spacing={1}>
               <Typography variant="body2" noWrap>{row.label}</Typography>
               <Typography variant="body2" fontWeight={800}>{row.formattedValue}</Typography>
@@ -544,6 +703,609 @@ function ActivityTimeline({ buckets }: { buckets: ActivityBucket[] }) {
   )
 }
 
+function HistoricalBoardDashboard({
+  history,
+  loading,
+  pack,
+  money,
+  number,
+}: {
+  history: BoardHistoricalStats | null
+  loading: boolean
+  pack: ContentPack
+  money: (value: number) => string
+  number: (value: number) => string
+}) {
+  const { t } = useTranslation()
+  if (loading) return <Alert severity="info">{t('analytics.historical.loading')}</Alert>
+  if (!history) {
+    return <Alert severity="warning">{t('analytics.historical.unavailable')}</Alert>
+  }
+  if (history.game_count === 0) {
+    return <Alert severity="info">{t('analytics.historical.empty')}</Alert>
+  }
+
+  const visitedPositions = history.position_landings.filter((count) => count > 0).length
+  const totalRent = history.properties.reduce(
+    (total, property) => total + property.total_rent,
+    0,
+  )
+  const rentPayments = history.properties.reduce(
+    (total, property) => total + property.rent_payments,
+    0,
+  )
+  const purchases = history.properties.reduce(
+    (total, property) => total + property.purchases,
+    0,
+  )
+  const auctionSales = history.properties.reduce(
+    (total, property) => total + property.auction_sales,
+    0,
+  )
+
+  return (
+    <Stack spacing={2}>
+      <Alert severity="info">
+        {t('analytics.historical.scopeNotice', { pack: history.pack_id })}
+      </Alert>
+      <MetricGrid>
+        <MetricCard
+          label={t('analytics.historical.games')}
+          value={String(history.game_count)}
+          detail={t('analytics.historical.previousGames')}
+          accent="#b8ff3d"
+        />
+        <MetricCard
+          label={t('analytics.historical.movements')}
+          value={String(history.movement_count)}
+          detail={t('analytics.historical.movementsPerGame', {
+            average: number(history.movement_count / history.game_count),
+          })}
+          accent="#6ea8fe"
+        />
+        <MetricCard
+          label={t('analytics.historical.visitedTiles')}
+          value={`${visitedPositions}/${pack.board.tiles.length}`}
+          detail={t('analytics.historical.distinctDestinations')}
+          accent="#a78bfa"
+        />
+        <MetricCard
+          label={t('analytics.historical.rentGenerated')}
+          value={money(totalRent)}
+          detail={t('analytics.historical.rentPayments', { count: rentPayments })}
+          accent="#ff8fab"
+        />
+        <MetricCard
+          label={t('analytics.historical.purchases')}
+          value={String(purchases)}
+          detail={t('analytics.historical.directPurchases')}
+          accent="#ffd166"
+        />
+        <MetricCard
+          label={t('analytics.historical.auctions')}
+          value={String(auctionSales)}
+          detail={t('analytics.historical.auctionSales')}
+          accent="#8a94a6"
+        />
+      </MetricGrid>
+      <DashboardGrid>
+        <Panel
+          title={t('analytics.historical.landingFrequency')}
+          subtitle={t('analytics.historical.landingFrequencyDetail')}
+        >
+          <HistoricalLandingBars history={history} pack={pack} />
+        </Panel>
+        <Panel
+          title={t('analytics.historical.rentRanking')}
+          subtitle={t('analytics.historical.rentRankingDetail')}
+        >
+          <HistoricalRentBars history={history} pack={pack} money={money} />
+        </Panel>
+        <Panel
+          title={t('analytics.historical.acquisitionRanking')}
+          subtitle={t('analytics.historical.acquisitionRankingDetail')}
+        >
+          <HistoricalAcquisitionBars history={history} pack={pack} />
+        </Panel>
+        <Panel
+          title={t('analytics.historical.coverage')}
+          subtitle={t('analytics.historical.coverageDetail')}
+        >
+          <KeyValueRows
+            rows={[
+              [t('analytics.historical.games'), String(history.game_count)],
+              [t('analytics.historical.movements'), String(history.movement_count)],
+              [t('analytics.historical.rentPaymentsLabel'), String(rentPayments)],
+              [t('analytics.historical.purchases'), String(purchases)],
+              [t('analytics.historical.auctions'), String(auctionSales)],
+            ]}
+          />
+        </Panel>
+      </DashboardGrid>
+      <Panel
+        title={t('analytics.historical.propertyTable')}
+        subtitle={t('analytics.historical.propertyTableDetail')}
+      >
+        <HistoricalPropertiesTable history={history} pack={pack} money={money} />
+      </Panel>
+    </Stack>
+  )
+}
+
+function HistoricalLandingBars({
+  history,
+  pack,
+}: {
+  history: BoardHistoricalStats
+  pack: ContentPack
+}) {
+  const rows = history.position_landings
+    .map((count, position) => ({ count, position }))
+    .filter((row) => row.count > 0)
+    .sort((left, right) => right.count - left.count || left.position - right.position)
+    .slice(0, 15)
+    .map(({ count, position }) => {
+      const tile = pack.board.tiles[position]
+      return {
+        label: tile ? pack.messages[tile.name_key] ?? tile.id : `#${position}`,
+        value: count,
+        formattedValue: `${count} · ${((count * 100) / Math.max(1, history.movement_count)).toFixed(1)}%`,
+        color: '#6ea8fe',
+      }
+    })
+  return <RankedBars rows={rows} />
+}
+
+function HistoricalRentBars({
+  history,
+  pack,
+  money,
+}: {
+  history: BoardHistoricalStats
+  pack: ContentPack
+  money: (value: number) => string
+}) {
+  const tileById = new Map(pack.board.tiles.map((tile) => [tile.id, tile]))
+  const rows = history.properties
+    .filter((property) => property.total_rent > 0)
+    .sort((left, right) => right.total_rent - left.total_rent)
+    .slice(0, 15)
+    .map((property) => {
+      const tile = tileById.get(property.tile_id)
+      return {
+        label: tile ? pack.messages[tile.name_key] ?? tile.id : property.tile_id,
+        value: property.total_rent,
+        formattedValue: money(property.total_rent),
+        color: '#ff8fab',
+      }
+    })
+  return <RankedBars rows={rows} />
+}
+
+function HistoricalAcquisitionBars({
+  history,
+  pack,
+}: {
+  history: BoardHistoricalStats
+  pack: ContentPack
+}) {
+  const { t } = useTranslation()
+  const tileById = new Map(pack.board.tiles.map((tile) => [tile.id, tile]))
+  const rows = history.properties
+    .filter((property) => property.purchases + property.auction_sales > 0)
+    .sort(
+      (left, right) =>
+        right.purchases +
+        right.auction_sales -
+        (left.purchases + left.auction_sales),
+    )
+    .slice(0, 15)
+    .map((property) => {
+      const tile = tileById.get(property.tile_id)
+      return {
+        label: tile ? pack.messages[tile.name_key] ?? tile.id : property.tile_id,
+        value: property.purchases + property.auction_sales,
+        formattedValue: `${t('analytics.historical.purchaseCount', {
+          count: property.purchases,
+        })} · ${t('analytics.historical.auctionCount', {
+          count: property.auction_sales,
+        })}`,
+        color: '#ffd166',
+      }
+    })
+  return <RankedBars rows={rows} />
+}
+
+function HistoricalPropertiesTable({
+  history,
+  pack,
+  money,
+}: {
+  history: BoardHistoricalStats
+  pack: ContentPack
+  money: (value: number) => string
+}) {
+  const { t } = useTranslation()
+  const tileById = new Map(pack.board.tiles.map((tile) => [tile.id, tile]))
+  const rows = [...history.properties].sort(
+    (left, right) =>
+      right.landings - left.landings || right.total_rent - left.total_rent,
+  )
+  return (
+    <TableContainer sx={{ maxHeight: 520 }}>
+      <Table stickyHeader size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>{t('analytics.historical.property')}</TableCell>
+            <TableCell align="right">{t('analytics.historical.landings')}</TableCell>
+            <TableCell align="right">%</TableCell>
+            <TableCell align="right">{t('analytics.historical.rentPaymentsLabel')}</TableCell>
+            <TableCell align="right">{t('analytics.historical.totalRent')}</TableCell>
+            <TableCell align="right">{t('analytics.historical.averageRent')}</TableCell>
+            <TableCell align="right">{t('analytics.historical.purchases')}</TableCell>
+            <TableCell align="right">{t('analytics.historical.averagePurchase')}</TableCell>
+            <TableCell align="right">{t('analytics.historical.auctions')}</TableCell>
+            <TableCell align="right">{t('analytics.historical.averageAuction')}</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((property) => {
+            const tile = tileById.get(property.tile_id)
+            return (
+              <TableRow key={property.tile_id}>
+                <TableCell>
+                  {tile ? pack.messages[tile.name_key] ?? tile.id : property.tile_id}
+                </TableCell>
+                <TableCell align="right">{property.landings}</TableCell>
+                <TableCell align="right">{property.landing_percent.toFixed(1)}%</TableCell>
+                <TableCell align="right">{property.rent_payments}</TableCell>
+                <TableCell align="right">{money(property.total_rent)}</TableCell>
+                <TableCell align="right">{money(property.average_rent)}</TableCell>
+                <TableCell align="right">{property.purchases}</TableCell>
+                <TableCell align="right">{money(property.average_purchase_price)}</TableCell>
+                <TableCell align="right">{property.auction_sales}</TableCell>
+                <TableCell align="right">{money(property.average_auction_price)}</TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  )
+}
+
+function DiceDashboard({
+  analytics,
+  game,
+  pack,
+  number,
+}: {
+  analytics: DiceAnalytics
+  game: GameState
+  pack: ContentPack
+  number: (value: number) => string
+}) {
+  const { t } = useTranslation()
+  const maxTotalCount = Math.max(0, ...analytics.totalCounts)
+  const mostFrequentTotal =
+    maxTotalCount === 0 ? null : analytics.totalCounts.indexOf(maxTotalCount) + 2
+  const landingRolls = analytics.landings.reduce(
+    (total, landing) => total + landing.count,
+    0,
+  )
+
+  return (
+    <Stack spacing={2}>
+      <MetricGrid>
+        <MetricCard
+          label={t('analytics.dice.rolls')}
+          value={number(analytics.rolls.length)}
+          detail={t('analytics.dice.authoritativeEvents')}
+          accent="#b8ff3d"
+        />
+        <MetricCard
+          label={t('analytics.dice.average')}
+          value={analytics.rolls.length > 0 ? number(analytics.average) : '—'}
+          detail={t('analytics.dice.expectedAverage')}
+          accent="#6ea8fe"
+        />
+        <MetricCard
+          label={t('analytics.dice.doubles')}
+          value={
+            analytics.rolls.length > 0
+              ? `${number((analytics.doubles * 100) / analytics.rolls.length)}%`
+              : '—'
+          }
+          detail={t('analytics.dice.doublesCount', { count: analytics.doubles })}
+          accent="#ffd166"
+        />
+        <MetricCard
+          label={t('analytics.dice.mostFrequentTotal')}
+          value={mostFrequentTotal === null ? '—' : String(mostFrequentTotal)}
+          detail={t('analytics.dice.appearances', { count: maxTotalCount })}
+          accent="#a78bfa"
+        />
+        <MetricCard
+          label={t('analytics.dice.landings')}
+          value={number(landingRolls)}
+          detail={t('analytics.dice.uniqueLandings', {
+            count: analytics.landings.length,
+          })}
+          accent="#ff8fab"
+        />
+        <MetricCard
+          label={t('analytics.dice.utilityRolls')}
+          value={number(analytics.utilityRolls.length)}
+          detail={t('analytics.dice.utilityRollsDetail')}
+          accent="#8a94a6"
+        />
+      </MetricGrid>
+      <DashboardGrid>
+        <Panel
+          title={t('analytics.dice.totalDistribution')}
+          subtitle={t('analytics.dice.totalDistributionDetail')}
+        >
+          <DiceTotalDistribution analytics={analytics} />
+        </Panel>
+        <Panel
+          title={t('analytics.dice.faceDistribution')}
+          subtitle={t('analytics.dice.faceDistributionDetail')}
+        >
+          <RankedBars
+            rows={analytics.faceCounts.map((count, index) => ({
+              label: t('analytics.dice.face', { face: index + 1 }),
+              value: count,
+              formattedValue: String(count),
+              color: '#6ea8fe',
+            }))}
+          />
+        </Panel>
+        <Panel
+          title={t('analytics.dice.landingFrequency')}
+          subtitle={t('analytics.dice.landingFrequencyDetail')}
+        >
+          <DiceLandingBars analytics={analytics} pack={pack} />
+        </Panel>
+        <Panel
+          title={t('analytics.dice.playerComparison')}
+          subtitle={t('analytics.dice.playerComparisonDetail')}
+        >
+          <DicePlayerTable analytics={analytics} game={game} number={number} />
+        </Panel>
+      </DashboardGrid>
+      <Panel
+        title={t('analytics.dice.history')}
+        subtitle={t('analytics.dice.historyDetail')}
+      >
+        <DiceHistoryTable analytics={analytics} game={game} pack={pack} />
+      </Panel>
+    </Stack>
+  )
+}
+
+function DiceTotalDistribution({ analytics }: { analytics: DiceAnalytics }) {
+  const { t } = useTranslation()
+  const expectedCombinations = [1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1]
+  const expected = expectedCombinations.map(
+    (combinations) => (analytics.rolls.length * combinations) / 36,
+  )
+  const max = Math.max(1, ...analytics.totalCounts, ...expected)
+  if (analytics.rolls.length === 0) return <Empty />
+  return (
+    <Box sx={{ overflowX: 'auto' }}>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(11, minmax(34px, 1fr))',
+          gap: 0.75,
+          minWidth: 520,
+          height: 230,
+          alignItems: 'end',
+          borderBottom: '1px solid rgba(255,255,255,.16)',
+          px: 1,
+        }}
+      >
+        {analytics.totalCounts.map((count, index) => {
+          const total = index + 2
+          return (
+            <Tooltip
+              key={total}
+              title={t('analytics.dice.totalTooltip', {
+                total,
+                count,
+                expected: expected[index].toFixed(1),
+              })}
+            >
+              <Stack justifyContent="flex-end" sx={{ height: '100%', minWidth: 0 }}>
+                <Typography variant="caption" textAlign="center" fontWeight={800}>
+                  {count}
+                </Typography>
+                <Box sx={{ position: 'relative', height: 180 }}>
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      inset: 'auto 12% 0',
+                      height: `${(count * 100) / max}%`,
+                      minHeight: count > 0 ? 3 : 0,
+                      bgcolor: '#b8ff3d',
+                      borderRadius: '5px 5px 0 0',
+                    }}
+                  />
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      left: 0,
+                      right: 0,
+                      bottom: `${(expected[index] * 100) / max}%`,
+                      borderTop: '2px solid #6ea8fe',
+                    }}
+                  />
+                </Box>
+                <Typography variant="caption" color="text.secondary" textAlign="center">
+                  {total}
+                </Typography>
+              </Stack>
+            </Tooltip>
+          )
+        })}
+      </Box>
+      <Stack direction="row" spacing={2} sx={{ mt: 1.5 }}>
+        <Stack direction="row" spacing={0.6} alignItems="center">
+          <Box sx={{ width: 10, height: 10, bgcolor: '#b8ff3d', borderRadius: 0.5 }} />
+          <Typography variant="caption" color="text.secondary">
+            {t('analytics.dice.observed')}
+          </Typography>
+        </Stack>
+        <Stack direction="row" spacing={0.6} alignItems="center">
+          <Box sx={{ width: 14, borderTop: '2px solid #6ea8fe' }} />
+          <Typography variant="caption" color="text.secondary">
+            {t('analytics.dice.theoretical')}
+          </Typography>
+        </Stack>
+      </Stack>
+    </Box>
+  )
+}
+
+function DiceLandingBars({
+  analytics,
+  pack,
+}: {
+  analytics: DiceAnalytics
+  pack: ContentPack
+}) {
+  const { t } = useTranslation()
+  const total = analytics.landings.reduce(
+    (sum, landing) => sum + landing.count,
+    0,
+  )
+  const tileById = new Map(pack.board.tiles.map((tile) => [tile.id, tile]))
+  const rows = analytics.landings.slice(0, 12).map((landing) => {
+    const tile = landing.tileId ? tileById.get(landing.tileId) : undefined
+    const label = tile
+      ? pack.messages[tile.name_key] ?? tile.id
+      : t('analytics.dice.position', { position: landing.position })
+    return {
+      label,
+      value: landing.count,
+      formattedValue: `${landing.count} · ${((landing.count * 100) / Math.max(1, total)).toFixed(1)}%`,
+      color: '#ff8fab',
+    }
+  })
+  return <RankedBars rows={rows} />
+}
+
+function DicePlayerTable({
+  analytics,
+  game,
+  number,
+}: {
+  analytics: DiceAnalytics
+  game: GameState
+  number: (value: number) => string
+}) {
+  const { t } = useTranslation()
+  const playerNames = new Map(
+    game.players.map((player) => [player.user_id, player.display_name]),
+  )
+  if (analytics.players.length === 0) return <Empty />
+  return (
+    <TableContainer sx={{ maxHeight: 360 }}>
+      <Table stickyHeader size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>{t('analytics.table.player')}</TableCell>
+            <TableCell align="right">{t('analytics.table.rolls')}</TableCell>
+            <TableCell align="right">{t('analytics.dice.average')}</TableCell>
+            <TableCell align="right">{t('analytics.dice.doubles')}</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {analytics.players.map((player) => (
+            <TableRow key={player.playerId}>
+              <TableCell>{playerNames.get(player.playerId) ?? player.playerId.slice(0, 8)}</TableCell>
+              <TableCell align="right">{player.rolls}</TableCell>
+              <TableCell align="right">{number(player.average)}</TableCell>
+              <TableCell align="right">
+                {player.doubles} · {number((player.doubles * 100) / player.rolls)}%
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  )
+}
+
+function DiceHistoryTable({
+  analytics,
+  game,
+  pack,
+}: {
+  analytics: DiceAnalytics
+  game: GameState
+  pack: ContentPack
+}) {
+  const { t, i18n } = useTranslation()
+  const playerNames = new Map(
+    game.players.map((player) => [player.user_id, player.display_name]),
+  )
+  const tileById = new Map(pack.board.tiles.map((tile) => [tile.id, tile]))
+  if (analytics.history.length === 0) return <Empty />
+  return (
+    <TableContainer sx={{ maxHeight: 480 }}>
+      <Table stickyHeader size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>{t('analytics.table.sequence')}</TableCell>
+            <TableCell>{t('analytics.table.time')}</TableCell>
+            <TableCell>{t('analytics.table.player')}</TableCell>
+            <TableCell>{t('analytics.dice.dice')}</TableCell>
+            <TableCell align="right">{t('analytics.dice.total')}</TableCell>
+            <TableCell>{t('analytics.dice.result')}</TableCell>
+            <TableCell>{t('analytics.dice.destination')}</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {analytics.history.slice(0, 50).map((roll) => {
+            const tile = roll.tileId ? tileById.get(roll.tileId) : undefined
+            const destination =
+              roll.source === 'utility'
+                ? '—'
+                : tile
+                  ? pack.messages[tile.name_key] ?? tile.id
+                  : roll.toPosition === null
+                    ? '—'
+                    : t('analytics.dice.position', { position: roll.toPosition })
+            const result = roll.jailAttempt
+              ? t('analytics.dice.jailAttempt')
+              : roll.source === 'utility'
+                ? t('analytics.dice.utility')
+                : roll.isDouble
+                  ? t('analytics.dice.double')
+                  : t('analytics.dice.movement')
+            return (
+              <TableRow key={roll.sequence}>
+                <TableCell>#{roll.sequence}</TableCell>
+                <TableCell>{formatDate(roll.occurredAt, i18n.language)}</TableCell>
+                <TableCell>
+                  {roll.playerId
+                    ? playerNames.get(roll.playerId) ?? roll.playerId.slice(0, 8)
+                    : '—'}
+                </TableCell>
+                <TableCell>{roll.dice.join(' + ')}</TableCell>
+                <TableCell align="right"><strong>{roll.total}</strong></TableCell>
+                <TableCell>{result}</TableCell>
+                <TableCell>{destination}</TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  )
+}
+
 function ProgressTable({ players }: { players: PlayerAnalytics[] }) {
   const { t } = useTranslation()
   return (
@@ -608,7 +1370,7 @@ function MarketTable({ game, pack, money }: { game: GameState; pack: ContentPack
   const { t } = useTranslation()
   if (game.bank.investments.length === 0) return <Empty />
   return (
-    <TableContainer sx={{ maxHeight: 330 }}><Table stickyHeader size="small"><TableHead><TableRow><TableCell>{t('analytics.table.instrument')}</TableCell><TableCell align="right">{t('analytics.table.price')}</TableCell><TableCell align="right">{t('analytics.table.change')}</TableCell><TableCell align="right">{t('analytics.table.volume')}</TableCell><TableCell align="right">{t('analytics.table.trades')}</TableCell></TableRow></TableHead><TableBody>{game.bank.investments.map((instrument) => { const change = instrument.base_price > 0 ? ((instrument.current_price - instrument.base_price) * 100) / instrument.base_price : 0; return <TableRow key={instrument.id}><TableCell>{pack.messages[instrument.name_key] ?? instrument.id}</TableCell><TableCell align="right">{money(instrument.current_price)}</TableCell><TableCell align="right" sx={{ color: change >= 0 ? 'primary.main' : '#ff8fab' }}>{change >= 0 ? '+' : ''}{change.toFixed(1)}%</TableCell><TableCell align="right">{instrument.buy_volume + instrument.sell_volume}</TableCell><TableCell align="right">{instrument.trade_count}</TableCell></TableRow> })}</TableBody></Table></TableContainer>
+    <TableContainer sx={{ maxHeight: 330 }}><Table stickyHeader size="small"><TableHead><TableRow><TableCell>{t('analytics.table.instrument')}</TableCell><TableCell align="right">{t('analytics.table.price')}</TableCell><TableCell align="right">{t('analytics.table.change')}</TableCell><TableCell align="right">{t('analytics.table.volume')}</TableCell><TableCell align="right">{t('analytics.table.trades')}</TableCell></TableRow></TableHead><TableBody>{game.bank.investments.map((instrument) => { const change = instrument.base_price > 0 ? ((instrument.current_price - instrument.base_price) * 100) / instrument.base_price : 0; return <TableRow key={instrument.id}><TableCell>{pack.messages[instrument.name_key] ?? instrument.id}</TableCell><TableCell align="right">{money(instrument.current_price)}</TableCell><TableCell align="right" sx={{ color: change >= 0 ? 'primary.main' : '#ff8fab' }}>{change >= 0 ? '+' : ''}{change.toFixed(1)}%</TableCell><TableCell align="right">{instrument.trade_volume}</TableCell><TableCell align="right">{instrument.trade_count}</TableCell></TableRow> })}</TableBody></Table></TableContainer>
   )
 }
 
