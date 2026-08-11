@@ -111,6 +111,7 @@ class UserRepository:
             email=record.email,
             display_name=record.display_name,
             locale=record.locale,
+            role=record.role,
             is_active=record.is_active,
             created_at=record.created_at,
         )

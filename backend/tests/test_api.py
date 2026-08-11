@@ -43,6 +43,7 @@ async def register_and_login(
 def test_legacy_panel_layout_defaults_to_properties_view() -> None:
     legacy_payload = {
         "order": ["room", "heatmap", "players", "management", "chat"],
+        "visible": ["room", "heatmap", "players", "management", "chat"],
         "zones": {
             "room": "left",
             "heatmap": "left",
@@ -130,6 +131,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "visual_effects": None,
         "player_sort": None,
         "game_view": None,
+        "color_theme": None,
     }
 
     panel_layout = {
@@ -173,9 +175,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
                 "market": "right",
                 "chat": "left",
             },
-            "windows": {
-                "bank": {"x": 120, "y": 80, "width": 420, "height": 540}
-            },
+            "windows": {"bank": {"x": 120, "y": 80, "width": 420, "height": 540}},
         },
     }
     updated = await client.patch(
@@ -192,6 +192,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "visual_effects": None,
         "player_sort": None,
         "game_view": None,
+        "color_theme": None,
     }
 
     audio_settings = {
@@ -213,6 +214,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "visual_effects": None,
         "player_sort": None,
         "game_view": None,
+        "color_theme": None,
     }
 
     token_appearance = {
@@ -239,6 +241,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "visual_effects": None,
         "player_sort": None,
         "game_view": None,
+        "color_theme": None,
     }
 
     automation_settings = {
@@ -260,6 +263,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "visual_effects": None,
         "player_sort": None,
         "game_view": None,
+        "color_theme": None,
     }
 
     visual_effects = {"intensity": "soft"}
@@ -277,6 +281,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "visual_effects": visual_effects,
         "player_sort": None,
         "game_view": None,
+        "color_theme": None,
     }
 
     player_sort = "netWorth"
@@ -294,6 +299,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "visual_effects": visual_effects,
         "player_sort": player_sort,
         "game_view": None,
+        "color_theme": None,
     }
 
     game_view = {
@@ -324,6 +330,15 @@ async def test_user_panel_layout_preferences_persist_per_account(
     assert game_view_updated.status_code == 200
     assert game_view_updated.json()["game_view"] == game_view
 
+    color_theme = "windows11-light"
+    color_theme_updated = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=first_headers,
+        json={"color_theme": color_theme},
+    )
+    assert color_theme_updated.status_code == 200
+    assert color_theme_updated.json()["color_theme"] == color_theme
+
     restored = await client.get(
         "/api/v1/users/me/preferences",
         headers=first_headers,
@@ -337,6 +352,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "visual_effects": visual_effects,
         "player_sort": player_sort,
         "game_view": game_view,
+        "color_theme": color_theme,
     }
 
     first_user = await session.scalar(
@@ -351,6 +367,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "visual_effects": visual_effects,
         "player_sort": player_sort,
         "game_view": game_view,
+        "color_theme": color_theme,
     }
     await session.rollback()
 
@@ -368,6 +385,7 @@ async def test_user_panel_layout_preferences_persist_per_account(
         "visual_effects": None,
         "player_sort": None,
         "game_view": None,
+        "color_theme": None,
     }
 
 
@@ -488,6 +506,13 @@ async def test_rejects_invalid_or_unauthenticated_panel_preferences(
     )
     assert invalid_player_sort.status_code == 422
 
+    invalid_color_theme = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=headers,
+        json={"color_theme": "windows-vista"},
+    )
+    assert invalid_color_theme.status_code == 422
+
 
 async def test_rejects_duplicate_email_and_invalid_password(
     client: AsyncClient,
@@ -584,7 +609,10 @@ async def test_game_creation_uses_authenticated_identity(client: AsyncClient) ->
     created = await client.post(
         "/api/v1/games",
         headers=headers,
-        json={"pack_id": "classic-demo"},
+        json={
+            "pack_id": "classic-demo",
+            "advanced_economy_enabled": False,
+        },
     )
 
     assert created.status_code == 201
@@ -592,6 +620,7 @@ async def test_game_creation_uses_authenticated_identity(client: AsyncClient) ->
     assert game["host_user_id"] == current_user["id"]
     assert game["players"][0]["user_id"] == current_user["id"]
     assert game["players"][0]["position"] == 0
+    assert game["settings"]["advanced_economy_enabled"] is False
     assert game["events"][0]["sequence"] == 1
     assert game["events"][0]["type"] == "game.created"
     assert game["events"][1]["type"] == "player.joined"
@@ -682,18 +711,18 @@ async def test_trade_analysis_uses_authenticated_participant_perspective(
     assert proposer_analysis.json()["proposer_analysis"]["convenience_level"] == (
         "very_unfavorable"
     )
-    assert proposer_analysis.json()["recipient_analysis"]["convenience_level"] == (
-        "very_favorable"
-    )
+    assert proposer_analysis.json()["recipient_analysis"]["convenience_level"] == ("very_favorable")
     assert recipient_analysis.status_code == 200
     assert recipient_analysis.json()["perspective"] == "recipient"
     assert recipient_analysis.json()["estimated_surplus"] == 200
-    assert recipient_analysis.json()["proposer_analysis"] == proposer_analysis.json()[
-        "proposer_analysis"
-    ]
-    assert recipient_analysis.json()["recipient_analysis"] == proposer_analysis.json()[
-        "recipient_analysis"
-    ]
+    assert (
+        recipient_analysis.json()["proposer_analysis"]
+        == proposer_analysis.json()["proposer_analysis"]
+    )
+    assert (
+        recipient_analysis.json()["recipient_analysis"]
+        == proposer_analysis.json()["recipient_analysis"]
+    )
 
 
 async def test_lists_active_games_for_each_member(
@@ -823,17 +852,22 @@ async def test_room_settings_and_spectator_permissions(
     assert settings.json()["settings"] == {
         "max_players": 3,
         "allow_spectators": False,
-            "auction_deposit_percent": 15,
-            "auction_minimum_bid_percent": 75,
-            "economic_difficulty": "standard",
-            "rules": {
+        "auction_deposit_percent": 15,
+        "auction_minimum_bid_percent": 75,
+        "economic_difficulty": "standard",
+        "advanced_economy_enabled": True,
+        "operating_cost_percent": 3,
+        "finale_trigger_week": 80,
+        "finale_duration_weeks": 12,
+        "finale_vote_interval_weeks": 12,
+        "rules": {
             "auction_unpurchased_properties": True,
             "free_parking_jackpot": True,
             "double_salary_on_start": False,
-                "loans_enabled": False,
-                "stock_market_enabled": False,
-                "custom_rent_debts_enabled": False,
-            },
+            "loans_enabled": False,
+            "stock_market_enabled": False,
+            "custom_rent_debts_enabled": False,
+        },
     }
 
 

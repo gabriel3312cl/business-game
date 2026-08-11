@@ -1,5 +1,6 @@
 import {
   Button,
+  Box,
   Checkbox,
   Dialog,
   DialogActions,
@@ -11,6 +12,7 @@ import {
   MenuItem,
   Select,
   Stack,
+  Switch,
   Typography,
 } from '@mui/material'
 import { useEffect, useMemo, useState } from 'react'
@@ -24,6 +26,7 @@ interface GameCreationDialogProps {
   onConfirm: (
     deckCollectionIds: Record<string, string[]>,
     difficulty: EconomicDifficulty,
+    advancedEconomyEnabled: boolean,
   ) => void
 }
 
@@ -45,11 +48,13 @@ export function GameCreationDialog({
   )
   const [selection, setSelection] = useState<Record<string, string[]>>(defaults)
   const [difficulty, setDifficulty] = useState<EconomicDifficulty>('standard')
+  const [advancedEconomyEnabled, setAdvancedEconomyEnabled] = useState(true)
 
   useEffect(() => {
     if (open) {
       setSelection(defaults)
       setDifficulty('standard')
+      setAdvancedEconomyEnabled(true)
     }
   }, [defaults, open])
 
@@ -91,6 +96,35 @@ export function GameCreationDialog({
         <Typography color="text.secondary" sx={{ mb: 2 }}>
           {t(`economy.difficultyDescription.${difficulty}`)}
         </Typography>
+        <Box
+          sx={{
+            mb: 2,
+            p: 1.5,
+            borderRadius: 2,
+            border: '1px solid var(--game-theme-border)',
+            bgcolor: 'var(--game-theme-primary-soft)',
+          }}
+        >
+          <FormControlLabel
+            labelPlacement="start"
+            sx={{ m: 0, width: '100%', justifyContent: 'space-between', gap: 2 }}
+            control={
+              <Switch
+                checked={advancedEconomyEnabled}
+                onChange={(_, checked) => setAdvancedEconomyEnabled(checked)}
+                inputProps={{ 'aria-label': t('gameSetup.advancedEconomy') }}
+              />
+            }
+            label={
+              <Typography fontWeight={800}>
+                {t('gameSetup.advancedEconomy')}
+              </Typography>
+            }
+          />
+          <Typography variant="body2" color="text.secondary" sx={{ pr: 6 }}>
+            {t('gameSetup.advancedEconomyHelp')}
+          </Typography>
+        </Box>
         <Typography color="text.secondary" sx={{ mb: 2 }}>
           {t('deckSelection.help')}
         </Typography>
@@ -140,7 +174,9 @@ export function GameCreationDialog({
         <Button onClick={onClose}>{t('cancel')}</Button>
         <Button
           variant="contained"
-          onClick={() => onConfirm(selection, difficulty)}
+          onClick={() =>
+            onConfirm(selection, difficulty, advancedEconomyEnabled)
+          }
         >
           {t('createGame')}
         </Button>

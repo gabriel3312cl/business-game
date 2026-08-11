@@ -210,8 +210,48 @@ export interface User {
   email: string
   display_name: string
   locale: string
+  role: 'player' | 'admin'
   is_active: boolean
   created_at: string
+}
+
+export interface GameAudioCatalogItem {
+  sound_id: string
+  custom: boolean
+  source_url: string | null
+  original_filename: string | null
+  content_type: string | null
+  size_bytes: number | null
+  updated_at: string | null
+}
+
+export interface AdminUserSummary {
+  id: string
+  email: string
+  display_name: string
+  role: 'player' | 'admin'
+  is_active: boolean
+  created_at: string
+}
+
+export interface AdminUserUpdate {
+  role?: 'player' | 'admin'
+  is_active?: boolean
+}
+
+export interface AdminRoomSummary {
+  id: string
+  pack_id: string
+  pack_version: string
+  status: 'lobby' | 'playing' | 'finished' | 'cancelled'
+  host_user_id: string
+  host_name: string
+  player_count: number
+  human_player_count: number
+  bot_count: number
+  spectator_count: number
+  created_at: string
+  updated_at: string
 }
 
 export type PanelId = 'room' | 'heatmap' | 'players' | 'management' | 'chat'
@@ -353,6 +393,29 @@ export interface GameViewPreferenceSettings {
   analytics_source: AnalyticsDashboardSource
 }
 
+export type GameColorThemeId =
+  | 'neon-night'
+  | 'ocean'
+  | 'emerald'
+  | 'copper'
+  | 'high-contrast'
+  | 'macos-tahoe'
+  | 'ios26-glass'
+  | 'windows11'
+  | 'windows10'
+  | 'windows7'
+  | 'windows-xp'
+  | 'windows98'
+  | 'linux'
+  | 'meta'
+  | 'facebook'
+  | 'daylight'
+  | 'financial-paper'
+  | 'macos-tahoe-light'
+  | 'ios26-glass-light'
+  | 'windows11-light'
+  | 'facebook-light'
+
 export interface UserPreferences {
   panel_layout: PanelLayoutPreferences | null
   audio_settings: AudioPreferenceSettings | null
@@ -361,6 +424,7 @@ export interface UserPreferences {
   visual_effects: VisualEffectsPreferenceSettings | null
   player_sort: PlayerSortOption | null
   game_view: GameViewPreferenceSettings | null
+  color_theme: GameColorThemeId | null
 }
 
 export interface TokenResponse {
@@ -438,6 +502,62 @@ export interface EconomicEventState {
   intensity: number
 }
 
+export interface EconomicForecastState {
+  kind: EconomicEventState['kind']
+  starts_in_weeks: number
+  duration_weeks: number
+  intensity: number
+}
+
+export interface OperatingCostAssessmentState {
+  due_week: number
+  announced_week: number
+  amounts: Record<string, number>
+  resolved_player_ids: string[]
+}
+
+export interface OperatingDebtState {
+  player_id: string
+  principal: number
+  interest_percent: number
+  remaining_amount: number
+  created_week: number
+}
+
+export type PublicProjectKind =
+  | 'rail_modernization'
+  | 'urban_renewal'
+  | 'energy_expansion'
+
+export interface PublicProjectState {
+  id: string
+  kind: PublicProjectKind
+  status: 'bidding' | 'active' | 'completed' | 'failed' | 'expired'
+  announced_week: number
+  bidding_ends_week: number
+  minimum_bid: number
+  reward_amount: number
+  required_tile_kind: 'property' | 'transport' | 'utility'
+  required_building_levels: number
+  bids: Record<string, { amount: number; sequence: number }>
+  owner_id: string | null
+  winning_bid: number
+  completes_week: number | null
+}
+
+export interface FinaleVoteState {
+  opened_week: number
+  eligible_player_ids: string[]
+  votes: Record<string, boolean>
+}
+
+export interface FinaleState {
+  started_week: number
+  ends_week: number
+  final_scores: Record<string, number>
+  winner_id: string | null
+}
+
 export interface MarketMovementState {
   instrument_id: string
   previous_price: number
@@ -460,6 +580,17 @@ export interface EconomicSimulationState {
   consumer_confidence: number
   market_sentiment: number
   active_events: EconomicEventState[]
+  forecast_events: EconomicForecastState[]
+  price_index_basis_points: number
+  inflation_base_week: number | null
+  next_operating_cost_week: number | null
+  operating_cost_assessment: OperatingCostAssessmentState | null
+  operating_debts: OperatingDebtState[]
+  next_public_project_week: number | null
+  public_projects: PublicProjectState[]
+  next_finale_vote_week: number | null
+  finale_vote: FinaleVoteState | null
+  finale: FinaleState | null
   last_market_movements: MarketMovementState[]
   last_company_action: string | null
   last_company_instrument_id: string | null
@@ -471,6 +602,11 @@ export interface GameSettings {
   auction_deposit_percent: number
   auction_minimum_bid_percent: number
   economic_difficulty: EconomicDifficulty
+  advanced_economy_enabled: boolean
+  operating_cost_percent: number
+  finale_trigger_week: number
+  finale_duration_weeks: number
+  finale_vote_interval_weeks: number
   rules: OptionalRules
 }
 
@@ -517,6 +653,7 @@ export interface AuctionState {
   eligible_player_ids: string[]
   ready_player_ids: string[]
   passed_player_ids: string[]
+  seller_id: string | null
 }
 
 export interface DebtState {
@@ -530,6 +667,8 @@ export interface DebtState {
     | 'card'
     | 'jail_fine'
     | 'bank_loan'
+    | 'player_loan'
+    | 'operating_cost'
     | 'resignation'
   tile_id: string
   installment_plan_id: string | null
@@ -563,6 +702,8 @@ export interface RentDebtPlanState {
   installments_remaining: number
   template: RentDebtPlanTemplate
   created_at_sequence: number
+  reason: DebtState['reason']
+  source_trade_id: string | null
 }
 
 export interface BankLoanState {
@@ -750,6 +891,7 @@ export type GameEventType =
   | 'auction.started'
   | 'bank_pot.increased'
   | 'bank.emergency_issued'
+  | 'bank.initialized'
   | 'bank.loan_defaulted'
   | 'bank.loan_issued'
   | 'bank.loan_payment'
@@ -781,9 +923,23 @@ export type GameEventType =
   | 'debt.plan_rejected'
   | 'dice.rolled'
   | 'economy.week_advanced'
+  | 'economy.operating_cost_announced'
+  | 'economy.operating_cost_due'
+  | 'economy.operating_cost_paid'
+  | 'economy.operating_cost_deferred'
+  | 'economy.operating_debt_paid'
+  | 'economy.public_project_announced'
+  | 'economy.public_project_bid'
+  | 'economy.public_project_awarded'
+  | 'economy.public_project_completed'
+  | 'economy.public_project_failed'
   | 'game.cancelled'
   | 'game.created'
   | 'game.finished'
+  | 'game.finale_vote_opened'
+  | 'game.finale_vote_cast'
+  | 'game.finale_vote_rejected'
+  | 'game.finale_started'
   | 'game.settings_updated'
   | 'game.started'
   | 'free_parking.collected'
@@ -820,6 +976,7 @@ export type GameEventType =
   | 'trade.countered'
   | 'trade.proposed'
   | 'trade.rejected'
+  | 'debt.player_loan_created'
   | 'relationship.changed'
   | 'turn.extra_roll'
   | 'turn.started'
@@ -850,6 +1007,16 @@ export type GameCommand =
   | { action: 'sell_group_round'; group_id: string }
   | { action: 'request_loan'; amount: number; auction_id?: string }
   | { action: 'repay_loan'; amount?: number | null }
+  | { action: 'pay_operating_costs' }
+  | { action: 'defer_operating_costs' }
+  | { action: 'repay_operating_debt'; amount?: number | null }
+  | { action: 'bid_public_project'; project_id: string; amount: number }
+  | {
+      action: 'offer_property_auction'
+      property_id: string
+      minimum_bid: number
+    }
+  | { action: 'vote_finale'; approve: boolean }
   | { action: 'buy_shares'; instrument_id: string; quantity: number }
   | { action: 'sell_shares'; instrument_id: string; quantity: number }
   | {
@@ -904,6 +1071,12 @@ export type GameCommand =
       requested_property_ids: string[]
     }
   | { action: 'accept_trade'; trade_id: string }
+  | {
+      action: 'accept_financed_trade'
+      trade_id: string
+      installments: number
+      interest_percent: number
+    }
   | { action: 'reject_trade'; trade_id: string }
   | { action: 'cancel_trade'; trade_id: string }
 

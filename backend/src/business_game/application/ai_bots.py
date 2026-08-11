@@ -8,10 +8,12 @@ from uuid import UUID
 
 import httpx
 
+from business_game.application.advanced_economy import indexed_amount
 from business_game.application.bots import BotAction
 from business_game.application.negotiation import NegotiationEngine, TradeCandidate
 from business_game.application.relationships import relationship_score
 from business_game.domain.models import (
+    AcceptFinancedTradeCommand,
     AcceptTradeCommand,
     BidCommand,
     BuildGroupRoundCommand,
@@ -23,11 +25,13 @@ from business_game.domain.models import (
     ContinueCardCommand,
     CounterTradeCommand,
     DeclinePropertyCommand,
+    DeferOperatingCostsCommand,
     EndTurnCommand,
     GameCommand,
     GameState,
     PassAuctionCommand,
     PayJailFineCommand,
+    PayOperatingCostsCommand,
     PlayerState,
     ProposeTradeCommand,
     ReadyAuctionCommand,
@@ -141,9 +145,7 @@ class AiBotPolicy:
             choice_index, note = _response_choice(response.json(), len(choices))
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             status_code = (
-                exc.response.status_code
-                if isinstance(exc, httpx.HTTPStatusError)
-                else None
+                exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
             )
             logger.warning("AI bot request failed with status %s", status_code)
             raise AiBotDecisionError("AI bot decision is unavailable") from exc
@@ -211,8 +213,7 @@ def build_ai_bot_choices(
         (
             trade
             for trade in game.trades
-            if trade.status is TradeStatus.PENDING
-            and trade.recipient_id == fallback.actor_id
+            if trade.status is TradeStatus.PENDING and trade.recipient_id == fallback.actor_id
         ),
         None,
     )
@@ -265,10 +266,8 @@ def build_ai_bot_choices(
         tile = _tile(pack, auction.property_id)
         held_deposit = auction.deposits.get(player.user_id, 0)
         available_cash = player.balance + held_deposit
-        can_place_deposit = (
-            held_deposit > 0 or player.balance >= auction.deposit_amount
-        )
-        increments = {1, max((tile.price or 50) // 10, 5)}
+        can_place_deposit = held_deposit > 0 or player.balance >= auction.deposit_amount
+        increments = {1, max((indexed_amount(game, tile.price or 50)) // 10, 5)}
         for increment in sorted(increments):
             amount = max(auction.minimum_bid, auction.current_bid + increment)
             if can_place_deposit and amount <= available_cash:
@@ -283,14 +282,15 @@ def build_ai_bot_choices(
 
     if game.pending_auction_selector_id == fallback.actor_id:
         candidates = [
-            tile
-            for tile in pack.board.tiles
-            if tile.is_purchasable and tile.id not in game.owners
+            tile for tile in pack.board.tiles if tile.is_purchasable and tile.id not in game.owners
         ]
         ranked = sorted(
             candidates,
             key=lambda item: (
-                -(engine.marginal_value(player.user_id, [item.id]) - (item.price or 0)),
+                -(
+                    engine.marginal_value(player.user_id, [item.id])
+                    - indexed_amount(game, item.price or 0)
+                ),
                 item.id,
             ),
         )
@@ -311,9 +311,26 @@ def build_ai_bot_choices(
         # offering `end_turn` here would only produce a command the server rejects.
         return choices
 
+    assessment = game.economy.operating_cost_assessment
+    operating_cost = (
+        assessment.amounts.get(player.user_id, 0)
+        if assessment is not None
+        and assessment.due_week <= game.economy.elapsed_weeks
+        and player.user_id not in assessment.resolved_player_ids
+        else 0
+    )
+    if operating_cost > 0:
+        reserve = indexed_amount(game, pack.manifest.pass_start_salary, 80)
+        add(
+            PayOperatingCostsCommand(action="pay_operating_costs")
+            if player.balance >= operating_cost + reserve
+            else DeferOperatingCostsCommand(action="defer_operating_costs")
+        )
+        return choices
+
     if game.phase is TurnPhase.BUY_DECISION:
         tile = _tile(pack, game.pending_tile_id or "")
-        if player.balance >= (tile.price or 0):
+        if player.balance >= indexed_amount(game, tile.price or 0):
             add(BuyPropertyCommand(action="buy_property"))
         add(DeclinePropertyCommand(action="decline_property"))
         return choices
@@ -384,7 +401,7 @@ def _trade_estimate(
             "tu_ganancia": valuation.proposer_surplus,
             "ganancia_rival": valuation.recipient_surplus,
         }
-    if isinstance(command, AcceptTradeCommand):
+    if isinstance(command, (AcceptTradeCommand, AcceptFinancedTradeCommand)):
         trade = next(
             (item for item in game.trades if item.id == command.trade_id),
             None,
@@ -481,9 +498,7 @@ def build_ai_bot_context(
         if trade.status is TradeStatus.PENDING
         and actor_id in {trade.proposer_id, trade.recipient_id}
     ]
-    personality = (
-        actor.bot_personality.value if actor.bot_personality is not None else "balanced"
-    )
+    personality = actor.bot_personality.value if actor.bot_personality is not None else "balanced"
     options: list[dict[str, object]] = []
     for index, choice in enumerate(choices):
         option: dict[str, object] = {"choice": index, "action": choice.description}
@@ -567,6 +582,11 @@ def _describe_command(command: GameCommand, game: GameState, pack: ContentPack) 
         return f"Subastar {_tile_name(pack, command.property_id)}"
     if isinstance(command, AcceptTradeCommand):
         return "Aceptar el trato pendiente"
+    if isinstance(command, AcceptFinancedTradeCommand):
+        return (
+            f"Financiar el trato en {command.installments} cuotas "
+            f"con {command.interest_percent}% de interés"
+        )
     if isinstance(command, RejectTradeCommand):
         return "Rechazar el trato pendiente"
     if isinstance(command, PayJailFineCommand):
@@ -617,23 +637,31 @@ def _describe_command(command: GameCommand, game: GameState, pack: ContentPack) 
     if isinstance(command, SellSharesCommand):
         return f"Vender {command.quantity} participación(es) de {command.instrument_id}"
     if isinstance(command, ProposeTradeCommand):
-        offered_properties = ", ".join(
-            _tile_name(pack, property_id) for property_id in command.offered_property_ids
-        ) or "ninguna propiedad"
-        requested_properties = ", ".join(
-            _tile_name(pack, property_id) for property_id in command.requested_property_ids
-        ) or "ninguna propiedad"
+        offered_properties = (
+            ", ".join(_tile_name(pack, property_id) for property_id in command.offered_property_ids)
+            or "ninguna propiedad"
+        )
+        requested_properties = (
+            ", ".join(
+                _tile_name(pack, property_id) for property_id in command.requested_property_ids
+            )
+            or "ninguna propiedad"
+        )
         return (
             f"Proponer trato: entregar ${command.offered_cash} y {offered_properties}; "
             f"pedir ${command.requested_cash} y {requested_properties}"
         )
     if isinstance(command, CounterTradeCommand):
-        offered_properties = ", ".join(
-            _tile_name(pack, property_id) for property_id in command.offered_property_ids
-        ) or "ninguna propiedad"
-        requested_properties = ", ".join(
-            _tile_name(pack, property_id) for property_id in command.requested_property_ids
-        ) or "ninguna propiedad"
+        offered_properties = (
+            ", ".join(_tile_name(pack, property_id) for property_id in command.offered_property_ids)
+            or "ninguna propiedad"
+        )
+        requested_properties = (
+            ", ".join(
+                _tile_name(pack, property_id) for property_id in command.requested_property_ids
+            )
+            or "ninguna propiedad"
+        )
         return (
             f"Contraofertar: entregar ${command.offered_cash} y {offered_properties}; "
             f"pedir ${command.requested_cash} y {requested_properties}"
@@ -720,7 +748,7 @@ def _system_prompt() -> str:
         "escala: un trato conviene si tu ganancia es buena, y se cierra más fácil si el rival "
         "también gana. Cuidado con entregar la propiedad que completa el grupo de otro. "
         "Responde exclusivamente con JSON válido en el formato "
-        "{\"choice\":numero,\"why\":\"motivo breve en español, máximo 15 palabras\"}."
+        '{"choice":numero,"why":"motivo breve en español, máximo 15 palabras"}.'
     )
 
 

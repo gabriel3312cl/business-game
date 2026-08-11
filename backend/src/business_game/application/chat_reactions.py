@@ -41,7 +41,8 @@ REACTION_PRIORITY = (
     "rival_bad_card",
     "rival_jailed",
     "rival_distress",
-    "rival_prize",
+    "rival_card_prize",
+    "rival_free_parking_prize",
 )
 
 REACTION_TEXT: dict[str, dict[str, str]] = {
@@ -63,11 +64,39 @@ REACTION_TEXT: dict[str, dict[str, str]] = {
         "balanced": "${amount} de renta en {property}. Así se financia el tablero.",
         "negotiator": "${amount} menos para ti. ¿Cambiamos algo antes de la próxima vuelta?",
     },
-    "rival_prize": {
-        "aggressive": "Disfruta esos ${amount}, no te van a durar.",
-        "conservative": "Buen momento para guardar esos ${amount}.",
-        "balanced": "${amount} de regalo. Nada mal.",
-        "negotiator": "Con ${amount} frescos, ahora sí podemos hablar de negocios.",
+    "rival_card_prize": {
+        "aggressive": (
+            "Otro jugador recibió ${amount} del banco por una carta positiva. "
+            "No le van a durar."
+        ),
+        "conservative": (
+            "Otro jugador recibió ${amount} del banco por una carta positiva. "
+            "Conviene guardarlos."
+        ),
+        "balanced": (
+            "Otro jugador recibió ${amount} del banco por una carta positiva. Nada mal."
+        ),
+        "negotiator": (
+            "Otro jugador recibió ${amount} del banco por una carta positiva. "
+            "Ahora hay margen para negociar."
+        ),
+    },
+    "rival_free_parking_prize": {
+        "aggressive": (
+            "Otro jugador recibió ${amount} del pozo de Estacionamiento Gratis. "
+            "No le van a durar."
+        ),
+        "conservative": (
+            "Otro jugador recibió ${amount} del pozo de Estacionamiento Gratis. "
+            "Conviene guardarlos."
+        ),
+        "balanced": (
+            "Otro jugador recibió ${amount} del pozo de Estacionamiento Gratis. Nada mal."
+        ),
+        "negotiator": (
+            "Otro jugador recibió ${amount} del pozo de Estacionamiento Gratis. "
+            "Ahora hay margen para negociar."
+        ),
     },
     "rival_bad_card": {
         "aggressive": "Esa carta te costó caro. Me encanta.",
@@ -240,14 +269,27 @@ def _reactions_for(
         amount = _number(event, "amount") or 0
         if amount == 0:
             return []
-        code = "rival_prize" if amount > 0 else "rival_bad_card"
-        return _rotating(bots, event, code, actor, params={"amount": abs(amount)})
+        if amount < 0:
+            return _rotating(
+                bots,
+                event,
+                "rival_bad_card",
+                actor,
+                params={"amount": abs(amount)},
+            )
+        return _rotating(
+            bots,
+            event,
+            "rival_card_prize",
+            actor,
+            params={"amount": amount},
+        )
 
     if event.type == "free_parking.collected":
         return _rotating(
             bots,
             event,
-            "rival_prize",
+            "rival_free_parking_prize",
             actor,
             params={"amount": _number(event, "amount") or 0},
         )

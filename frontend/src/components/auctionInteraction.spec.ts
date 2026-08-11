@@ -9,6 +9,7 @@ function auction(
   return {
     id: 'auction-1',
     property_id: 'property_03',
+    seller_id: null,
     phase,
     minimum_bid: 42,
     current_bid: leaderId ? 50 : 0,

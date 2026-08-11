@@ -34,12 +34,20 @@ export function nextAutomationCommand({
   }
 
   const currentPlayer = game.players[game.current_player_index]
+  const operatingAssessment = game.economy?.operating_cost_assessment
+  const operatingCostDue = Boolean(
+    operatingAssessment &&
+      operatingAssessment.due_week <= game.economy.elapsed_weeks &&
+      (operatingAssessment.amounts[userId] ?? 0) > 0 &&
+      !operatingAssessment.resolved_player_ids.includes(userId),
+  )
   const canActAutomatically =
     !motionPending &&
     game.status === 'playing' &&
     game.pending_auction_selector_id === null &&
     game.active_auction === null &&
     game.active_debt === null &&
+    !operatingCostDue &&
     currentPlayer?.user_id === userId &&
     !currentPlayer.bankrupt
 

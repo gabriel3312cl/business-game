@@ -127,6 +127,96 @@ export function soundCuesForEvent(
       return [{ sound: 'debt-created' }]
     case 'debt.paid':
       return [{ sound: 'debt-paid' }]
+    case 'bank.loan_issued':
+      return [
+        {
+          sound: 'bank-loan-issued',
+          gain: textValue(event, 'player_id') === userId ? 1 : 0.55,
+        },
+      ]
+    case 'bank.loan_payment':
+      return [
+        {
+          sound: 'bank-loan-payment',
+          gain: textValue(event, 'player_id') === userId ? 1 : 0.55,
+        },
+      ]
+    case 'bank.emergency_issued':
+      return [{ sound: 'bank-emergency-credit', gain: 0.82 }]
+    case 'bank.initialized':
+      return [{ sound: 'bank-initialized', gain: 0.78 }]
+    case 'bank.loan_defaulted':
+    case 'bank.loan_payment_missed':
+      return [
+        {
+          sound: 'bank-loan-defaulted',
+          gain: textValue(event, 'player_id') === userId ? 1 : 0.6,
+        },
+      ]
+    case 'investment.shares_bought':
+      return [
+        {
+          sound: 'market-shares-bought',
+          gain: textValue(event, 'player_id') === userId ? 1 : 0.58,
+        },
+      ]
+    case 'investment.shares_sold':
+      return [
+        {
+          sound: 'market-shares-sold',
+          gain: textValue(event, 'player_id') === userId ? 1 : 0.58,
+        },
+      ]
+    case 'investment.order_filled':
+      return [
+        {
+          sound: 'market-order-filled',
+          gain:
+            textValue(event, 'buyer_id') === userId ||
+            textValue(event, 'seller_id') === userId
+              ? 1
+              : 0.55,
+        },
+      ]
+    case 'investment.limit_order_placed':
+      return [
+        {
+          sound: 'market-order-placed',
+          gain: textValue(event, 'player_id') === userId ? 1 : 0.52,
+        },
+      ]
+    case 'investment.limit_order_cancelled':
+      return [
+        {
+          sound: 'market-order-cancelled',
+          gain: textValue(event, 'player_id') === userId ? 1 : 0.52,
+        },
+      ]
+    case 'investment.dividend_paid':
+      return [
+        {
+          sound: 'market-dividend-paid',
+          gain: textValue(event, 'owner_id') === userId ? 1 : 0.55,
+        },
+      ]
+    case 'investment.margin_call':
+      return [
+        {
+          sound: 'market-margin-call',
+          gain: textValue(event, 'player_id') === userId ? 1 : 0.55,
+        },
+      ]
+    case 'investment.position_liquidated':
+      return [
+        {
+          sound: 'market-position-liquidated',
+          gain: textValue(event, 'player_id') === userId ? 1 : 0.58,
+        },
+      ]
+    case 'investment.market_expanded':
+      return [{ sound: 'market-opened', gain: 0.78 }]
+    case 'economy.week_advanced':
+      return [{ sound: 'economy-week-advanced', gain: 0.72 }]
     case 'trade.proposed':
       return [{ sound: 'trade-proposed' }]
     case 'trade.accepted':

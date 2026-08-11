@@ -39,6 +39,7 @@ interface PlayerResult {
   properties: number
   houses: number
   hotels: number
+  auditedScore: number | null
 }
 
 interface GameSummary {
@@ -337,6 +338,12 @@ function PlayerResultRow({
           sx={{ mt: 0.5 }}
         >
           <InlineStat label={t('gameResult.cash')} value={`$${result.player.balance}`} />
+          {result.auditedScore !== null && (
+            <InlineStat
+              label={t('gameResult.auditedScore')}
+              value={`$${result.auditedScore}`}
+            />
+          )}
           <InlineStat label={t('gameResult.properties')} value={result.properties} />
           <InlineStat label={t('gameResult.houses')} value={result.houses} />
           <InlineStat label={t('gameResult.hotels')} value={result.hotels} />
@@ -359,6 +366,15 @@ function buildGameSummary(game: GameState): GameSummary {
     .reverse()
     .find((event) => event.type === 'game.finished')
   const eventWinnerId = finishedEvent ? eventText(finishedEvent, 'winner_id') : null
+  const rawScores = finishedEvent?.data.scores
+  const finaleScores =
+    rawScores && typeof rawScores === 'object' && !Array.isArray(rawScores)
+      ? (rawScores as Record<string, unknown>)
+      : null
+  const scoreFor = (playerId: string): number | null => {
+    const value = finaleScores?.[playerId]
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
+  }
   const activePlayers = game.players.filter((player) => !player.bankrupt)
   const winnerId =
     eventWinnerId ?? (activePlayers.length === 1 ? activePlayers[0].user_id : null)
@@ -373,6 +389,11 @@ function buildGameSummary(game: GameState): GameSummary {
   const rankedPlayers = [...game.players].sort((left, right) => {
     if (left.user_id === winnerId) return -1
     if (right.user_id === winnerId) return 1
+    const leftScore = scoreFor(left.user_id)
+    const rightScore = scoreFor(right.user_id)
+    if (leftScore !== null || rightScore !== null) {
+      return (rightScore ?? 0) - (leftScore ?? 0) || right.balance - left.balance
+    }
     const leftBankruptcy = bankruptcySequence.get(left.user_id)
     const rightBankruptcy = bankruptcySequence.get(right.user_id)
     if (leftBankruptcy !== undefined && rightBankruptcy !== undefined) {
@@ -399,6 +420,7 @@ function buildGameSummary(game: GameState): GameSummary {
         0,
       ),
       hotels: levels.filter((level) => level === 5).length,
+      auditedScore: scoreFor(player.user_id),
     }
   })
 

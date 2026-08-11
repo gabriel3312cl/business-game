@@ -173,7 +173,7 @@ export function PersonalizablePanel({
           height: keepsContentHeight || fillsAvailableHeight ? '100%' : 'auto',
           display: 'flex',
           flexDirection: 'column',
-          border: '1px solid rgba(255,255,255,.08)',
+          border: '1px solid var(--game-theme-border)',
           borderRadius: '12px !important',
           bgcolor: 'background.paper',
           overflow: 'hidden',
@@ -325,7 +325,7 @@ export function PersonalizablePanel({
               bottom: 2,
               height: 2,
               borderRadius: 99,
-              bgcolor: 'rgba(255,255,255,.28)',
+              bgcolor: 'text.secondary',
             },
           }}
         />

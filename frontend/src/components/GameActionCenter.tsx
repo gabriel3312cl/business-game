@@ -24,6 +24,7 @@ import type {
   VisualEffectsIntensity,
 } from '../types'
 import { Dice3D } from './Dice3D'
+import { AdvancedEconomyPanel } from './AdvancedEconomyPanel'
 import { EconomicPulsePanel } from './EconomicPulsePanel'
 import { GameActivityFeed } from './GameActivityFeed'
 import { PlayerStatusSummary } from './PlayerStatusSummary'
@@ -75,9 +76,25 @@ export function GameActionCenter({
       game.owners[tile.id] === undefined,
   )
   const isSelectingAuction = game.pending_auction_selector_id === user.id
+  const operatingAssessment = game.economy.operating_cost_assessment
+  const operatingCostBlocksTurn = Boolean(
+    operatingAssessment &&
+      operatingAssessment.due_week <= game.economy.elapsed_weeks &&
+      (operatingAssessment.amounts[user.id] ?? 0) > 0 &&
+      !operatingAssessment.resolved_player_ids.includes(user.id),
+  )
   const pendingPrice = pendingTile?.price ?? 0
+  const indexedPendingPrice = Math.round(
+    (pendingPrice * game.economy.price_index_basis_points) / 10_000,
+  )
   const discountedPrice = Math.floor(
-    (pendingPrice * (100 - game.pending_purchase_discount_percent)) / 100,
+    (indexedPendingPrice * (100 - game.pending_purchase_discount_percent)) / 100,
+  )
+  const indexedJailFine = Math.round(
+    (pack.manifest.jail_fine *
+      (10_000 +
+        ((game.economy.price_index_basis_points - 10_000) * 80) / 100)) /
+      10_000,
   )
   const latestDice = latestDiceResult(diceGame)
 
@@ -120,6 +137,13 @@ export function GameActionCenter({
           : ''}
       </Typography>
       <EconomicPulsePanel game={game} pack={pack} />
+      <AdvancedEconomyPanel
+        game={game}
+        pack={pack}
+        user={user}
+        busy={busy}
+        onCommand={onCommand}
+      />
       <Box
         id="turn-actions"
         component="section"
@@ -191,7 +215,8 @@ export function GameActionCenter({
             !game.active_debt &&
             !game.pending_card_draw &&
             !game.pending_card_choice &&
-            !game.pending_card_choice_result && (
+            !game.pending_card_choice_result &&
+            !operatingCostBlocksTurn && (
             <Stack
               direction="row"
               spacing={0.75}
@@ -213,7 +238,12 @@ export function GameActionCenter({
                       </MenuItem>
                       {auctionCandidates.map((tile) => (
                         <MenuItem key={tile.id} value={tile.id}>
-                          {pack.messages[tile.name_key]} · ${tile.price ?? 0}
+                          {pack.messages[tile.name_key]} · $
+                          {Math.round(
+                            ((tile.price ?? 0) *
+                              game.economy.price_index_basis_points) /
+                              10_000,
+                          )}
                         </MenuItem>
                       ))}
                     </Select>
@@ -269,7 +299,7 @@ export function GameActionCenter({
                       : t('heatmap.showProbability')}
                   </Button>
                   {currentPlayer.in_jail &&
-                    currentPlayer.balance >= pack.manifest.jail_fine && (
+                    currentPlayer.balance >= indexedJailFine && (
                       <Button
                         variant="outlined"
                         size="small"
@@ -280,7 +310,7 @@ export function GameActionCenter({
                         sx={{ minHeight: 44 }}
                       >
                         {t('payJailFine', {
-                          amount: pack.manifest.jail_fine,
+                          amount: indexedJailFine,
                         })}
                       </Button>
                     )}

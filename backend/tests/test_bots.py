@@ -19,6 +19,7 @@ from business_game.application.services import (
 )
 from business_game.domain.errors import ConflictError, ForbiddenError
 from business_game.domain.models import (
+    AcceptFinancedTradeCommand,
     AcceptTradeCommand,
     AddBotRequest,
     AuctionState,
@@ -656,6 +657,67 @@ async def test_bot_accepts_profitable_trade_and_rejects_bad_trade(
     action = policy.choose_action(game, pack)
     assert action is not None
     assert isinstance(action.command, RejectTradeCommand)
+
+
+async def test_bot_finances_a_money_request_and_can_request_money(
+    packs_dir: Path,
+    session: AsyncSession,
+) -> None:
+    host = await create_user(session, "money-bot-host@example.com", "Host")
+    game = await GameService(session, PackLoader(packs_dir)).create("classic-demo", host)
+    pack = PackLoader(packs_dir).load("classic-demo")
+    human = PlayerState(user_id=host.id, display_name="Human", balance=1500)
+    bot = PlayerState(
+        user_id=game.id,
+        display_name="Bot",
+        is_bot=True,
+        bot_personality=BotPersonality.BALANCED,
+        balance=1500,
+    )
+    game.players = [human, bot]
+    game.status = GameStatus.PLAYING
+    game.trades = [
+        TradeOffer(
+            proposer_id=human.user_id,
+            recipient_id=bot.user_id,
+            requested_cash=150,
+        )
+    ]
+    game.active_debt = DebtState(
+        debtor_id=human.user_id,
+        amount=100,
+        reason=DebtReason.TAX,
+        tile_id="tax",
+    )
+
+    action = BotPolicy().choose_action(game, pack)
+
+    assert action is not None
+    assert isinstance(action.command, AcceptFinancedTradeCommand)
+    assert action.command.installments == 4
+    assert action.command.interest_percent == 10
+
+    game.trades = []
+    game.active_debt = None
+    game.current_player_index = 1
+    game.phase = TurnPhase.WAITING_FOR_END
+    game.events = [
+        GameEvent(
+            sequence=1,
+            type="turn.started",
+            data={"player_id": str(bot.user_id)},
+        )
+    ]
+    bot.balance = 0
+
+    request = BotPolicy().choose_action(game, pack)
+
+    assert request is not None
+    assert isinstance(request.command, ProposeTradeCommand)
+    assert request.command.recipient_id == human.user_id
+    assert request.command.requested_cash > 0
+    assert request.command.offered_cash == 0
+    assert request.command.offered_property_ids == []
 
 
 async def test_bot_cancels_unanswered_trade_after_two_of_its_turns(

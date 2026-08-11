@@ -1,13 +1,19 @@
 import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded'
+import GavelRoundedIcon from '@mui/icons-material/GavelRounded'
 import {
   Box,
   Button,
   ButtonBase,
   Chip,
   Divider,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Paper,
   Stack,
   Switch,
+  TextField,
   ToggleButton,
   ToggleButtonGroup,
   Tooltip,
@@ -24,6 +30,7 @@ import type {
   PropertyFilter,
 } from '../types'
 import { BoardTileDialog } from './BoardTileDialog'
+import { indexedAmount, indexedRent } from './economicValues'
 import { playerColor } from './gameColors'
 import {
   buildGroupRoundAvailability,
@@ -72,6 +79,8 @@ export function PropertyManagementPanel({
     onFilterChange?.(nextFilter)
   }
   const [selectedTileId, setSelectedTileId] = useState<string | null>(null)
+  const [auctionTileId, setAuctionTileId] = useState<string | null>(null)
+  const [auctionMinimum, setAuctionMinimum] = useState('')
   const assetTiles = pack.board.tiles.filter(
     (tile) =>
       tile.price != null &&
@@ -413,6 +422,28 @@ export function PropertyManagementPanel({
                                   })
                                 }
                               />
+                              {game.status === 'playing' &&
+                                game.players[game.current_player_index]?.user_id === user.id &&
+                                !game.active_auction &&
+                                tradeAvailable &&
+                                !mortgaged && (
+                                  <Button
+                                    size="small"
+                                    startIcon={<GavelRoundedIcon />}
+                                    disabled={busy}
+                                    onClick={() => {
+                                      const indexedPrice = Math.round(
+                                        (tile.price ?? 1) *
+                                          game.economy.price_index_basis_points /
+                                          10_000,
+                                      )
+                                      setAuctionTileId(tile.id)
+                                      setAuctionMinimum(String(indexedPrice))
+                                    }}
+                                  >
+                                    {t('economy.advanced.auctionMine')}
+                                  </Button>
+                                )}
                             </Stack>
                           </Tooltip>
                         )}
@@ -437,6 +468,46 @@ export function PropertyManagementPanel({
         onCommand={onCommand}
         onTrade={onTrade}
       />
+      <Dialog open={auctionTileId !== null} onClose={() => setAuctionTileId(null)}>
+        <DialogTitle>{t('economy.advanced.voluntaryAuctionTitle')}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            {t('economy.advanced.voluntaryAuctionHelp')}
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            type="number"
+            label={t('economy.advanced.minimumBid')}
+            value={auctionMinimum}
+            onChange={(event) => setAuctionMinimum(event.target.value)}
+            slotProps={{ htmlInput: { min: 1 } }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAuctionTileId(null)}>{t('cancel')}</Button>
+          <Button
+            variant="contained"
+            disabled={
+              busy ||
+              auctionTileId === null ||
+              !Number.isInteger(Number(auctionMinimum)) ||
+              Number(auctionMinimum) <= 0
+            }
+            onClick={async () => {
+              if (!auctionTileId) return
+              const accepted = await onCommand({
+                action: 'offer_property_auction',
+                property_id: auctionTileId,
+                minimum_bid: Number(auctionMinimum),
+              })
+              if (accepted) setAuctionTileId(null)
+            }}
+          >
+            {t('economy.advanced.startAuction')}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }
@@ -481,7 +552,9 @@ function propertyValueLabel(
   game: GameState,
   t: ReturnType<typeof useTranslation>['t'],
 ): string {
-  if (!ownerId) return t('purchasePrice', { amount: tile.price ?? 0 })
+  if (!ownerId) {
+    return t('purchasePrice', { amount: indexedAmount(game, tile.price ?? 0) })
+  }
   if (tile.kind === 'utility') {
     const ownedUtilities = pack.board.tiles.filter(
       (candidate) =>
@@ -492,7 +565,7 @@ function propertyValueLabel(
       tile.rent_multipliers?.[0]
     return multiplier != null
       ? t('propertyDiceRent', { multiplier })
-      : t('purchasePrice', { amount: tile.price ?? 0 })
+      : t('purchasePrice', { amount: indexedAmount(game, tile.price ?? 0) })
   }
   if (tile.kind === 'transport') {
     const ownedTransports = pack.board.tiles.filter(
@@ -502,8 +575,8 @@ function propertyValueLabel(
     const rent =
       tile.rent_levels?.[Math.max(ownedTransports - 1, 0)] ?? tile.base_rent
     return rent != null
-      ? t('propertyRent', { amount: rent })
-      : t('purchasePrice', { amount: tile.price ?? 0 })
+      ? t('propertyRent', { amount: indexedRent(game, tile, rent) })
+      : t('purchasePrice', { amount: indexedAmount(game, tile.price ?? 0) })
   }
   let rent = tile.rent_levels?.[level] ?? tile.base_rent
   if (rent != null && level === 0 && tile.group) {
@@ -521,8 +594,8 @@ function propertyValueLabel(
     }
   }
   return rent != null
-    ? t('propertyRent', { amount: rent })
-    : t('purchasePrice', { amount: tile.price ?? 0 })
+    ? t('propertyRent', { amount: indexedRent(game, tile, rent) })
+    : t('purchasePrice', { amount: indexedAmount(game, tile.price ?? 0) })
 }
 
 function BuildingMarker({

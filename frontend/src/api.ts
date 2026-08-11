@@ -1,4 +1,7 @@
 import type {
+  AdminRoomSummary,
+  AdminUserSummary,
+  AdminUserUpdate,
   AutomationPreferenceSettings,
   AudioPreferenceSettings,
   BoardHistoricalStats,
@@ -7,8 +10,10 @@ import type {
   ContentPack,
   EconomicDifficulty,
   GameCommand,
+  GameAudioCatalogItem,
   GameState,
   GameViewPreferenceSettings,
+  GameColorThemeId,
   OptionalRules,
   PanelLayoutPreferences,
   PackManifest,
@@ -42,6 +47,24 @@ export class ApiError extends Error {
   ) {
     super(message)
   }
+}
+
+function resolveAudioSource(item: GameAudioCatalogItem): GameAudioCatalogItem {
+  if (!item.source_url || /^https?:\/\//.test(item.source_url)) return item
+  const apiPrefix = '/api/v1'
+  if (item.source_url.startsWith(apiPrefix) && API_BASE !== apiPrefix) {
+    return {
+      ...item,
+      source_url: `${API_BASE}${item.source_url.slice(apiPrefix.length)}`,
+    }
+  }
+  return item
+}
+
+function resolveAudioCatalog(
+  items: GameAudioCatalogItem[],
+): GameAudioCatalogItem[] {
+  return items.map(resolveAudioSource)
 }
 
 async function request<T>(
@@ -177,6 +200,41 @@ export const api = {
     return request<void>('/auth/logout', { method: 'POST' })
   },
   me: () => request<User>('/auth/me', {}, true),
+  getAudioCatalog: () =>
+    request<GameAudioCatalogItem[]>('/audio/catalog').then(resolveAudioCatalog),
+  listAdminAudio: () =>
+    request<GameAudioCatalogItem[]>('/admin/audio', {}, true).then(
+      resolveAudioCatalog,
+    ),
+  replaceAdminAudio: (soundId: string, file: File) => {
+    const body = new FormData()
+    body.set('file', file)
+    return request<GameAudioCatalogItem>(
+      `/admin/audio/${encodeURIComponent(soundId)}`,
+      { method: 'PUT', body },
+      true,
+    ).then(resolveAudioSource)
+  },
+  resetAdminAudio: (soundId: string) =>
+    request<void>(
+      `/admin/audio/${encodeURIComponent(soundId)}`,
+      { method: 'DELETE' },
+      true,
+    ),
+  listAdminUsers: () => request<AdminUserSummary[]>('/admin/users', {}, true),
+  updateAdminUser: (userId: string, data: AdminUserUpdate) =>
+    request<AdminUserSummary>(
+      `/admin/users/${encodeURIComponent(userId)}`,
+      { method: 'PATCH', body: JSON.stringify(data) },
+      true,
+    ),
+  listAdminRooms: () => request<AdminRoomSummary[]>('/admin/rooms', {}, true),
+  cancelAdminRoom: (gameId: string) =>
+    request<void>(
+      `/admin/rooms/${encodeURIComponent(gameId)}/cancel`,
+      { method: 'POST' },
+      true,
+    ),
   getUserPreferences: () =>
     request<UserPreferences>('/users/me/preferences', {}, true),
   updatePanelLayout: (panelLayout: PanelLayoutPreferences) =>
@@ -244,11 +302,21 @@ export const api = {
       },
       true,
     ),
+  updateColorTheme: (colorTheme: GameColorThemeId) =>
+    request<UserPreferences>(
+      '/users/me/preferences',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ color_theme: colorTheme }),
+      },
+      true,
+    ),
   createGame: (
     packId: string,
     version?: string,
     deckCollectionIds: Record<string, string[]> = {},
     economicDifficulty: EconomicDifficulty = 'standard',
+    advancedEconomyEnabled = true,
   ) =>
     request<GameState>(
       '/games',
@@ -259,6 +327,7 @@ export const api = {
           ...(version ? { version } : {}),
           deck_collection_ids: deckCollectionIds,
           economic_difficulty: economicDifficulty,
+          advanced_economy_enabled: advancedEconomyEnabled,
         }),
       },
       true,
@@ -316,6 +385,11 @@ export const api = {
       auction_deposit_percent?: number
       auction_minimum_bid_percent?: number
       economic_difficulty?: EconomicDifficulty
+      advanced_economy_enabled?: boolean
+      operating_cost_percent?: number
+      finale_trigger_week?: number
+      finale_duration_weeks?: number
+      finale_vote_interval_weeks?: number
       rules?: Partial<OptionalRules>
     },
   ) =>

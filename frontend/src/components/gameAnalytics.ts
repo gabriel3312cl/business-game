@@ -1,4 +1,5 @@
 import type { ContentPack, GameEvent, GameState, PlayerState } from '../types'
+import { indexedAmount } from './economicValues'
 import { buildPortfolioPerformance } from './portfolioPerformance'
 
 export type ActivityCategory =
@@ -31,6 +32,7 @@ export interface PlayerAnalytics {
   investmentValue: number
   loanDebt: number
   installmentDebt: number
+  operatingDebt: number
   immediateDebt: number
   totalDebt: number
   estimatedNetWorth: number
@@ -312,7 +314,13 @@ export function buildGameAnalytics(
         .filter(([, ownerId]) => ownerId === player.user_id)
         .map(([propertyId]) => propertyId)
       const propertyValue = propertyIds.reduce(
-        (total, propertyId) => total + (tileById.get(propertyId)?.price ?? 0),
+        (total, propertyId) => {
+          const tile = tileById.get(propertyId)
+          const baseValue = mortgaged.has(propertyId)
+            ? (tile?.mortgage_value ?? 0)
+            : (tile?.price ?? 0)
+          return total + indexedAmount(game, baseValue)
+        },
         0,
       )
       let houseCount = 0
@@ -324,10 +332,11 @@ export function buildGameAnalytics(
         if (level >= 5) {
           hotelCount += 1
           buildingValue +=
-            4 * (tile?.build_cost ?? 0) + (tile?.hotel_cost ?? tile?.build_cost ?? 0)
+            4 * indexedAmount(game, tile?.build_cost ?? 0) +
+            indexedAmount(game, tile?.hotel_cost ?? tile?.build_cost ?? 0)
         } else {
           houseCount += level
-          buildingValue += level * (tile?.build_cost ?? 0)
+          buildingValue += level * indexedAmount(game, tile?.build_cost ?? 0)
         }
       }
       const investmentValue = buildPortfolioPerformance(game, player.user_id).currentValue
@@ -337,12 +346,15 @@ export function buildGameAnalytics(
       const installmentDebt = game.rent_debt_plans
         .filter((plan) => plan.debtor_id === player.user_id)
         .reduce((total, plan) => total + plan.remaining_amount, 0)
+      const operatingDebt = (game.economy?.operating_debts ?? [])
+        .filter((debt) => debt.player_id === player.user_id)
+        .reduce((total, debt) => total + debt.remaining_amount, 0)
       const immediateDebt =
         game.active_debt?.debtor_id === player.user_id &&
         game.active_debt.installment_plan_id === null
           ? game.active_debt.amount
           : 0
-      const totalDebt = loanDebt + installmentDebt + immediateDebt
+      const totalDebt = loanDebt + installmentDebt + operatingDebt + immediateDebt
       const playerEvents = sortedEvents.filter((event) =>
         eventRelatesToPlayer(event, game, player.user_id),
       )
@@ -360,6 +372,7 @@ export function buildGameAnalytics(
         investmentValue,
         loanDebt,
         installmentDebt,
+        operatingDebt,
         immediateDebt,
         totalDebt,
         estimatedNetWorth:

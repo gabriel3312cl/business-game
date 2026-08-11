@@ -1,4 +1,5 @@
 import AccountCircleRoundedIcon from '@mui/icons-material/AccountCircleRounded'
+import AdminPanelSettingsRoundedIcon from '@mui/icons-material/AdminPanelSettingsRounded'
 import CloseFullscreenRoundedIcon from '@mui/icons-material/CloseFullscreenRounded'
 import DashboardCustomizeRoundedIcon from '@mui/icons-material/DashboardCustomizeRounded'
 import FullscreenRoundedIcon from '@mui/icons-material/FullscreenRounded'
@@ -22,7 +23,9 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { activeGameSession, api, ApiError, authToken } from './api'
+import { AdminPanel } from './admin/AdminPanel'
 import { GameAdvisorChat } from './advisor/GameAdvisorChat'
+import { gameAudio } from './audio/gameAudio'
 import { BoardStudio } from './board-editor/BoardStudio'
 import { AuthDialog, type AuthMode } from './components/AuthDialog'
 import { GameBoard } from './components/GameBoard'
@@ -66,6 +69,7 @@ export default function App() {
   const [gameCreationOpen, setGameCreationOpen] = useState(false)
   const [joinGameId, setJoinGameId] = useState('')
   const [boardStudioOpen, setBoardStudioOpen] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(false)
   const [customPackNames, setCustomPackNames] = useState<Record<string, string>>(
     {},
   )
@@ -146,6 +150,13 @@ export default function App() {
   useEffect(() => {
     void loadManifests()
   }, [loadManifests])
+
+  useEffect(() => {
+    void api
+      .getAudioCatalog()
+      .then((catalog) => gameAudio.applyCatalog(catalog))
+      .catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     if (selectedMode !== 'custom') return
@@ -284,6 +295,7 @@ export default function App() {
   const createGame = async (
     deckCollectionIds: Record<string, string[]> = {},
     economicDifficulty: EconomicDifficulty = 'standard',
+    advancedEconomyEnabled = true,
   ) => {
     setCreatedGame(null)
     setGamePack(null)
@@ -301,6 +313,7 @@ export default function App() {
         pack.manifest.version,
         deckCollectionIds,
         economicDifficulty,
+        advancedEconomyEnabled,
       )
       setGameCreationOpen(false)
       activeGameSession.set(game.id)
@@ -327,6 +340,7 @@ export default function App() {
       setCreatedGame(null)
       setGamePack(null)
       setBoardStudioOpen(false)
+      setAdminOpen(false)
     }
   }
 
@@ -428,7 +442,7 @@ export default function App() {
           >
             <Box sx={{ minWidth: 0 }}>
               <Typography variant="h6" fontWeight={900}>
-                BUSINESS<span style={{ color: '#b8ff3d' }}>GAME</span>
+                BUSINESS<span style={{ color: 'var(--game-theme-primary)' }}>GAME</span>
               </Typography>
               <Typography
                 variant="caption"
@@ -456,7 +470,10 @@ export default function App() {
                   variant={boardStudioOpen ? 'contained' : 'outlined'}
                   color="secondary"
                   startIcon={<DashboardCustomizeRoundedIcon />}
-                  onClick={() => setBoardStudioOpen(true)}
+                  onClick={() => {
+                    setAdminOpen(false)
+                    setBoardStudioOpen(true)
+                  }}
                   sx={{
                     minWidth: { xs: 40, sm: 'auto' },
                     px: { xs: 1, sm: 2 },
@@ -469,6 +486,27 @@ export default function App() {
                     sx={{ display: { xs: 'none', sm: 'inline' } }}
                   >
                     {t('createBoard')}
+                  </Box>
+                </Button>
+              )}
+              {user?.role === 'admin' && (
+                <Button
+                  variant={adminOpen ? 'contained' : 'outlined'}
+                  color="secondary"
+                  startIcon={<AdminPanelSettingsRoundedIcon />}
+                  onClick={() => {
+                    setBoardStudioOpen(false)
+                    setAdminOpen(true)
+                  }}
+                  sx={{
+                    minWidth: { xs: 40, sm: 'auto' },
+                    px: { xs: 1, sm: 2 },
+                    '& .MuiButton-startIcon': { mr: { xs: 0, sm: 1 } },
+                  }}
+                  aria-label={t('admin.open')}
+                >
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+                    {t('admin.open')}
                   </Box>
                 </Button>
               )}
@@ -520,7 +558,7 @@ export default function App() {
           </Stack>
         )}
 
-        {!createdGame && !boardStudioOpen && (
+        {!createdGame && !boardStudioOpen && !adminOpen && (
           <Stack
             direction={{ xs: 'column', md: 'row' }}
             spacing={2}
@@ -610,7 +648,7 @@ export default function App() {
           </Stack>
         )}
 
-        {user && !createdGame && !boardStudioOpen && (
+        {user && !createdGame && !boardStudioOpen && !adminOpen && (
           <>
             <Suspense
               fallback={
@@ -694,7 +732,9 @@ export default function App() {
           </Alert>
         )}
 
-        {boardStudioOpen && user ? (
+        {adminOpen && user?.role === 'admin' ? (
+          <AdminPanel user={user} onClose={() => setAdminOpen(false)} />
+        ) : boardStudioOpen && user ? (
           <BoardStudio
             locale={i18n.language}
             onClose={() => setBoardStudioOpen(false)}
@@ -767,8 +807,12 @@ export default function App() {
           open={gameCreationOpen}
           pack={pack}
           onClose={() => setGameCreationOpen(false)}
-          onConfirm={(deckCollectionIds, difficulty) =>
-            void createGame(deckCollectionIds, difficulty)
+          onConfirm={(deckCollectionIds, difficulty, advancedEconomyEnabled) =>
+            void createGame(
+              deckCollectionIds,
+              difficulty,
+              advancedEconomyEnabled,
+            )
           }
         />
       )}

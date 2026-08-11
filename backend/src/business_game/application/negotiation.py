@@ -16,6 +16,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
 
+from business_game.application.advanced_economy import (
+    building_replacement_cost,
+    indexed_amount,
+    indexed_rent,
+)
 from business_game.domain.models import (
     BotPersonality,
     ContentPack,
@@ -238,8 +243,7 @@ class NegotiationEngine:
             if len(group) > 1 and owned == len(group):
                 monopoly_percent = (
                     MONOPOLY_BASE_PERCENT
-                    + MONOPOLY_MULTIPLIER_PERCENT
-                    * self._pack.manifest.monopoly_rent_multiplier
+                    + MONOPOLY_MULTIPLIER_PERCENT * self._pack.manifest.monopoly_rent_multiplier
                 )
                 value = value * monopoly_percent // 100
             elif owned > 1:
@@ -250,7 +254,11 @@ class NegotiationEngine:
             value = value * (100 + SAME_KIND_PERCENT * max(owned - 1, 0)) // 100
         level = self._game.building_levels.get(tile.id, 0)
         if level:
-            value += level * (tile.build_cost or 0) * BUILDING_EQUITY_PERCENT // 100
+            value += (
+                indexed_amount(self._game, building_replacement_cost(tile, level))
+                * BUILDING_EQUITY_PERCENT
+                // 100
+            )
         if tile.id in self._game.mortgaged_property_ids:
             value = value * MORTGAGED_PERCENT // 100
         return value
@@ -321,24 +329,16 @@ class NegotiationEngine:
             after[property_id] = proposer_id
 
         proposer_mid = {
-            key: value
-            for key, value in before.items()
-            if key not in set(offered_property_ids)
+            key: value for key, value in before.items() if key not in set(offered_property_ids)
         }
         recipient_mid = {
-            key: value
-            for key, value in before.items()
-            if key not in set(requested_property_ids)
+            key: value for key, value in before.items() if key not in set(requested_property_ids)
         }
         proposer_mid_value = self.portfolio_value(proposer_id, proposer_mid)
         recipient_mid_value = self.portfolio_value(recipient_id, recipient_mid)
         return TradeValuation(
-            proposer_property_gain=(
-                self.portfolio_value(proposer_id, after) - proposer_mid_value
-            ),
-            proposer_property_loss=(
-                self.portfolio_value(proposer_id, before) - proposer_mid_value
-            ),
+            proposer_property_gain=(self.portfolio_value(proposer_id, after) - proposer_mid_value),
+            proposer_property_loss=(self.portfolio_value(proposer_id, before) - proposer_mid_value),
             recipient_property_gain=(
                 self.portfolio_value(recipient_id, after) - recipient_mid_value
             ),
@@ -390,11 +390,7 @@ class NegotiationEngine:
             valuation,
             owners_after,
         )
-        selected = (
-            proposer_analysis
-            if actor.user_id == trade.proposer_id
-            else recipient_analysis
-        )
+        selected = proposer_analysis if actor.user_id == trade.proposer_id else recipient_analysis
         return TradeAnalysisResponse(
             trade_id=trade.id,
             perspective=selected.role,
@@ -585,8 +581,7 @@ class NegotiationEngine:
         is_double = first == second
         if player.in_jail:
             forced_release = (
-                player.jail_failed_rolls + 1
-                >= self._pack.manifest.jail_max_failed_rolls
+                player.jail_failed_rolls + 1 >= self._pack.manifest.jail_max_failed_rolls
             )
             return (
                 (player.position + first + second) % tile_count
@@ -597,8 +592,7 @@ class NegotiationEngine:
             self._game.current_player is not None
             and self._game.current_player.user_id == player.user_id
             and is_double
-            and self._game.consecutive_doubles + 1
-            >= self._pack.manifest.max_consecutive_doubles
+            and self._game.consecutive_doubles + 1 >= self._pack.manifest.max_consecutive_doubles
         ):
             jail_position = next(
                 (
@@ -638,16 +632,21 @@ class NegotiationEngine:
         cash: int,
     ) -> int:
         if tile.amount is not None:
-            return tile.amount
+            return indexed_amount(self._game, tile.amount, 80)
         if tile.net_worth_percent is not None:
             net_worth = cash + sum(
-                (owned_tile.price or 0)
-                + min(self._game.building_levels.get(owned_tile.id, 0), 4)
-                * (owned_tile.build_cost or 0)
-                + (
-                    owned_tile.hotel_cost or owned_tile.build_cost or 0
-                    if self._game.building_levels.get(owned_tile.id, 0) == 5
-                    else 0
+                indexed_amount(
+                    self._game,
+                    (owned_tile.mortgage_value or 0)
+                    if owned_tile.id in self._game.mortgaged_property_ids
+                    else owned_tile.price or 0,
+                )
+                + indexed_amount(
+                    self._game,
+                    building_replacement_cost(
+                        owned_tile,
+                        self._game.building_levels.get(owned_tile.id, 0),
+                    ),
                 )
                 for owned_tile in self._pack.board.tiles
                 if owners.get(owned_tile.id) == player.user_id
@@ -655,11 +654,14 @@ class NegotiationEngine:
             return net_worth * tile.net_worth_percent // 100
         if tile.complete_group_amount is not None:
             complete_groups = sum(
-                bool(group)
-                and all(owners.get(item.id) == player.user_id for item in group)
+                bool(group) and all(owners.get(item.id) == player.user_id for item in group)
                 for group in self._groups.values()
             )
-            return complete_groups * tile.complete_group_amount
+            return indexed_amount(
+                self._game,
+                complete_groups * tile.complete_group_amount,
+                80,
+            )
         house_count = sum(
             level if level < 5 else 0
             for property_id, level in self._game.building_levels.items()
@@ -670,8 +672,10 @@ class NegotiationEngine:
             for property_id, level in self._game.building_levels.items()
             if owners.get(property_id) == player.user_id
         )
-        return house_count * (tile.house_amount or 0) + hotel_count * (
-            tile.hotel_amount or 0
+        return indexed_amount(
+            self._game,
+            house_count * (tile.house_amount or 0) + hotel_count * (tile.hotel_amount or 0),
+            80,
         )
 
     # ------------------------------------------------------------- pressures
@@ -697,23 +701,35 @@ class NegotiationEngine:
             levels = tile.rent_levels or [tile.base_rent or 0]
             level = self._game.building_levels.get(tile.id, 0)
             if level:
-                return levels[min(level, len(levels) - 1)]
+                return indexed_rent(
+                    self._game,
+                    tile,
+                    levels[min(level, len(levels) - 1)],
+                )
             group = self._groups.get(tile.group or "", [tile])
-            if len(group) > 1 and all(
-                owners.get(item.id) == owner_id for item in group
-            ) and not any(
-                item.id in self._game.mortgaged_property_ids for item in group
+            if (
+                len(group) > 1
+                and all(owners.get(item.id) == owner_id for item in group)
+                and not any(item.id in self._game.mortgaged_property_ids for item in group)
             ):
-                return (tile.base_rent or 0) * self._pack.manifest.monopoly_rent_multiplier
-            return tile.base_rent or 0
+                return indexed_rent(
+                    self._game,
+                    tile,
+                    (tile.base_rent or 0) * self._pack.manifest.monopoly_rent_multiplier,
+                )
+            return indexed_rent(self._game, tile, tile.base_rent or 0)
         peers = self._kinds.get(tile.kind, [tile])
         owned = max(sum(owners.get(item.id) == owner_id for item in peers), 1)
         if tile.kind is TileKind.UTILITY:
             multipliers = tile.rent_multipliers or [0]
             index = min(owned - 1, len(multipliers) - 1)
-            return multipliers[index] * dice_total
+            return indexed_rent(self._game, tile, multipliers[index] * dice_total)
         levels = tile.rent_levels or [tile.base_rent or 0]
-        return levels[min(owned - 1, len(levels) - 1)]
+        return indexed_rent(
+            self._game,
+            tile,
+            levels[min(owned - 1, len(levels) - 1)],
+        )
 
     def rent_threat(
         self,
@@ -725,8 +741,7 @@ class NegotiationEngine:
         threats = [
             self._rent_for(tile, owner_id, scenario_owners, AVERAGE_DICE_ROLL)
             for tile in self._pack.board.tiles
-            if (owner_id := scenario_owners.get(tile.id)) is not None
-            and owner_id != player.user_id
+            if (owner_id := scenario_owners.get(tile.id)) is not None and owner_id != player.user_id
         ]
         return max(threats, default=0)
 
@@ -751,11 +766,15 @@ class NegotiationEngine:
             if self._game.owners.get(tile.id) != player.user_id:
                 continue
             if tile.id in self._game.mortgaged_property_ids:
-                total += tile.mortgage_value or 0
+                total += indexed_amount(self._game, tile.mortgage_value or 0)
             else:
-                total += tile.price or 0
+                total += indexed_amount(self._game, tile.price or 0)
             level = self._game.building_levels.get(tile.id, 0)
-            total += level * (tile.build_cost or 0) * BUILDING_EQUITY_PERCENT // 100
+            total += (
+                indexed_amount(self._game, building_replacement_cost(tile, level))
+                * BUILDING_EQUITY_PERCENT
+                // 100
+            )
         return total
 
     def standing_percent(self, player: PlayerState) -> int:
@@ -772,10 +791,7 @@ class NegotiationEngine:
 
     def is_distressed(self, player: PlayerState) -> bool:
         """Cash cannot cover the worst landing and the board is ahead."""
-        return (
-            player.balance < self.rent_threat(player)
-            and self.standing_percent(player) < 100
-        )
+        return player.balance < self.rent_threat(player) and self.standing_percent(player) < 100
 
     def threshold_percent(
         self,
@@ -804,8 +820,7 @@ class NegotiationEngine:
             (
                 item.score
                 for item in self._game.bot_relationships
-                if item.bot_id == player.user_id
-                and item.player_id == counterpart.user_id
+                if item.bot_id == player.user_id and item.player_id == counterpart.user_id
             ),
             0,
         )
@@ -942,6 +957,42 @@ class NegotiationEngine:
                     reason="propose_sell_spare_for_cash",
                 )
             )
+        floor = self.liquidity_floor(bot)
+        available = self._spendable(rival)
+        recent_request = any(
+            trade.proposer_id == bot.user_id
+            and trade.recipient_id == rival.user_id
+            and trade.requested_cash > 0
+            and trade.offered_cash == 0
+            and not trade.offered_property_ids
+            and not trade.requested_property_ids
+            and trade.status in {TradeStatus.REJECTED, TradeStatus.CANCELLED}
+            and self._turns_since_refusal(trade, bot.user_id) <= profile_for(bot).patience
+            for trade in self._game.trades
+        )
+        if not candidates and bot.balance < floor // 2 and available >= 25 and not recent_request:
+            amount = min(floor - bot.balance, max(25, available // 3), 300)
+            if amount > 0:
+                valuation = self.evaluate(
+                    bot.user_id,
+                    rival.user_id,
+                    offered_cash=0,
+                    requested_cash=amount,
+                    offered_property_ids=[],
+                    requested_property_ids=[],
+                )
+                candidates.append(
+                    TradeCandidate(
+                        command=ProposeTradeCommand(
+                            action="propose_trade",
+                            recipient_id=rival.user_id,
+                            requested_cash=amount,
+                        ),
+                        reason="propose_money_request",
+                        valuation=valuation,
+                        score=max(1, amount + self._mood(rival.user_id)),
+                    )
+                )
         return candidates
 
     def _priced_candidate(
@@ -1038,14 +1089,10 @@ class NegotiationEngine:
         profile = profile_for(player)
         if as_recipient:
             cost = deal.recipient_cost
-            counterpart_synergy = (
-                deal.proposer_property_gain - deal.proposer_incoming_anchor
-            )
+            counterpart_synergy = deal.proposer_property_gain - deal.proposer_incoming_anchor
         else:
             cost = deal.proposer_cost
-            counterpart_synergy = (
-                deal.recipient_property_gain - deal.recipient_incoming_anchor
-            )
+            counterpart_synergy = deal.recipient_property_gain - deal.recipient_incoming_anchor
         return cost + max(counterpart_synergy, 0) * profile.blocking_appetite // 100
 
     def _build_counter(
@@ -1059,8 +1106,7 @@ class NegotiationEngine:
         if (
             profile.sociability < 50
             or self._already_countered(bot, trade)
-            or self._negotiation_rounds(bot.user_id, trade.proposer_id)
-            >= MAX_NEGOTIATION_ROUNDS
+            or self._negotiation_rounds(bot.user_id, trade.proposer_id) >= MAX_NEGOTIATION_ROUNDS
             # Countering is an answer, not an idea: once the bot has played a
             # turn the refusal is history and it negotiates from scratch.
             or self._turns_since_refusal(trade, bot.user_id) > 0
@@ -1139,13 +1185,11 @@ class NegotiationEngine:
         if tile.kind is not TileKind.PROPERTY or tile.group is None:
             peers = self._kinds.get(tile.kind, [])
             return len(peers) > 1 and all(
-                item.id == tile.id or self._game.owners.get(item.id) == player_id
-                for item in peers
+                item.id == tile.id or self._game.owners.get(item.id) == player_id for item in peers
             )
         group = self._groups.get(tile.group, [tile])
         return len(group) > 1 and all(
-            item.id == tile.id or self._game.owners.get(item.id) == player_id
-            for item in group
+            item.id == tile.id or self._game.owners.get(item.id) == player_id for item in group
         )
 
     def _wanted_from(
@@ -1285,8 +1329,7 @@ class NegotiationEngine:
             (
                 event.sequence
                 for event in reversed(self._game.events)
-                if event.type == "trade.rejected"
-                and event.data.get("trade_id") == str(trade.id)
+                if event.type == "trade.rejected" and event.data.get("trade_id") == str(trade.id)
             ),
             None,
         )
@@ -1308,9 +1351,9 @@ class NegotiationEngine:
 
     def _anchor(self, tile: TileDefinition) -> int:
         return max(
-            tile.price or 0,
-            (tile.mortgage_value or 0) * 2,
-            (tile.base_rent or 0) * RENT_ANCHOR_MULTIPLIER,
+            indexed_amount(self._game, tile.price or 0),
+            indexed_amount(self._game, tile.mortgage_value or 0) * 2,
+            indexed_rent(self._game, tile, tile.base_rent or 0) * RENT_ANCHOR_MULTIPLIER,
             1,
         )
 

@@ -252,6 +252,7 @@ async def create_game(
         data.version,
         data.deck_collection_ids,
         data.economic_difficulty,
+        data.advanced_economy_enabled,
     )
     return game_state_view(game, current_user.id)
 

@@ -5,11 +5,13 @@ import random
 from dataclasses import dataclass
 from datetime import timedelta
 
+from business_game.application.advanced_economy import advance_price_index
 from business_game.domain.models import (
     ContentPack,
     EconomicCycle,
     EconomicDifficulty,
     EconomicEventState,
+    EconomicForecastState,
     EconomicSeason,
     GameState,
     MarketMovementState,
@@ -97,6 +99,23 @@ COMPANY_ACTIONS = {
 
 def initialize_economic_simulation(game: GameState) -> None:
     game.economy.season = season_for_month(game.economy.current_date.month)
+    if game.economy.inflation_base_week is None:
+        game.economy.inflation_base_week = game.economy.elapsed_weeks
+    if game.economy.next_operating_cost_week is None:
+        game.economy.next_operating_cost_week = max(
+            12,
+            (game.economy.elapsed_weeks // 4 + 1) * 4,
+        )
+    if game.economy.next_public_project_week is None:
+        game.economy.next_public_project_week = max(
+            16,
+            (game.economy.elapsed_weeks // 8 + 1) * 8,
+        )
+    if game.economy.next_finale_vote_week is None:
+        game.economy.next_finale_vote_week = max(
+            game.settings.finale_trigger_week,
+            game.economy.elapsed_weeks,
+        )
 
 
 def advance_economic_week(game: GameState, pack: ContentPack) -> dict[str, object]:
@@ -121,18 +140,39 @@ def advance_economic_week(game: GameState, pack: ContentPack) -> dict[str, objec
             )
     economy.active_events = retained_events
     started_event: EconomicEventState | None = None
+    retained_forecasts: list[EconomicForecastState] = []
+    for forecast in economy.forecast_events:
+        if forecast.starts_in_weeks <= 1:
+            if all(event.kind != forecast.kind for event in economy.active_events):
+                started_event = EconomicEventState(
+                    kind=forecast.kind,
+                    remaining_weeks=forecast.duration_weeks,
+                    intensity=forecast.intensity,
+                )
+                economy.active_events.append(started_event)
+        else:
+            retained_forecasts.append(
+                forecast.model_copy(
+                    update={"starts_in_weeks": forecast.starts_in_weeks - 1},
+                )
+            )
+    economy.forecast_events = retained_forecasts
+    announced_event: EconomicForecastState | None = None
     if (
-        len(economy.active_events) < 3
+        len(economy.active_events) + len(economy.forecast_events) < 3
         and roller.randrange(100) < profile.event_chance_percent
     ):
         kind = roller.choice(EVENT_KINDS)
-        if all(event.kind != kind for event in economy.active_events):
-            started_event = EconomicEventState(
+        if all(event.kind != kind for event in economy.active_events) and all(
+            event.kind != kind for event in economy.forecast_events
+        ):
+            announced_event = EconomicForecastState(
                 kind=kind,
-                remaining_weeks=roller.randint(2, 6),
+                starts_in_weeks=2,
+                duration_weeks=roller.randint(2, 6),
                 intensity=roller.choices((1, 2, 3), weights=(60, 30, 10), k=1)[0],
             )
-            economy.active_events.append(started_event)
+            economy.forecast_events.append(announced_event)
 
     growth_effect = weather_effect[0] * economy.weather_intensity
     inflation_effect = weather_effect[1] * economy.weather_intensity
@@ -168,6 +208,7 @@ def advance_economic_week(game: GameState, pack: ContentPack) -> dict[str, objec
         lower=0,
         upper=5000,
     )
+    advance_price_index(game)
     inflation_gap = economy.annual_inflation_basis_points - 300
     economy.policy_rate_basis_points = _bounded_indicator(
         economy.policy_rate_basis_points,
@@ -183,9 +224,7 @@ def advance_economic_week(game: GameState, pack: ContentPack) -> dict[str, objec
         100,
         min(
             5000,
-            economy.unemployment_basis_points
-            - growth_change // 3
-            + roller.randint(-4, 4),
+            economy.unemployment_basis_points - growth_change // 3 + roller.randint(-4, 4),
         ),
     )
     economy.consumer_confidence = max(
@@ -233,17 +272,19 @@ def advance_economic_week(game: GameState, pack: ContentPack) -> dict[str, objec
         "difficulty": game.settings.economic_difficulty.value,
         "growth_basis_points": economy.annual_growth_basis_points,
         "inflation_basis_points": economy.annual_inflation_basis_points,
+        "price_index_basis_points": economy.price_index_basis_points,
         "policy_rate_basis_points": economy.policy_rate_basis_points,
         "unemployment_basis_points": economy.unemployment_basis_points,
         "consumer_confidence": economy.consumer_confidence,
         "market_sentiment": economy.market_sentiment,
         "started_event": started_event.model_dump(mode="json") if started_event else None,
+        "announced_event": (announced_event.model_dump(mode="json") if announced_event else None),
         "active_events": [event.model_dump(mode="json") for event in economy.active_events],
+        "forecast_events": [event.model_dump(mode="json") for event in economy.forecast_events],
         "company_action": company_action,
         "company_instrument_id": company_instrument_id,
         "market_movements": [
-            movement.model_dump(mode="json")
-            for movement in economy.last_market_movements
+            movement.model_dump(mode="json") for movement in economy.last_market_movements
         ],
     }
 
@@ -303,9 +344,7 @@ def _company_action(
     roller: random.Random,
 ) -> tuple[str | None, str | None]:
     candidates = [
-        instrument
-        for instrument in game.bank.investments
-        if instrument.instrument_kind == "asset"
+        instrument for instrument in game.bank.investments if instrument.instrument_kind == "asset"
     ]
     if not game.settings.rules.stock_market_enabled or not candidates:
         return None, None
@@ -339,8 +378,7 @@ def _move_markets(
         )
         action_effect = (
             COMPANY_ACTIONS[company_action]
-            if company_action is not None
-            and instrument.id == company_instrument_id
+            if company_action is not None and instrument.id == company_instrument_id
             else 0
         )
         raw_basis_points = (

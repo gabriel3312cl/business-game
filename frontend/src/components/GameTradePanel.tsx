@@ -88,7 +88,11 @@ export function GameTradePanel({
   const theme = useTheme()
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const [open, setOpen] = useState(false)
+  const [requestingMoney, setRequestingMoney] = useState(false)
   const [detailTradeId, setDetailTradeId] = useState<string | null>(null)
+  const [financingTradeId, setFinancingTradeId] = useState<string | null>(null)
+  const [loanInstallments, setLoanInstallments] = useState(3)
+  const [loanInterestPercent, setLoanInterestPercent] = useState(10)
   const [counteringTradeId, setCounteringTradeId] = useState<string | null>(null)
   const [systemAnalysis, setSystemAnalysis] = useState<TradeAnalysis | null>(null)
   const [systemAnalysisLoading, setSystemAnalysisLoading] = useState(false)
@@ -163,6 +167,7 @@ export function GameTradePanel({
       (game.building_levels[draft.requestedPropertyId] ?? 0) === 0 &&
       !tradeUnavailablePropertyIds.includes(draft.requestedPropertyId)
     if (recipientIsAvailable && propertyIsAvailable) {
+      setRequestingMoney(false)
       setCounteringTradeId(null)
       setRecipientId(draft.recipientId)
       setOfferedCash(0)
@@ -277,6 +282,7 @@ export function GameTradePanel({
     }
   }
   const reset = () => {
+    setRequestingMoney(false)
     setCounteringTradeId(null)
     setRecipientId('')
     setOfferedCash(0)
@@ -287,6 +293,11 @@ export function GameTradePanel({
   const close = () => {
     setOpen(false)
     reset()
+  }
+  const startMoneyRequest = () => {
+    reset()
+    setRequestingMoney(true)
+    setOpen(true)
   }
   const startCounterOffer = (trade: TradeOffer) => {
     setCounteringTradeId(trade.id)
@@ -313,22 +324,42 @@ export function GameTradePanel({
       offeredPropertyIds.length > 0 ||
       requestedPropertyIds.length > 0)
 
+  const isPureMoneyRequest = (trade: TradeOffer) =>
+    trade.requested_cash > 0 &&
+    trade.offered_cash === 0 &&
+    trade.offered_property_ids.length === 0 &&
+    trade.requested_property_ids.length === 0
+  const financedPrincipal = (trade: TradeOffer) =>
+    Math.max(0, trade.requested_cash - trade.offered_cash)
+  const recipientChoices = requestingMoney ? otherPlayers : tradeablePlayers
+
   return (
     <Stack spacing={1.25}>
       <Stack direction="row" alignItems="center" justifyContent="space-between">
         <Typography fontWeight={850}>{t('trades')}</Typography>
-        <Button
-          size="small"
-          variant="contained"
-          color="secondary"
-          startIcon={<SwapHorizRoundedIcon />}
-          disabled={
-            game.status !== 'playing' || !canTrade || tradeablePlayers.length === 0
-          }
-          onClick={() => setOpen(true)}
-        >
-          {t('createTrade')}
-        </Button>
+        <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" justifyContent="flex-end">
+          <Button
+            size="small"
+            variant="outlined"
+            color="secondary"
+            disabled={game.status !== 'playing' || !canTrade || otherPlayers.length === 0}
+            onClick={startMoneyRequest}
+          >
+            {t('requestMoney')}
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            color="secondary"
+            startIcon={<SwapHorizRoundedIcon />}
+            disabled={
+              game.status !== 'playing' || !canTrade || tradeablePlayers.length === 0
+            }
+            onClick={() => setOpen(true)}
+          >
+            {t('createTrade')}
+          </Button>
+        </Stack>
       </Stack>
 
       {pendingTrades.length === 0 ? (
@@ -364,7 +395,7 @@ export function GameTradePanel({
                         })
                       }
                     >
-                      {t('accept')}
+                      {t(isPureMoneyRequest(trade) ? 'giftMoney' : 'accept')}
                     </Button>
                     <Button
                       disabled={busy}
@@ -458,6 +489,63 @@ export function GameTradePanel({
                   pack={pack}
                 />
               </Box>
+              {financingTradeId === detailTrade.id && (
+                <Paper
+                  variant="outlined"
+                  sx={{ mt: 2, p: 2, borderColor: 'secondary.main' }}
+                >
+                  <Typography fontWeight={850}>{t('loanOfferTitle')}</Typography>
+                  <Typography variant="body2" color="text.secondary" mb={1.5}>
+                    {t('loanOfferHelp', { amount: financedPrincipal(detailTrade) })}
+                  </Typography>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                    <TextField
+                      type="number"
+                      label={t('loanInstallments')}
+                      value={loanInstallments}
+                      onChange={(event) =>
+                        setLoanInstallments(
+                          Math.min(12, Math.max(2, Number(event.target.value) || 2)),
+                        )
+                      }
+                      slotProps={{ htmlInput: { min: 2, max: 12, step: 1 } }}
+                    />
+                    <TextField
+                      type="number"
+                      label={t('loanInterest')}
+                      value={loanInterestPercent}
+                      onChange={(event) =>
+                        setLoanInterestPercent(
+                          Math.min(100, Math.max(0, Number(event.target.value) || 0)),
+                        )
+                      }
+                      slotProps={{ htmlInput: { min: 0, max: 100, step: 1 } }}
+                    />
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      disabled={busy}
+                      onClick={async () => {
+                        const accepted = await onCommand({
+                          action: 'accept_financed_trade',
+                          trade_id: detailTrade.id,
+                          installments: loanInstallments,
+                          interest_percent: loanInterestPercent,
+                        })
+                        if (accepted) setDetailTradeId(null)
+                      }}
+                    >
+                      {t('confirmLoan', {
+                        total: Math.ceil(
+                          (financedPrincipal(detailTrade) *
+                            (100 + loanInterestPercent)) /
+                            100,
+                        ),
+                      })}
+                    </Button>
+                  </Stack>
+                </Paper>
+              )}
               <Divider sx={{ my: 2.5 }} />
               <Stack spacing={2}>
                 <SystemTradeAnalysis
@@ -549,8 +637,18 @@ export function GameTradePanel({
                       if (accepted) setDetailTradeId(null)
                     }}
                   >
-                    {t('accept')}
+                    {t(isPureMoneyRequest(detailTrade) ? 'giftMoney' : 'accept')}
                   </Button>
+                  {financedPrincipal(detailTrade) > 0 && (
+                    <Button
+                      color="secondary"
+                      variant="outlined"
+                      disabled={busy}
+                      onClick={() => setFinancingTradeId(detailTrade.id)}
+                    >
+                      {t('offerLoan')}
+                    </Button>
+                  )}
                   <Button
                     color="secondary"
                     disabled={busy}
@@ -610,7 +708,13 @@ export function GameTradePanel({
               <ArrowBackRoundedIcon />
             </IconButton>
           )}
-          {t(counteringTradeId ? 'counterOffer' : 'createTrade')}
+          {t(
+            counteringTradeId
+              ? 'counterOffer'
+              : requestingMoney
+                ? 'requestMoney'
+                : 'createTrade',
+          )}
           <IconButton
             aria-label={t('close')}
             onClick={close}
@@ -628,9 +732,9 @@ export function GameTradePanel({
           {!recipientId ? (
             <Stack spacing={1.25}>
               <Typography textAlign="center" fontWeight={750} mb={1}>
-                {t('selectTradePlayer')}
+                {t(requestingMoney ? 'selectMoneyPlayer' : 'selectTradePlayer')}
               </Typography>
-              {tradeablePlayers.map((player) => {
+              {recipientChoices.map((player) => {
                 const index = game.players.findIndex(
                   (candidate) => candidate.user_id === player.user_id,
                 )
@@ -660,6 +764,28 @@ export function GameTradePanel({
                   </Button>
                 )
               })}
+            </Stack>
+          ) : requestingMoney ? (
+            <Stack spacing={2} sx={{ maxWidth: 440, mx: 'auto', pt: 1 }}>
+              <Typography textAlign="center" fontWeight={800}>
+                {t('requestMoneyFrom', {
+                  player:
+                    otherPlayers.find((player) => player.user_id === recipientId)
+                      ?.display_name ?? '',
+                })}
+              </Typography>
+              <TextField
+                autoFocus
+                type="number"
+                label={t('amountRequested')}
+                value={requestedCash === 0 ? '' : requestedCash}
+                placeholder="$0"
+                onChange={(event) =>
+                  setRequestedCash(Math.max(0, Number(event.target.value) || 0))
+                }
+                slotProps={{ htmlInput: { min: 0, step: 1 } }}
+                helperText={t('requestMoneyHelp')}
+              />
             </Stack>
           ) : (
             <Box
@@ -744,7 +870,13 @@ export function GameTradePanel({
               }}
               sx={{ minHeight: 48, px: 3 }}
             >
-              {t(counteringTradeId ? 'sendCounterOffer' : 'sendOffer')}
+              {t(
+                counteringTradeId
+                  ? 'sendCounterOffer'
+                  : requestingMoney
+                    ? 'sendMoneyRequest'
+                    : 'sendOffer',
+              )}
             </Button>
           </DialogActions>
         )}

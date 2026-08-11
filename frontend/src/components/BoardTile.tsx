@@ -110,6 +110,7 @@ export function BoardTile({
   const mortgagedLabel = mortgaged && mortgageLabel ? `, ${mortgageLabel}` : ''
   const heatmapLabel = heatmap ? `, ${heatmap.ariaLabel}` : ''
   const visualMode = viewMode === 'visual'
+  const currentUserToken = tokens.find((token) => token.currentUser)
   const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
     const target = event.target as HTMLElement
     onClick(target.closest('[data-color-group-preview]') ? 'group' : 'tile')
@@ -117,10 +118,52 @@ export function BoardTile({
 
   return (
     <Tooltip
-      title={tooltip}
+      title={
+        <Box
+          sx={{
+            width: { xs: 220, sm: 260 },
+            overflow: 'hidden',
+            borderRadius: 2.25,
+            border: `1px solid color-mix(in srgb, ${accent} 70%, white)`,
+            background: mortgaged
+              ? 'repeating-linear-gradient(135deg, rgba(255,174,51,.10) 0 8px, rgba(11,9,18,.12) 8px 16px), var(--game-theme-tile-tooltip)'
+              : 'var(--game-theme-tile-tooltip)',
+            color: 'text.primary',
+            boxShadow: `0 18px 46px rgba(0,0,0,.62), 0 0 24px color-mix(in srgb, ${accent} 30%, transparent)`,
+          }}
+        >
+          <Box
+            aria-hidden
+            sx={{
+              height: 9,
+              bgcolor: accent,
+              boxShadow: `0 2px 14px color-mix(in srgb, ${accent} 60%, transparent)`,
+            }}
+          />
+          <Box sx={{ p: 1.5 }}>{tooltip}</Box>
+        </Box>
+      }
       arrow
       enterTouchDelay={300}
       leaveTouchDelay={2500}
+      slotProps={{
+        tooltip: {
+          sx: {
+            maxWidth: 'none',
+            p: 0,
+            bgcolor: 'transparent',
+            boxShadow: 'none',
+          },
+        },
+        arrow: {
+          sx: {
+            color: accent,
+            '&::before': {
+              boxShadow: '0 2px 7px rgba(0,0,0,.45)',
+            },
+          },
+        },
+      }}
     >
     <Box
       ref={buttonRef}
@@ -129,6 +172,7 @@ export function BoardTile({
       tabIndex={tabIndex}
       data-board-tile-id={tile.id}
       data-highlighted={highlighted || undefined}
+      data-current-user-location={currentUserToken ? true : undefined}
       aria-label={`${name}${priceLabel}${ownerLabel}${buildingsLabel}${mortgagedLabel}${heatmapLabel}`}
       onFocus={onFocus}
       onKeyDown={onKeyDown}
@@ -141,20 +185,22 @@ export function BoardTile({
         minHeight: 0,
         m: { xs: '0.5px', sm: '1px' },
         overflow: 'hidden',
-        border: '1px solid rgba(255,255,255,.07)',
+        border: '1px solid var(--game-theme-border)',
         borderRadius: {
           xs: compact ? '3px' : '4px',
           sm: compact ? '4px' : '7px',
           md: compact ? '5px' : '9px',
         },
         background: mortgaged
-          ? 'repeating-linear-gradient(135deg, rgba(255,174,51,.10) 0 7px, rgba(11,9,18,.12) 7px 14px), linear-gradient(155deg, rgba(55,49,83,.98), rgba(27,23,42,.98) 72%)'
-          : 'linear-gradient(155deg, rgba(55,49,83,.98), rgba(27,23,42,.98) 72%)',
+          ? 'repeating-linear-gradient(135deg, rgba(255,174,51,.10) 0 7px, rgba(11,9,18,.12) 7px 14px), var(--game-theme-tile)'
+          : 'var(--game-theme-tile)',
         boxShadow: highlighted
-          ? 'inset 0 0 0 3px #b8ff3d, inset 0 0 18px rgba(184,255,61,.45), 0 0 16px rgba(184,255,61,.85)'
-          : mortgaged
-            ? 'inset 0 0 0 2px rgba(255,174,51,.82), inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)'
-            : 'inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)',
+          ? 'inset 0 0 0 3px var(--game-theme-primary), inset 0 0 18px var(--game-theme-primary-soft), 0 0 16px var(--game-theme-primary)'
+          : currentUserToken
+            ? `inset 0 0 0 2px rgba(255,255,255,.72), inset 0 0 18px color-mix(in srgb, ${currentUserToken.color} 34%, transparent), 0 0 14px color-mix(in srgb, ${currentUserToken.color} 58%, transparent)`
+            : mortgaged
+              ? 'inset 0 0 0 2px rgba(255,174,51,.82), inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)'
+              : 'inset 0 1px 0 rgba(255,255,255,.045), 0 1px 4px rgba(0,0,0,.28)',
         position: 'relative',
         isolation: 'isolate',
         p: 0,
@@ -171,8 +217,12 @@ export function BoardTile({
             : 'board-tile-action-pulse 620ms cubic-bezier(.2,.78,.24,1)'
           : undefined,
         transformOrigin: 'center',
-        filter: highlighted ? 'brightness(1.3) saturate(1.15)' : undefined,
-        zIndex: highlighted ? 7 : actionPulse ? 6 : undefined,
+        filter: highlighted
+          ? 'brightness(1.3) saturate(1.15)'
+          : currentUserToken
+            ? 'brightness(1.08) saturate(1.08)'
+            : undefined,
+        zIndex: highlighted ? 7 : actionPulse ? 6 : currentUserToken ? 2 : undefined,
         '@keyframes board-tile-action-pulse': {
           '0%, 100%': { transform: 'translateY(0) scale(1)', filter: 'none' },
           '28%': {
@@ -187,7 +237,7 @@ export function BoardTile({
           '45%': { filter: 'brightness(1.28) saturate(1.12)' },
         },
         '&:focus-visible': {
-          outline: '2px solid #b8ff3d',
+          outline: '2px solid var(--game-theme-primary)',
           outlineOffset: -2,
           zIndex: 5,
         },
@@ -210,7 +260,7 @@ export function BoardTile({
               zIndex: 2,
               pointerEvents: 'none',
               bgcolor: heatmap.color,
-              opacity: 0.12 + heatmap.intensity * 0.52,
+              opacity: 0.5 + heatmap.intensity * 0.32,
               boxShadow: `inset 0 0 0 2px ${heatmap.color}`,
             }}
           />
@@ -226,8 +276,8 @@ export function BoardTile({
               px: { xs: 0.2, sm: 0.45 },
               py: 0.1,
               borderRadius: 1,
-              bgcolor: 'rgba(9,7,17,.82)',
-              color: '#fff',
+              bgcolor: 'var(--game-theme-surface)',
+              color: 'text.primary',
               fontSize: {
                 xs: compact ? 5 : 6,
                 sm: compact ? 7 : 8,
@@ -242,6 +292,39 @@ export function BoardTile({
             {heatmap.valueLabel}
           </Typography>
         </>
+      )}
+
+      {currentUserToken && (
+        <Box
+          aria-hidden
+          data-current-user-trail
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 2,
+            pointerEvents: 'none',
+            background: `radial-gradient(circle at 86% 14%, color-mix(in srgb, ${currentUserToken.color} 78%, transparent) 0 5%, color-mix(in srgb, ${currentUserToken.color} 34%, transparent) 13%, transparent 38%), linear-gradient(145deg, transparent 32%, color-mix(in srgb, ${currentUserToken.color} 22%, transparent) 68%, transparent 100%)`,
+            mixBlendMode: 'screen',
+            opacity: 0.78,
+            animation:
+              motionIntensity === 'off'
+                ? undefined
+                : motionIntensity === 'soft'
+                  ? 'current-user-trail-soft 2.8s ease-in-out infinite alternate'
+                  : 'current-user-trail 2.4s ease-in-out infinite alternate',
+            '@keyframes current-user-trail': {
+              from: { opacity: 0.56, filter: 'brightness(.9)' },
+              to: { opacity: 0.9, filter: 'brightness(1.16)' },
+            },
+            '@keyframes current-user-trail-soft': {
+              from: { opacity: 0.58 },
+              to: { opacity: 0.76 },
+            },
+            '@media (prefers-reduced-motion: reduce)': {
+              animation: 'none',
+            },
+          }}
+        />
       )}
 
       {owner && (
@@ -292,11 +375,11 @@ export function BoardTile({
                 ? '#ffae33'
                 : actionEffect === 'unmortgaged'
                   ? '#67dc8a'
-                  : 'rgba(9,7,17,.92)',
+                  : 'var(--game-theme-surface)',
             color:
               actionEffect === 'mortgaged' || actionEffect === 'unmortgaged'
                 ? '#19120a'
-                : '#fff',
+                : 'text.primary',
             fontSize: { xs: 4.5, sm: compact ? 6 : 7.5, md: compact ? 7 : 9 },
             lineHeight: 1.1,
             fontWeight: 950,
@@ -495,7 +578,7 @@ export function BoardTile({
             sx={{
               flex: '0 0 auto',
               borderRadius: 1,
-              bgcolor: 'rgba(255,255,255,.14)',
+              bgcolor: 'var(--game-theme-primary-soft)',
               px: { xs: 0.25, sm: 0.55 },
               py: { xs: 0, sm: 0.1 },
               fontSize: {
@@ -543,9 +626,14 @@ export function BoardTile({
               title={token.displayName}
               data-board-token-player-id={token.playerId}
               data-highlighted={token.highlighted || undefined}
+              data-current-user={token.currentUser || undefined}
               sx={{
-                width: { xs: 9, sm: compact ? 11 : 14, md: compact ? 13 : 17 },
-                height: { xs: 9, sm: compact ? 11 : 14, md: compact ? 13 : 17 },
+                width: token.currentUser
+                  ? { xs: 11, sm: compact ? 14 : 18, md: compact ? 16 : 21 }
+                  : { xs: 9, sm: compact ? 11 : 14, md: compact ? 13 : 17 },
+                height: token.currentUser
+                  ? { xs: 11, sm: compact ? 14 : 18, md: compact ? 16 : 21 }
+                  : { xs: 9, sm: compact ? 11 : 14, md: compact ? 13 : 17 },
                 display: 'grid',
                 placeItems: 'center',
                 position: 'relative',
@@ -559,10 +647,12 @@ export function BoardTile({
                   ? '2px solid #fff'
                   : '1px solid rgba(255,255,255,.75)',
                 boxShadow: token.highlighted
-                  ? '0 0 0 2px #fff, 0 0 0 5px #b8ff3d, 0 0 22px 10px rgba(184,255,61,.72)'
-                  : token.active
-                    ? '0 0 0 2px #b8ff3d, 0 2px 8px rgba(0,0,0,.55)'
-                    : '0 2px 6px rgba(0,0,0,.5)',
+                  ? '0 0 0 2px #fff, 0 0 0 5px var(--game-theme-primary), 0 0 22px 10px var(--game-theme-primary-soft)'
+                  : token.currentUser
+                    ? `0 0 0 2px #fff, 0 0 0 4px ${token.color}, 0 0 20px 8px color-mix(in srgb, ${token.color} 68%, transparent), 0 3px 8px rgba(0,0,0,.72)`
+                    : token.active
+                      ? '0 0 0 2px var(--game-theme-primary), 0 2px 8px rgba(0,0,0,.55)'
+                      : '0 2px 6px rgba(0,0,0,.5)',
                 filter: token.highlighted
                   ? 'brightness(1.35) saturate(1.2)'
                   : undefined,

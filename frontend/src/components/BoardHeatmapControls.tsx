@@ -12,7 +12,7 @@ import {
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 import type { PlayerState } from '../types'
-import type { BoardHeatmapMode } from './boardHeatmap'
+import { boardHeatmapGradient, type BoardHeatmapMode } from './boardHeatmap'
 
 export type BoardHeatmapSource = 'current' | 'historical'
 
@@ -157,7 +157,7 @@ export function BoardHeatmapControls({
               {t('heatmap.historicalSample', { count: historicalGameCount })}
             </Typography>
           )}
-          <HeatmapLegend color="#ff7043" />
+          <HeatmapLegend />
         </Stack>
       )}
 
@@ -166,14 +166,14 @@ export function BoardHeatmapControls({
           <Typography variant="caption" color="text.secondary">
             {t('heatmap.probabilityHelp')}
           </Typography>
-          <HeatmapLegend color="#35d7ff" />
+          <HeatmapLegend />
         </Stack>
       )}
     </Stack>
   )
 }
 
-function HeatmapLegend({ color }: { color: string }) {
+function HeatmapLegend() {
   const { t } = useTranslation()
   return (
     <Stack direction="row" spacing={0.75} alignItems="center">
@@ -186,7 +186,7 @@ function HeatmapLegend({ color }: { color: string }) {
           height: 8,
           flex: 1,
           borderRadius: 999,
-          background: `linear-gradient(90deg, color-mix(in srgb, ${color} 18%, transparent), ${color})`,
+          background: boardHeatmapGradient,
         }}
       />
       <Typography variant="caption" color="text.secondary">

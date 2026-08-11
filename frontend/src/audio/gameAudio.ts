@@ -6,6 +6,11 @@ export const GAME_AUDIO_FILES = {
   'auction-countdown': ['/audio/auction-countdown.ogg'],
   'auction-lost': ['/audio/auction-lost.ogg'],
   'auction-start': ['/audio/auction-start.ogg'],
+  'bank-emergency-credit': ['/audio/debt-created.ogg'],
+  'bank-initialized': ['/audio/game-started.ogg'],
+  'bank-loan-defaulted': ['/audio/player-bankrupt.ogg'],
+  'bank-loan-issued': ['/audio/payment-received.ogg'],
+  'bank-loan-payment': ['/audio/payment-sent.ogg'],
   'building-hotel': ['/audio/building-hotel.ogg'],
   'building-house': ['/audio/building-house.ogg'],
   'building-sold': ['/audio/building-sold.ogg'],
@@ -21,12 +26,22 @@ export const GAME_AUDIO_FILES = {
   'dice-doubles': ['/audio/dice-doubles.ogg'],
   'dice-roll-a': ['/audio/dice-roll-a.ogg'],
   'dice-roll-b': ['/audio/dice-roll-b.ogg'],
+  'economy-week-advanced': ['/audio/ui-important-click.ogg'],
   'free-parking-collected': ['/audio/free-parking-collected.ogg'],
   'game-finished': ['/audio/game-finished.ogg'],
   'game-started': ['/audio/game-started.ogg'],
   'jail-entered': ['/audio/jail-entered.ogg'],
   'jail-released': ['/audio/jail-released.ogg'],
   'jail-roll-failed': ['/audio/jail-roll-failed.ogg'],
+  'market-dividend-paid': ['/audio/free-parking-collected.ogg'],
+  'market-margin-call': ['/audio/action-rejected.ogg'],
+  'market-opened': ['/audio/game-started.ogg'],
+  'market-order-cancelled': ['/audio/trade-cancelled.ogg'],
+  'market-order-filled': ['/audio/auction-completed.ogg'],
+  'market-order-placed': ['/audio/auction-bid.ogg'],
+  'market-position-liquidated': ['/audio/player-bankrupt.ogg'],
+  'market-shares-bought': ['/audio/property-purchase.ogg'],
+  'market-shares-sold': ['/audio/building-sold.ogg'],
   'payment-received': ['/audio/payment-received.ogg'],
   'payment-sent': ['/audio/payment-sent.ogg'],
   'player-bankrupt': ['/audio/player-bankrupt.ogg'],
@@ -113,6 +128,7 @@ class GameAudioManager {
   private settings = loadSettings(this.storageKey)
   private listeners = new Set<() => void>()
   private templates = new Map<string, HTMLAudioElement>()
+  private sources: Record<GameSound, readonly string[]> = { ...GAME_AUDIO_FILES }
   private active = new Map<
     HTMLAudioElement,
     { gain: number; sound: GameSound }
@@ -123,6 +139,26 @@ class GameAudioManager {
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  applyCatalog(catalog: Array<{ sound_id: string; source_url: string | null }>): void {
+    const customSources = new Map(
+      catalog.flatMap((item) =>
+        item.sound_id in GAME_AUDIO_FILES && item.source_url
+          ? [[item.sound_id as GameSound, item.source_url] as const]
+          : [],
+      ),
+    )
+    const sources = { ...GAME_AUDIO_FILES } as Record<
+      GameSound,
+      readonly string[]
+    >
+    for (const sound of GAME_SOUNDS) {
+      const customSource = customSources.get(sound)
+      if (customSource) sources[sound] = [customSource]
+    }
+    this.sources = sources
+    this.templates.clear()
   }
 
   useUser(userId: string): void {
@@ -161,7 +197,7 @@ class GameAudioManager {
   }
 
   preloadAll(): void {
-    for (const sources of Object.values(GAME_AUDIO_FILES)) {
+    for (const sources of Object.values(this.sources)) {
       for (const source of sources) this.templateFor(source)
     }
   }
@@ -186,7 +222,7 @@ class GameAudioManager {
     ) {
       return
     }
-    const sources = GAME_AUDIO_FILES[sound]
+    const sources = this.sources[sound]
     const variant = Math.abs(options.variant ?? 0) % sources.length
     const template = this.templateFor(sources[variant])
     const player = template.cloneNode(true) as HTMLAudioElement

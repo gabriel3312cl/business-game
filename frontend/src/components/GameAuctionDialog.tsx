@@ -36,6 +36,7 @@ import {
   historicalProperty,
 } from './propertyHistoricalAnalysis'
 import { defaultTileColor } from './tilePresentation'
+import { indexedAmount } from './economicValues'
 import { auctionInteractionState } from './auctionInteraction'
 
 interface Props {
@@ -201,6 +202,9 @@ export function GameAuctionDialog({
     (player) => player.user_id === auction.current_bidder_id,
   )
   const bidder = bidderIndex >= 0 ? game.players[bidderIndex] : undefined
+  const seller = game.players.find(
+    (player) => player.user_id === auction.seller_id,
+  )
   const bidderName = bidder?.display_name ?? t('auctionNoLeader')
   const bidderOwnedInGroup = bidder
     ? ownedGroupProperties(groupTiles, game, bidder.user_id)
@@ -264,7 +268,7 @@ export function GameAuctionDialog({
   const bids = currentAuctionBids(game.events, auction.property_id)
   const priceComparison =
     auction.current_bidder_id && tile?.price
-      ? compareAuctionPrice(auction.current_bid, tile.price)
+      ? compareAuctionPrice(auction.current_bid, indexedAmount(game, tile.price))
       : null
 
   return (
@@ -307,6 +311,13 @@ export function GameAuctionDialog({
         {error && (
           <Alert severity="warning" sx={{ mb: 2 }}>
             {error}
+          </Alert>
+        )}
+        {seller && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            {t('economy.advanced.voluntaryAuctionSeller', {
+              seller: seller.display_name,
+            })}
           </Alert>
         )}
         <Box

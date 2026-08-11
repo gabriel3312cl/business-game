@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from business_game.application.advanced_economy import building_replacement_cost, indexed_amount
 from business_game.domain.models import (
     BankCreditProfileState,
     ContentPack,
@@ -38,8 +39,7 @@ def scale_market_capacity(base_capacity: int, player_count: int) -> int:
     active_players = max(1, player_count)
     return max(
         base_capacity,
-        (base_capacity * active_players + MARKET_BASELINE_PLAYERS - 1)
-        // MARKET_BASELINE_PLAYERS,
+        (base_capacity * active_players + MARKET_BASELINE_PLAYERS - 1) // MARKET_BASELINE_PLAYERS,
     )
 
 
@@ -96,9 +96,7 @@ def initialize_bank(game: GameState, pack: ContentPack) -> None:
     player_count = sum(not player.bankrupt for player in game.players)
     if not game.bank.initialized:
         game.bank.initialized = True
-        game.bank.minimum_reserve_percent = (
-            pack.manifest.bank_minimum_reserve_percent
-        )
+        game.bank.minimum_reserve_percent = pack.manifest.bank_minimum_reserve_percent
     if game.status is GameStatus.LOBBY:
         game.bank.monetary_base = derived_money_supply(pack, player_count)
         game.bank.emergency_issuance = 0
@@ -151,10 +149,7 @@ def credit_offer(
         // 10_000
     )
     income_capacity = (
-        maximum_installment
-        * pack.manifest.loan_max_term_laps
-        * 100
-        // (100 + interest_percent)
+        maximum_installment * pack.manifest.loan_max_term_laps * 100 // (100 + interest_percent)
     )
     collateral = _collateral_value(game, pack, player.user_id)
     collateral_capacity = collateral * 30 * limit_percent // 10_000
@@ -163,9 +158,7 @@ def credit_offer(
         0,
         available_bank_cash(game) - minimum_reserve(game),
     )
-    has_active_loan = any(
-        loan.player_id == player.user_id for loan in game.bank.loans
-    )
+    has_active_loan = any(loan.player_id == player.user_id for loan in game.bank.loans)
     return CreditOffer(
         interest_percent=interest_percent,
         maximum_amount=0 if has_active_loan else min(calculated_limit, reserve_capacity),
@@ -186,13 +179,12 @@ def refresh_credit_profiles(game: GameState, pack: ContentPack) -> None:
 def _collateral_value(game: GameState, pack: ContentPack, player_id: UUID) -> int:
     tiles = {tile.id: tile for tile in pack.board.tiles}
     property_collateral = sum(
-        tiles[tile_id].mortgage_value or 0
+        indexed_amount(game, tiles[tile_id].mortgage_value or 0)
         for tile_id, owner_id in game.owners.items()
         if owner_id == player_id and tile_id in tiles
     )
     building_collateral = sum(
-        (tiles[tile_id].build_cost or 0)
-        * level
+        indexed_amount(game, building_replacement_cost(tiles[tile_id], level))
         * pack.manifest.building_sell_percent
         // 100
         for tile_id, level in game.building_levels.items()
@@ -239,13 +231,9 @@ def ensure_investments(
                 base_price=share_price,
                 current_price=share_price,
                 dividend_percent=pack.manifest.investment_dividend_percent,
-                transaction_fee_percent=(
-                    pack.manifest.investment_transaction_fee_percent
-                ),
+                transaction_fee_percent=(pack.manifest.investment_transaction_fee_percent),
                 revenue_fee_percent=pack.manifest.investment_revenue_fee_percent,
-                max_ownership_percent=(
-                    pack.manifest.investment_max_ownership_percent
-                ),
+                max_ownership_percent=(pack.manifest.investment_max_ownership_percent),
                 spread_percent=pack.manifest.investment_spread_percent,
             )
         )
@@ -275,8 +263,7 @@ def ensure_investments(
     tax_tiles = [tile for tile in pack.board.tiles if tile.kind is TileKind.TAX]
     if tax_tiles:
         reference_tax = max(
-            (tile.amount or pack.manifest.starting_balance // 10)
-            for tile in tax_tiles
+            (tile.amount or pack.manifest.starting_balance // 10) for tile in tax_tiles
         )
         institution_specs.append(
             (
@@ -301,13 +288,9 @@ def ensure_investments(
                 base_price=base_price,
                 current_price=base_price,
                 dividend_percent=pack.manifest.investment_dividend_percent,
-                transaction_fee_percent=(
-                    pack.manifest.investment_transaction_fee_percent
-                ),
+                transaction_fee_percent=(pack.manifest.investment_transaction_fee_percent),
                 revenue_fee_percent=0,
-                max_ownership_percent=(
-                    pack.manifest.investment_max_ownership_percent
-                ),
+                max_ownership_percent=(pack.manifest.investment_max_ownership_percent),
                 spread_percent=pack.manifest.investment_spread_percent,
             )
         )
@@ -324,13 +307,9 @@ def ensure_investments(
                 base_price=100,
                 current_price=100,
                 dividend_percent=pack.manifest.investment_dividend_percent,
-                transaction_fee_percent=(
-                    pack.manifest.investment_transaction_fee_percent
-                ),
+                transaction_fee_percent=(pack.manifest.investment_transaction_fee_percent),
                 revenue_fee_percent=0,
-                max_ownership_percent=(
-                    pack.manifest.investment_max_ownership_percent
-                ),
+                max_ownership_percent=(pack.manifest.investment_max_ownership_percent),
                 spread_percent=pack.manifest.investment_spread_percent,
             )
         )
@@ -339,12 +318,8 @@ def ensure_investments(
             instrument.total_shares = share_supply
             instrument.available_shares = share_supply
         instrument.dividend_percent = pack.manifest.investment_dividend_percent
-        instrument.transaction_fee_percent = (
-            pack.manifest.investment_transaction_fee_percent
-        )
-        instrument.max_ownership_percent = (
-            pack.manifest.investment_max_ownership_percent
-        )
+        instrument.transaction_fee_percent = pack.manifest.investment_transaction_fee_percent
+        instrument.max_ownership_percent = pack.manifest.investment_max_ownership_percent
         instrument.spread_percent = pack.manifest.investment_spread_percent
         if instrument.session_high == 0:
             instrument.session_high = instrument.current_price
@@ -355,19 +330,14 @@ def ensure_investments(
 
 def market_index_value(game: GameState) -> int:
     components = [
-        instrument
-        for instrument in game.bank.investments
-        if instrument.instrument_kind != "index"
+        instrument for instrument in game.bank.investments if instrument.instrument_kind != "index"
     ]
     if not components:
         return 100
     return max(
         1,
         round(
-            sum(
-                instrument.current_price * 100 / instrument.base_price
-                for instrument in components
-            )
+            sum(instrument.current_price * 100 / instrument.base_price for instrument in components)
             / len(components)
         ),
     )
@@ -376,11 +346,7 @@ def market_index_value(game: GameState) -> int:
 def refresh_market_index(game: GameState) -> int:
     value = market_index_value(game)
     instrument = next(
-        (
-            item
-            for item in game.bank.investments
-            if item.instrument_kind == "index"
-        ),
+        (item for item in game.bank.investments if item.instrument_kind == "index"),
         None,
     )
     if instrument is None:
@@ -416,10 +382,7 @@ def effective_spread_percent(
         8,
         max(
             0,
-            instrument.spread_percent
-            + imbalance_bonus
-            + volatility_bonus
-            + liquidity_bonus,
+            instrument.spread_percent + imbalance_bonus + volatility_bonus + liquidity_bonus,
         ),
     )
 
@@ -437,9 +400,7 @@ def market_order_quote(
         opposite_order_depth=opposite_order_depth,
     )
     spread = (mid_price * spread_percent + 50) // 100
-    execution_price = (
-        mid_price + spread if buying else max(1, mid_price - spread)
-    )
+    execution_price = mid_price + spread if buying else max(1, mid_price - spread)
     gross = execution_price * quantity
     market_depth = (
         instrument.available_shares + opposite_order_depth
@@ -459,9 +420,7 @@ def market_order_quote(
         if instrument.instrument_kind == "index"
         else (mid_price * impact_basis_points + 5_000) // 10_000
     )
-    new_price = (
-        mid_price + movement if buying else max(1, mid_price - movement)
-    )
+    new_price = mid_price + movement if buying else max(1, mid_price - movement)
     return MarketQuote(
         gross=gross,
         average_price=execution_price,
@@ -485,9 +444,7 @@ def reconcile_bank(game: GameState) -> int:
 
 
 def minimum_reserve(game: GameState) -> int:
-    return (
-        game.bank.monetary_base * game.bank.minimum_reserve_percent + 99
-    ) // 100
+    return (game.bank.monetary_base * game.bank.minimum_reserve_percent + 99) // 100
 
 
 def available_bank_cash(game: GameState) -> int:

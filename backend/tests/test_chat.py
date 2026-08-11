@@ -1134,9 +1134,32 @@ def test_prizes_and_bad_cards_are_told_apart_by_the_sign(pack: ContentPack) -> N
         ],
     )
 
-    assert prize is not None and prize.code == "rival_prize"
+    assert prize is not None and prize.code == "rival_card_prize"
     assert prize.params == {"amount": 200}
+    assert "Otro jugador recibió $200 del banco por una carta positiva" in prize.body
     assert penalty is not None and penalty.code == "rival_bad_card"
+
+
+def test_free_parking_prize_names_the_real_source(pack: ContentPack) -> None:
+    game, _, human = reaction_game(pack)
+
+    reaction = detect_reaction(
+        game,
+        pack,
+        [
+            GameEvent(
+                sequence=20,
+                type="free_parking.collected",
+                data={"player_id": str(human.user_id), "amount": 3_716},
+            )
+        ],
+    )
+
+    assert reaction is not None and reaction.code == "rival_free_parking_prize"
+    assert reaction.params == {"amount": 3_716}
+    assert "Otro jugador recibió $3716 del pozo de Estacionamiento Gratis" in (
+        reaction.body
+    )
 
 
 def test_rent_reaction_needs_an_amount_worth_mentioning(pack: ContentPack) -> None:
@@ -1231,6 +1254,7 @@ async def test_ai_bot_reaction_prompt_marks_the_trigger_as_server_decided(
     assert answer.text == "Esa era mía y lo sabes."
     assert "evento_reciente" in captured["system"]
     assert "no confiable" in captured["system"]
+    assert "el dinero lo recibió la persona con la que hablas" in captured["system"]
     assert "stolen_group_key" in captured["user"]
     assert "Gabriela Real" not in captured["user"]
     assert str(human.user_id) not in captured["user"]

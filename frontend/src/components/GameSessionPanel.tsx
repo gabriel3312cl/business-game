@@ -13,6 +13,8 @@ import GridViewRoundedIcon from '@mui/icons-material/GridViewRounded'
 import TextFieldsRoundedIcon from '@mui/icons-material/TextFieldsRounded'
 import DragIndicatorRoundedIcon from '@mui/icons-material/DragIndicatorRounded'
 import FastForwardRoundedIcon from '@mui/icons-material/FastForwardRounded'
+import ExpandLessRoundedIcon from '@mui/icons-material/ExpandLessRounded'
+import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded'
 import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded'
 import LayersRoundedIcon from '@mui/icons-material/LayersRounded'
@@ -88,6 +90,8 @@ import { GameChatPanel } from '../chat/GameChatPanel'
 import type { ChatMessage } from '../chat/types'
 import { useGameChat } from '../chat/useGameChat'
 import { createCommandId } from '../commandId'
+import { readColorTheme, writeColorTheme } from '../colorThemePreferences'
+import { useGameTheme } from '../gameThemeContext'
 import { mergeGameState } from '../gameState'
 import type {
   AutomationPreferenceSettings,
@@ -98,6 +102,7 @@ import type {
   GameCommand,
   GameState,
   GameViewPreferenceSettings,
+  GameColorThemeId,
   AudioPreferenceSettings,
   ManagementPanelId,
   PanelId,
@@ -116,6 +121,7 @@ import type {
 import { nextAutomationCommand } from '../gameAutomation'
 import { shouldBufferParticipantPresentation } from './botPresentation'
 import { BotManagementPanel } from './BotManagementPanel'
+import { ColorThemeControl } from './ColorThemeControl'
 import { BankPanel } from './BankPanel'
 import { GameActionCenter } from './GameActionCenter'
 import { GameAuctionDialog } from './GameAuctionDialog'
@@ -477,6 +483,7 @@ export function GameSessionPanel({
   onSessionExpired,
 }: Props) {
   const { t, i18n } = useTranslation()
+  const { setThemeId: applyGameTheme } = useGameTheme()
   const theme = useTheme()
   const isTablet = useMediaQuery(theme.breakpoints.up('md'))
   const isWideWorkspace = useMediaQuery(theme.breakpoints.up('lg'))
@@ -497,6 +504,7 @@ export function GameSessionPanel({
     x: number
     y: number
   } | null>(null)
+  const [debtAlertMinimized, setDebtAlertMinimized] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connectionState, setConnectionState] =
     useState<ConnectionState>('connecting')
@@ -507,6 +515,11 @@ export function GameSessionPanel({
   const [gameView, setGameView] = useState<GameViewPreferenceSettings>(() =>
     readGameView(user.id),
   )
+  const [colorTheme, setColorTheme] = useState<GameColorThemeId>(() =>
+    readColorTheme(user.id),
+  )
+  const colorThemeRef = useRef(colorTheme)
+  const colorThemeChangeRef = useRef(0)
   const gameViewRef = useRef(gameView)
   const gameViewChangeRef = useRef(0)
   const latestAuthoritativeGameRef = useRef(game)
@@ -564,6 +577,9 @@ export function GameSessionPanel({
     useState<WorkspacePanelId | null>(null)
   const [draggedManagementPanel, setDraggedManagementPanel] =
     useState<ManagementPanelId | null>(null)
+  useEffect(() => {
+    applyGameTheme(colorTheme)
+  }, [applyGameTheme, colorTheme])
   const [workspaceNotificationCounts, setWorkspaceNotificationCounts] =
     useState<WorkspaceNotificationCounts>(() => ({
       ...EMPTY_WORKSPACE_NOTIFICATION_COUNTS,
@@ -661,6 +677,7 @@ export function GameSessionPanel({
   }, [layoutEditing])
   useEffect(() => {
     setDebtAlertPosition(null)
+    setDebtAlertMinimized(false)
     debtAlertDragRef.current = null
   }, [game.active_debt?.debtor_id, game.active_debt?.tile_id, game.id])
   const chat = useGameChat(game.id)
@@ -994,7 +1011,11 @@ export function GameSessionPanel({
   const showAuctionModal = shouldShowPlayerModal(
     gameView.show_other_player_modals,
     user.id,
-    [presentedGame.pending_auction_selector_id, ...activeAuctionPlayerIds],
+    [
+      presentedGame.pending_auction_selector_id,
+      presentedGame.active_auction?.seller_id,
+      ...activeAuctionPlayerIds,
+    ],
   )
   const probabilityHeatmapAvailable =
     presentedGame.status === 'playing' &&
@@ -1194,6 +1215,18 @@ export function GameSessionPanel({
     [],
   )
 
+  const saveColorThemeRemotely = useCallback((themeId: GameColorThemeId) => {
+    preferenceSaveQueueRef.current = preferenceSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await api.updateColorTheme(themeId)
+        } catch {
+          // The per-user browser cache remains available until a later change retries.
+        }
+      })
+  }, [])
+
   useEffect(() => {
     gameAudio.useUser(user.id)
     const unsubscribe = gameAudio.subscribe(() => {
@@ -1225,6 +1258,7 @@ export function GameSessionPanel({
     const visualEffectsChangesAtStart = visualEffectsChangeRef.current
     const playerSortChangesAtStart = playerSortChangeRef.current
     const gameViewChangesAtStart = gameViewChangeRef.current
+    const colorThemeChangesAtStart = colorThemeChangeRef.current
     void api
       .getUserPreferences()
       .then((preferences) => {
@@ -1325,6 +1359,19 @@ export function GameSessionPanel({
         ) {
           saveGameViewRemotely(gameViewRef.current)
         }
+        if (
+          preferences.color_theme &&
+          colorThemeChangeRef.current === colorThemeChangesAtStart
+        ) {
+          colorThemeRef.current = preferences.color_theme
+          setColorTheme(preferences.color_theme)
+          writeColorTheme(user.id, preferences.color_theme)
+        } else if (
+          colorThemeChangeRef.current !== colorThemeChangesAtStart ||
+          !preferences.color_theme
+        ) {
+          saveColorThemeRemotely(colorThemeRef.current)
+        }
         setAutomationSettingsReady(true)
       })
       .catch(() => {
@@ -1342,6 +1389,7 @@ export function GameSessionPanel({
     saveGameViewRemotely,
     saveTokenAppearanceRemotely,
     saveVisualEffectsRemotely,
+    saveColorThemeRemotely,
     user.id,
   ])
 
@@ -1432,6 +1480,17 @@ export function GameSessionPanel({
       saveVisualEffectsRemotely(settings)
     },
     [saveVisualEffectsRemotely, user.id],
+  )
+
+  const updateColorTheme = useCallback(
+    (themeId: GameColorThemeId) => {
+      colorThemeRef.current = themeId
+      colorThemeChangeRef.current += 1
+      setColorTheme(themeId)
+      writeColorTheme(user.id, themeId)
+      saveColorThemeRemotely(themeId)
+    },
+    [saveColorThemeRemotely, user.id],
   )
 
   const updatePlayerSort = useCallback(
@@ -2090,7 +2149,7 @@ export function GameSessionPanel({
             spacing={1}
           >
             <Typography fontWeight={900} sx={{ letterSpacing: '-0.03em' }}>
-              BUSINESS<span style={{ color: '#b8ff3d' }}>GAME</span>
+              BUSINESS<span style={{ color: 'var(--game-theme-primary)' }}>GAME</span>
             </Typography>
             <Stack direction="row" alignItems="center" spacing={0.5}>
               <AudioControls />
@@ -2099,6 +2158,7 @@ export function GameSessionPanel({
                 systemReducedMotion={prefersReducedMotion}
                 onChange={updateVisualEffects}
               />
+              <ColorThemeControl value={colorTheme} onChange={updateColorTheme} />
               <FormControl size="small">
                 <Select
                   value={i18n.language}
@@ -2123,7 +2183,7 @@ export function GameSessionPanel({
             sx={{
               p: 1,
               borderRadius: 2,
-              bgcolor: 'rgba(255,255,255,.045)',
+              bgcolor: 'var(--game-theme-primary-soft)',
             }}
           >
             <Stack direction="row" alignItems="center" spacing={0.75} minWidth={0}>
@@ -2578,7 +2638,7 @@ export function GameSessionPanel({
             '& .MuiToggleButton-root': { flex: 1 },
             '& .MuiToggleButton-root.Mui-selected': {
               color: 'primary.main',
-              bgcolor: 'rgba(184,255,61,.12)',
+              bgcolor: 'var(--game-theme-primary-soft)',
             },
           }}
         >
@@ -2732,9 +2792,11 @@ export function GameSessionPanel({
         <Alert
           severity="error"
           sx={{
-            flexDirection: { xs: 'column', sm: 'row' },
-            maxHeight: 'min(72dvh, 620px)',
-            overflowY: 'auto',
+            flexDirection: debtAlertMinimized
+              ? 'row'
+              : { xs: 'column', sm: 'row' },
+            maxHeight: debtAlertMinimized ? 'none' : 'min(72dvh, 620px)',
+            overflowY: debtAlertMinimized ? 'hidden' : 'auto',
             overscrollBehaviorY: 'contain',
             touchAction: { xs: 'pan-y', md: 'auto' },
             WebkitOverflowScrolling: 'touch',
@@ -2749,42 +2811,86 @@ export function GameSessionPanel({
             <Stack
               direction="row"
               alignItems="center"
-              spacing={0.5}
-              tabIndex={isTablet ? 0 : -1}
-              aria-label={t('rentDebt.moveNotification')}
-              aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown"
-              onPointerDown={startDebtAlertDrag}
-              onPointerMove={moveDebtAlert}
-              onPointerUp={finishDebtAlertDrag}
-              onPointerCancel={finishDebtAlertDrag}
-              onKeyDown={moveDebtAlertWithKeyboard}
+              justifyContent="space-between"
+              spacing={1}
               sx={{
-                width: 'fit-content',
+                width: '100%',
                 maxWidth: '100%',
-                cursor: { xs: 'default', md: 'grab' },
-                touchAction: { xs: 'auto', md: 'none' },
-                userSelect: 'none',
-                '&:active': { cursor: { md: 'grabbing' } },
-                '&:focus-visible': {
-                  outline: '2px solid currentColor',
-                  outlineOffset: 3,
-                  borderRadius: 0.5,
-                },
               }}
             >
-              <DragIndicatorRoundedIcon fontSize="small" />
-              <Typography variant="caption" fontWeight={800}>
-                {t('rentDebt.moveNotification')}
-              </Typography>
+              <Stack
+                direction="row"
+                alignItems="center"
+                spacing={0.5}
+                tabIndex={isTablet ? 0 : -1}
+                aria-label={t('rentDebt.moveNotification')}
+                aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown"
+                onPointerDown={startDebtAlertDrag}
+                onPointerMove={moveDebtAlert}
+                onPointerUp={finishDebtAlertDrag}
+                onPointerCancel={finishDebtAlertDrag}
+                onKeyDown={moveDebtAlertWithKeyboard}
+                sx={{
+                  width: 'fit-content',
+                  maxWidth: 'calc(100% - 36px)',
+                  cursor: { xs: 'default', md: 'grab' },
+                  touchAction: { xs: 'auto', md: 'none' },
+                  userSelect: 'none',
+                  '&:active': { cursor: { md: 'grabbing' } },
+                  '&:focus-visible': {
+                    outline: '2px solid currentColor',
+                    outlineOffset: 3,
+                    borderRadius: 0.5,
+                  },
+                }}
+              >
+                <DragIndicatorRoundedIcon fontSize="small" />
+                <Typography variant="caption" fontWeight={800} noWrap>
+                  {t('rentDebt.moveNotification')}
+                </Typography>
+              </Stack>
+              <Tooltip
+                title={t(
+                  debtAlertMinimized
+                    ? 'rentDebt.expandNotification'
+                    : 'rentDebt.minimizeNotification',
+                )}
+              >
+                <IconButton
+                  size="small"
+                  color="inherit"
+                  aria-label={t(
+                    debtAlertMinimized
+                      ? 'rentDebt.expandNotification'
+                      : 'rentDebt.minimizeNotification',
+                  )}
+                  onClick={() => setDebtAlertMinimized((current) => !current)}
+                >
+                  {debtAlertMinimized ? (
+                    <ExpandMoreRoundedIcon fontSize="small" />
+                  ) : (
+                    <ExpandLessRoundedIcon fontSize="small" />
+                  )}
+                </IconButton>
+              </Tooltip>
             </Stack>
-            <RentDebtResolutionPanel
-              game={presentedGame}
-              pack={pack}
-              user={user}
-              busy={presentationBusy}
-              playerName={playerName}
-              onCommand={sendCommand}
-            />
+            {debtAlertMinimized ? (
+              <Typography variant="body2" fontWeight={750} noWrap>
+                {t('rentDebt.minimizedSummary', {
+                  debtor: playerName(presentedGame.active_debt.debtor_id),
+                  amount: presentedGame.active_debt.amount,
+                })}
+              </Typography>
+            ) : (
+              <RentDebtResolutionPanel
+                game={presentedGame}
+                pack={pack}
+                user={user}
+                busy={presentationBusy}
+                playerName={playerName}
+                onCommand={sendCommand}
+              />
+            )}
           </Stack>
         </Alert>
       )}
@@ -2941,6 +3047,8 @@ export function GameSessionPanel({
         resizeLabel={t('layout.resizeWindow', { panel: title })}
         dockLeftLabel={t('layout.dockLeft', { panel: title })}
         dockRightLabel={t('layout.dockRight', { panel: title })}
+        minimizeLabel={t('layout.minimizeWindow', { panel: title })}
+        restoreLabel={t('layout.restoreWindow', { panel: title })}
         closeLabel={t('layout.closePanel', { panel: title })}
         closeDisabled={panelLayout.rail.visible.length === 1}
         onActivate={() => bringWorkspaceWindowToFront(panelId)}
@@ -3201,9 +3309,9 @@ export function GameSessionPanel({
               maxWidth: '100%',
               flexShrink: 0,
               overflowX: 'auto',
-              bgcolor: 'rgba(17,13,29,.92)',
+              bgcolor: 'var(--game-theme-surface)',
               backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(255,255,255,.12)',
+              border: '1px solid var(--game-theme-border)',
             }}
           >
             <ToggleButtonGroup
@@ -3346,7 +3454,7 @@ export function GameSessionPanel({
                 md: debtAlertPosition ? 'none' : 'translateX(-50%)',
               },
               width: 'min(92%, 760px)',
-              zIndex: 8,
+              zIndex: (theme) => theme.zIndex.snackbar,
               pointerEvents: 'none',
               '& .MuiAlert-root': { pointerEvents: 'auto' },
             }}
@@ -3439,7 +3547,7 @@ export function GameSessionPanel({
               overflow: 'hidden',
               p: 1,
               borderLeft: '1px solid rgba(255,255,255,.08)',
-              bgcolor: 'rgba(12,10,21,.94)',
+              bgcolor: 'var(--game-theme-surface)',
             }}
           >
             <PersonalizablePanel
@@ -3472,7 +3580,7 @@ export function GameSessionPanel({
               py: 1,
               px: 0.75,
               borderLeft: '1px solid rgba(255,255,255,.1)',
-              bgcolor: 'rgba(10,8,18,.97)',
+              bgcolor: 'var(--game-theme-elevated)',
               position: 'relative',
               zIndex: 500,
               overflowY: 'auto',
@@ -3504,7 +3612,7 @@ export function GameSessionPanel({
                     mb: 0.5,
                     alignSelf: showWorkspaceRailLabels ? 'flex-end' : 'center',
                     color: 'text.secondary',
-                    border: '1px solid rgba(255,255,255,.08)',
+                    border: '1px solid var(--game-theme-border)',
                     borderRadius: 2,
                   }}
                 >
@@ -3584,7 +3692,7 @@ export function GameSessionPanel({
                               borderRadius: '10px !important',
                               '&.Mui-selected': {
                                 color: 'primary.main',
-                                bgcolor: 'rgba(184,255,61,.14)',
+                                bgcolor: 'var(--game-theme-primary-soft)',
                                 borderColor: 'rgba(184,255,61,.32)',
                               },
                             }}
@@ -3647,7 +3755,7 @@ export function GameSessionPanel({
                           ? 'flex-start'
                           : 'center',
                         border: '1px solid rgba(167,139,250,.34)',
-                        bgcolor: 'rgba(167,139,250,.1)',
+                        bgcolor: 'var(--game-theme-secondary-soft)',
                         '& .MuiButton-startIcon': {
                           m: showWorkspaceRailLabels ? '0 8px 0 0' : 0,
                         },
@@ -3792,7 +3900,7 @@ export function GameSessionPanel({
               bottom: 'max(8px, env(safe-area-inset-bottom))',
               zIndex: 1200,
               borderRadius: 3,
-              border: '1px solid rgba(255,255,255,.1)',
+              border: '1px solid var(--game-theme-border)',
               boxShadow: '0 12px 36px rgba(0,0,0,.5)',
               '& .MuiBottomNavigationAction-root': {
                 minWidth: 0,

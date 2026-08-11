@@ -19,6 +19,24 @@ export interface BoardHeatmap {
   total: number
 }
 
+const heatmapPalette = ['#482878', '#31688e', '#1f9e89', '#6ece58', '#fde725']
+
+export const boardHeatmapGradient = `linear-gradient(90deg, ${heatmapPalette.join(', ')})`
+
+export function boardHeatmapColor(intensity: number): string {
+  const clampedIntensity = Math.min(1, Math.max(0, intensity))
+  const palettePosition = clampedIntensity * (heatmapPalette.length - 1)
+  const lowerIndex = Math.floor(palettePosition)
+  const upperIndex = Math.min(lowerIndex + 1, heatmapPalette.length - 1)
+  const mix = palettePosition - lowerIndex
+
+  const lower = hexToRgb(heatmapPalette[lowerIndex])
+  const upper = hexToRgb(heatmapPalette[upperIndex])
+  const channel = (start: number, end: number) => Math.round(start + (end - start) * mix)
+
+  return `rgb(${channel(lower[0], upper[0])}, ${channel(lower[1], upper[1])}, ${channel(lower[2], upper[2])})`
+}
+
 const movementEventTypes = new Set<GameEvent['type']>([
   'dice.rolled',
   'card.player_moved',
@@ -113,12 +131,15 @@ function normalizedHeatmap(
   mode: BoardHeatmap['mode'],
   values: Map<number, number>,
 ): BoardHeatmap {
-  const maximum = Math.max(0, ...values.values())
+  const populatedValues = Array.from(values.values())
+  const minimum = populatedValues.length > 0 ? Math.min(...populatedValues) : 0
+  const maximum = populatedValues.length > 0 ? Math.max(...populatedValues) : 0
+  const range = maximum - minimum
   const cells = new Map<number, BoardHeatmapCell>()
 
   for (const [position, value] of values) {
     cells.set(position, {
-      intensity: maximum > 0 ? value / maximum : 0,
+      intensity: range > 0 ? Math.sqrt((value - minimum) / range) : 1,
       value,
     })
   }
@@ -126,6 +147,14 @@ function normalizedHeatmap(
   return {
     mode,
     cells,
-    total: Array.from(values.values()).reduce((sum, value) => sum + value, 0),
+    total: populatedValues.reduce((sum, value) => sum + value, 0),
   }
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  return [
+    Number.parseInt(hex.slice(1, 3), 16),
+    Number.parseInt(hex.slice(3, 5), 16),
+    Number.parseInt(hex.slice(5, 7), 16),
+  ]
 }

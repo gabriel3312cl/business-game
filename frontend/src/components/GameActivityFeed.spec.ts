@@ -69,6 +69,37 @@ describe('institutionRevenueSourceKey', () => {
 })
 
 describe('GameActivityFeed', () => {
+  it('renders advanced economy events with localized project names', () => {
+    const player = {
+      user_id: 'player-1',
+      display_name: 'Batman',
+      is_bot: false,
+      bankrupt: false,
+    } as unknown as PlayerState
+    const pack = {
+      manifest: { tile_count: 40 },
+      board: { tiles: [], decks: [] },
+      messages: {},
+    } as unknown as ContentPack
+
+    const html = renderToStaticMarkup(
+      createElement(GameActivityFeed, {
+        events: [
+          event('economy.public_project_announced', {
+            kind: 'rail_modernization',
+            minimum_bid: 400,
+          }),
+        ],
+        players: [player],
+        spectators: [],
+        pack,
+      }),
+    )
+
+    expect(html).toContain('Modernización ferroviaria')
+    expect(html).toContain('$400')
+  })
+
   it('uses the purchase price emitted by property.purchased', () => {
     const player: PlayerState = {
       user_id: 'player-1',

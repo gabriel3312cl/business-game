@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from business_game.application.advanced_economy import indexed_amount
 from business_game.application.economy import (
     credit_offer,
     market_order_quote,
@@ -17,6 +18,7 @@ from business_game.application.negotiation import (
 )
 from business_game.application.relationships import relationship_score
 from business_game.domain.models import (
+    AcceptFinancedTradeCommand,
     AcceptRentDebtPlanCommand,
     AcceptTradeCommand,
     BidCommand,
@@ -33,6 +35,7 @@ from business_game.domain.models import (
     DebtReason,
     DeclareBankruptcyCommand,
     DeclinePropertyCommand,
+    DeferOperatingCostsCommand,
     DemandRentDebtCommand,
     EndTurnCommand,
     ForgiveRentDebtCommand,
@@ -43,6 +46,7 @@ from business_game.domain.models import (
     PassAuctionCommand,
     PayDebtCommand,
     PayJailFineCommand,
+    PayOperatingCostsCommand,
     PlayerState,
     ProposeRentDebtPlanCommand,
     ReadyAuctionCommand,
@@ -299,6 +303,13 @@ class BotPolicy:
                 "select_property_worth_winning",
             )
         if game.active_debt is not None:
+            money_request = self._incoming_trade_action(
+                game,
+                engine,
+                money_requests_only=True,
+            )
+            if money_request is not None:
+                return money_request
             if self._rent_debt_waits_for_creditor(game):
                 creditor = self._bot(game, game.active_debt.creditor_id)
                 if creditor is None:
@@ -309,8 +320,8 @@ class BotPolicy:
                     engine,
                     creditor,
                 )
-                command = choices[0] if choices else DemandRentDebtCommand(
-                    action="demand_rent_debt"
+                command = (
+                    choices[0] if choices else DemandRentDebtCommand(action="demand_rent_debt")
                 )
                 return BotAction(
                     creditor.user_id,
@@ -342,6 +353,27 @@ class BotPolicy:
         if player is None or not player.is_bot or player.bankrupt:
             return None
         profile = self._profile(player)
+        assessment = game.economy.operating_cost_assessment
+        operating_cost = (
+            assessment.amounts.get(player.user_id, 0)
+            if assessment is not None
+            and assessment.due_week <= game.economy.elapsed_weeks
+            and player.user_id not in assessment.resolved_player_ids
+            else 0
+        )
+        if operating_cost > 0:
+            reserve = indexed_amount(game, pack.manifest.pass_start_salary, 80)
+            return BotAction(
+                player.user_id,
+                (
+                    PayOperatingCostsCommand(action="pay_operating_costs")
+                    if player.balance >= operating_cost + reserve
+                    else DeferOperatingCostsCommand(action="defer_operating_costs")
+                ),
+                "pay_operating_costs"
+                if player.balance >= operating_cost + reserve
+                else "defer_operating_costs",
+            )
 
         if game.phase is TurnPhase.BUY_DECISION:
             return self._purchase_action(game, pack, engine, player, profile)
@@ -475,9 +507,7 @@ class BotPolicy:
                     command = (
                         RejectRentDebtPlanCommand(action="reject_rent_debt_plan")
                         if proposal.requested_property_ids
-                        else AcceptRentDebtPlanCommand(
-                            action="accept_rent_debt_plan"
-                        )
+                        else AcceptRentDebtPlanCommand(action="accept_rent_debt_plan")
                     )
                 elif bot.balance >= game.active_debt.amount:
                     command = PayDebtCommand(action="pay_debt")
@@ -526,14 +556,8 @@ class BotPolicy:
                 or bot.bankrupt
                 or player_id == auction.current_bidder_id
                 or player_id in auction.passed_player_ids
-                or (
-                    auction.phase == "idle"
-                    and player_id in auction.ready_player_ids
-                )
-                or (
-                    auction.phase == "bidding"
-                    and player_id not in auction.ready_player_ids
-                )
+                or (auction.phase == "idle" and player_id in auction.ready_player_ids)
+                or (auction.phase == "bidding" and player_id not in auction.ready_player_ids)
             ):
                 continue
             profile = self._profile(bot)
@@ -547,15 +571,16 @@ class BotPolicy:
                 max(available_cash - reserve, 0),
                 strategic_value * profile.auction_value_percent // 100,
             )
-            increment = max(1, (tile.price or strategic_value or 20) // 20)
+            increment = max(
+                1,
+                (indexed_amount(game, tile.price or 0) or strategic_value or 20) // 20,
+            )
             amount = max(
                 auction.minimum_bid,
                 auction.current_bid + 1,
                 auction.current_bid + increment,
             )
-            can_place_deposit = (
-                held_deposit > 0 or bot.balance >= auction.deposit_amount
-            )
+            can_place_deposit = held_deposit > 0 or bot.balance >= auction.deposit_amount
             if auction.phase == "idle":
                 if can_place_deposit and auction.minimum_bid <= max_bid:
                     return BotAction(
@@ -605,20 +630,21 @@ class BotPolicy:
     ) -> str | None:
         """Send to auction what the bot itself can win cheaply and wants."""
         candidates = [
-            tile
-            for tile in pack.board.tiles
-            if tile.is_purchasable and tile.id not in game.owners
+            tile for tile in pack.board.tiles if tile.is_purchasable and tile.id not in game.owners
         ]
         if not candidates:
             return None
         spendable = max(bot.balance - engine.liquidity_floor(bot) // 2, 0)
-        affordable = [tile for tile in candidates if (tile.price or 0) <= spendable]
+        affordable = [
+            tile for tile in candidates if indexed_amount(game, tile.price or 0) <= spendable
+        ]
         pool = affordable or candidates
         return max(
             pool,
             key=lambda tile: (
-                engine.marginal_value(bot.user_id, [tile.id]) - (tile.price or 0),
-                -(tile.price or 0),
+                engine.marginal_value(bot.user_id, [tile.id])
+                - indexed_amount(game, tile.price or 0),
+                -indexed_amount(game, tile.price or 0),
                 tile.id,
             ),
         ).id
@@ -626,9 +652,7 @@ class BotPolicy:
     @staticmethod
     def _cheapest_unowned(game: GameState, pack: ContentPack) -> str | None:
         candidates = [
-            tile
-            for tile in pack.board.tiles
-            if tile.is_purchasable and tile.id not in game.owners
+            tile for tile in pack.board.tiles if tile.is_purchasable and tile.id not in game.owners
         ]
         if not candidates:
             return None
@@ -669,14 +693,8 @@ class BotPolicy:
                 bot.user_id,
                 proposal.requested_property_ids,
             )
-            reasonable_cost = (
-                cash_cost + property_cost <= settlement_amount * 125 // 100
-            )
-            if (
-                proposal.interest_percent <= 25
-                and proposal.installments <= 6
-                and reasonable_cost
-            ):
+            reasonable_cost = cash_cost + property_cost <= settlement_amount * 125 // 100
+            if proposal.interest_percent <= 25 and proposal.installments <= 6 and reasonable_cost:
                 return BotAction(
                     bot.user_id,
                     AcceptRentDebtPlanCommand(action="accept_rent_debt_plan"),
@@ -699,10 +717,7 @@ class BotPolicy:
                 maximum_quantity = 0
                 for quantity in range(1, held + 1):
                     gross = instrument.current_price * quantity
-                    proceeds = (
-                        gross
-                        - gross * instrument.transaction_fee_percent // 100
-                    )
+                    proceeds = gross - gross * instrument.transaction_fee_percent // 100
                     if proceeds <= bank_capacity:
                         maximum_quantity = quantity
                 if maximum_quantity:
@@ -718,9 +733,7 @@ class BotPolicy:
                 )
                 per_share = max(
                     1,
-                    instrument.current_price
-                    * (100 - instrument.transaction_fee_percent)
-                    // 100,
+                    instrument.current_price * (100 - instrument.transaction_fee_percent) // 100,
                 )
                 quantity = min(
                     maximum_quantity,
@@ -788,10 +801,11 @@ class BotPolicy:
                 if game.houses_remaining < houses_required:
                     continue
             refund = sum(
-                (
+                indexed_amount(
+                    game,
                     item.hotel_cost
                     if levels[item.id] == 5 and item.hotel_cost is not None
-                    else item.build_cost or 0
+                    else item.build_cost or 0,
                 )
                 * pack.manifest.building_sell_percent
                 // 100
@@ -821,13 +835,58 @@ class BotPolicy:
         self,
         game: GameState,
         engine: NegotiationEngine,
+        *,
+        money_requests_only: bool = False,
     ) -> BotAction | None:
         for trade in game.trades:
             if trade.status is not TradeStatus.PENDING:
                 continue
+            pure_money_request = (
+                trade.requested_cash > 0
+                and trade.offered_cash == 0
+                and not trade.offered_property_ids
+                and not trade.requested_property_ids
+            )
+            if money_requests_only and (
+                not pure_money_request
+                or game.active_debt is None
+                or trade.proposer_id != game.active_debt.debtor_id
+            ):
+                continue
             bot = self._bot(game, trade.recipient_id)
             if bot is None or bot.bankrupt:
                 continue
+            if pure_money_request:
+                floor = engine.liquidity_floor(bot)
+                if bot.balance - trade.requested_cash < floor // 2:
+                    return BotAction(
+                        bot.user_id,
+                        RejectTradeCommand(action="reject_trade", trade_id=trade.id),
+                        "reject_liquidity_risk",
+                    )
+                affinity = relationship_score(game, bot.user_id, trade.proposer_id)
+                if affinity >= 60 and trade.requested_cash <= max(50, floor // 5):
+                    return BotAction(
+                        bot.user_id,
+                        AcceptTradeCommand(action="accept_trade", trade_id=trade.id),
+                        "gift_money_to_ally",
+                    )
+                installments, interest = {
+                    BotPersonality.CONSERVATIVE: (3, 15),
+                    BotPersonality.BALANCED: (4, 10),
+                    BotPersonality.AGGRESSIVE: (3, 20),
+                    BotPersonality.NEGOTIATOR: (5, 8),
+                }[bot.bot_personality or BotPersonality.BALANCED]
+                return BotAction(
+                    bot.user_id,
+                    AcceptFinancedTradeCommand(
+                        action="accept_financed_trade",
+                        trade_id=trade.id,
+                        installments=installments,
+                        interest_percent=interest,
+                    ),
+                    "finance_money_request",
+                )
             assessment = engine.assess_incoming(bot, trade)
             if assessment.verdict is TradeVerdict.ACCEPT:
                 return BotAction(
@@ -945,11 +1004,7 @@ class BotPolicy:
                     property_id=tile.id,
                     available=available,
                 ),
-                (
-                    "enable_spare_for_trade"
-                    if available
-                    else "protect_strategic_property"
-                ),
+                ("enable_spare_for_trade" if available else "protect_strategic_property"),
             )
         return None
 
@@ -982,16 +1037,9 @@ class BotPolicy:
             target_reserve = floor // 2 if completes else floor
             required_credit = max(1, price + target_reserve - bot.balance)
             offer = credit_offer(game, pack, bot)
-            financed_cost = price + (
-                required_credit * offer.interest_percent + 99
-            ) // 100
-            if (
-                required_credit <= offer.maximum_amount
-                and (
-                    completes
-                    or value * 100
-                    >= financed_cost * profile.buy_required_percent
-                )
+            financed_cost = price + (required_credit * offer.interest_percent + 99) // 100
+            if required_credit <= offer.maximum_amount and (
+                completes or value * 100 >= financed_cost * profile.buy_required_percent
             ):
                 return BotAction(
                     bot.user_id,
@@ -1027,10 +1075,7 @@ class BotPolicy:
             should_pay = bot.bot_personality in {
                 BotPersonality.CONSERVATIVE,
                 BotPersonality.NEGOTIATOR,
-            } or (
-                bot.bot_personality is BotPersonality.BALANCED
-                and bot.jail_failed_rolls > 0
-            )
+            } or (bot.bot_personality is BotPersonality.BALANCED and bot.jail_failed_rolls > 0)
             # While broke, jail is shelter: no rent can be charged from inside.
             if should_pay and not engine.is_distressed(bot) and bot.balance - fine >= floor:
                 return BotAction(
@@ -1059,13 +1104,11 @@ class BotPolicy:
             if game.owners.get(property_id) != bot.user_id:
                 continue
             tile = self._tile(pack, property_id)
-            mortgage = tile.mortgage_value or 0
+            mortgage = indexed_amount(game, tile.mortgage_value or 0)
             interest = (mortgage * pack.manifest.mortgage_interest_percent + 99) // 100
             cost = mortgage + interest
             if bot.balance - cost >= floor:
-                candidates.append(
-                    (engine.strategic_value(bot.user_id, tile, game.owners), tile)
-                )
+                candidates.append((engine.strategic_value(bot.user_id, tile, game.owners), tile))
         if not candidates:
             return None
         tile = max(candidates, key=lambda item: (item[0], item[1].id))[1]
@@ -1111,10 +1154,11 @@ class BotPolicy:
                 continue
             targets = [item for item in group if levels[item.id] == minimum_level]
             total_cost = sum(
-                (
+                indexed_amount(
+                    game,
                     item.hotel_cost
                     if minimum_level == 4 and item.hotel_cost is not None
-                    else item.build_cost or 0
+                    else item.build_cost or 0,
                 )
                 for item in targets
             )
@@ -1191,15 +1235,11 @@ class BotPolicy:
             held = instrument.holdings.get(bot.user_id, 0)
             maximum = max(
                 1,
-                instrument.total_shares
-                * instrument.max_ownership_percent
-                // 100,
+                instrument.total_shares * instrument.max_ownership_percent // 100,
             )
             holding_capacity = max(0, maximum - held)
             quote_one = market_order_quote(instrument, 1, buying=True)
-            fee_one = (
-                quote_one.gross * instrument.transaction_fee_percent + 99
-            ) // 100
+            fee_one = (quote_one.gross * instrument.transaction_fee_percent + 99) // 100
             cost_one = quote_one.gross + fee_one
             historic_dividend = instrument.dividends_paid // instrument.total_shares
             attractively_priced = (
@@ -1211,8 +1251,7 @@ class BotPolicy:
             if loan is not None:
                 credit = game.bank.credit_profiles.get(bot.user_id)
                 instrument_reserve = (
-                    loan.installment_amount
-                    * pack.manifest.loan_investment_installment_reserve
+                    loan.installment_amount * pack.manifest.loan_investment_installment_reserve
                     + pack.manifest.pass_start_salary
                     * pack.manifest.loan_investment_reserve_salary_percent
                     // 100
@@ -1223,11 +1262,7 @@ class BotPolicy:
                 )
                 exposure_limit = max(
                     0,
-                    (
-                        engine.net_worth(bot)
-                        + exposure
-                        - loan.remaining_balance
-                    )
+                    (engine.net_worth(bot) + exposure - loan.remaining_balance)
                     * pack.manifest.loan_investment_max_net_worth_percent
                     // 100,
                 )
@@ -1248,8 +1283,7 @@ class BotPolicy:
                 budget = max(cost_one, surplus * allocation_percent // 100)
                 fair_turn_capacity = max(
                     1,
-                    (instrument.total_shares + active_player_count - 1)
-                    // active_player_count,
+                    (instrument.total_shares + active_player_count - 1) // active_player_count,
                 )
                 quantity = min(
                     instrument.available_shares,
@@ -1258,14 +1292,9 @@ class BotPolicy:
                     max(1, budget // cost_one),
                 )
                 quote = market_order_quote(instrument, quantity, buying=True)
-                fee = (
-                    quote.gross * instrument.transaction_fee_percent + 99
-                ) // 100
+                fee = (quote.gross * instrument.transaction_fee_percent + 99) // 100
                 cost = quote.gross + fee
-                if cost > surplus or (
-                    loan is not None
-                    and exposure + quote.gross > exposure_limit
-                ):
+                if cost > surplus or (loan is not None and exposure + quote.gross > exposure_limit):
                     continue
                 candidates.append(
                     (
@@ -1297,7 +1326,7 @@ class BotPolicy:
 
     @staticmethod
     def _purchase_price(game: GameState, tile: TileDefinition) -> int:
-        price = tile.price or 0
+        price = indexed_amount(game, tile.price or 0)
         discount = game.pending_purchase_discount_percent
         if discount:
             price -= price * discount // 100
@@ -1312,8 +1341,7 @@ class BotPolicy:
         if tile.group is None:
             return True
         return not any(
-            game.building_levels.get(item.id, 0) > 0
-            for item in self._group_tiles(pack, tile)
+            game.building_levels.get(item.id, 0) > 0 for item in self._group_tiles(pack, tile)
         )
 
     @staticmethod
@@ -1366,11 +1394,7 @@ class BotPolicy:
     @staticmethod
     def _bot(game: GameState, player_id: UUID) -> PlayerState | None:
         return next(
-            (
-                player
-                for player in game.players
-                if player.user_id == player_id and player.is_bot
-            ),
+            (player for player in game.players if player.user_id == player_id and player.is_bot),
             None,
         )
 

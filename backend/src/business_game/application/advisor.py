@@ -6,6 +6,11 @@ from uuid import UUID
 
 import httpx
 
+from business_game.application.advanced_economy import (
+    building_replacement_cost,
+    indexed_amount,
+    indexed_rent,
+)
 from business_game.application.economy import market_order_quote
 from business_game.domain.advisor_models import (
     AdvisorChatMessage,
@@ -160,12 +165,14 @@ def build_advisor_context(
             "name": tile_name(tile.id),
             "kind": tile.kind.value,
             "group": tile.group,
-            "price": tile.price,
-            "base_rent": tile.base_rent,
-            "mortgage_value": tile.mortgage_value,
-            "build_cost": tile.build_cost,
-            "hotel_cost": tile.hotel_cost,
-            "rent_levels": tile.rent_levels,
+            "price": indexed_amount(game, tile.price or 0),
+            "base_rent": indexed_rent(game, tile, tile.base_rent or 0),
+            "mortgage_value": indexed_amount(game, tile.mortgage_value or 0),
+            "build_cost": indexed_amount(game, tile.build_cost or 0),
+            "hotel_cost": indexed_amount(game, tile.hotel_cost or tile.build_cost or 0),
+            "rent_levels": [
+                indexed_rent(game, tile, amount) for amount in (tile.rent_levels or [])
+            ],
             "rent_multipliers": tile.rent_multipliers,
             "owner": alias(game.owners.get(tile.id)) if tile.id in game.owners else None,
             "mortgaged": tile.id in game.mortgaged_property_ids,
@@ -286,41 +293,27 @@ def build_advisor_context(
             continue
         payout = payouts.get(actor_id_text)
         if isinstance(payout, int):
-            dividends_received[instrument_id] = (
-                dividends_received.get(instrument_id, 0) + payout
-            )
+            dividends_received[instrument_id] = dividends_received.get(instrument_id, 0) + payout
 
     market: list[dict[str, object]] = []
     your_portfolio: list[dict[str, object]] = []
     investment_exposure = 0
     for instrument in game.bank.investments:
         instrument_orders = [
-            order
-            for order in game.bank.market_orders
-            if order.instrument_id == instrument.id
+            order for order in game.bank.market_orders if order.instrument_id == instrument.id
         ]
         best_player_bid = max(
-            (
-                order.limit_price
-                for order in instrument_orders
-                if order.side.value == "buy"
-            ),
+            (order.limit_price for order in instrument_orders if order.side.value == "buy"),
             default=0,
         )
         best_player_ask = min(
-            (
-                order.limit_price
-                for order in instrument_orders
-                if order.side.value == "sell"
-            ),
+            (order.limit_price for order in instrument_orders if order.side.value == "sell"),
             default=0,
         )
         bank_bid = market_order_quote(instrument, 1, buying=False).average_price
         bank_ask = market_order_quote(instrument, 1, buying=True).average_price
         change_percent = round(
-            (instrument.current_price - instrument.base_price)
-            * 100
-            / instrument.base_price,
+            (instrument.current_price - instrument.base_price) * 100 / instrument.base_price,
             2,
         )
         name = investment_name(instrument)
@@ -330,9 +323,7 @@ def build_advisor_context(
                 "category": instrument.instrument_kind,
                 "current_price": instrument.current_price,
                 "best_bid": max(bank_bid, best_player_bid),
-                "best_ask": min(
-                    value for value in (bank_ask, best_player_ask) if value > 0
-                ),
+                "best_ask": min(value for value in (bank_ask, best_player_ask) if value > 0),
                 "change_from_base_percent": change_percent,
                 "session_low": instrument.session_low,
                 "session_high": instrument.session_high,
@@ -371,14 +362,10 @@ def build_advisor_context(
                 "market_value": market_value,
                 "estimated_cost_basis": cost_basis,
                 "estimated_average_cost": (
-                    round(float(tracked_cost / shares), 2)
-                    if has_cost_basis
-                    else None
+                    round(float(tracked_cost / shares), 2) if has_cost_basis else None
                 ),
                 "estimated_unrealized_gain": (
-                    round(market_value - float(tracked_cost), 2)
-                    if has_cost_basis
-                    else None
+                    round(market_value - float(tracked_cost), 2) if has_cost_basis else None
                 ),
                 "current_price": instrument.current_price,
                 "change_from_base_percent": change_percent,
@@ -386,10 +373,7 @@ def build_advisor_context(
                     instrument.available_shares,
                     max(
                         0,
-                        instrument.total_shares
-                        * instrument.max_ownership_percent
-                        // 100
-                        - shares,
+                        instrument.total_shares * instrument.max_ownership_percent // 100 - shares,
                     ),
                 ),
                 "dividends_received": dividends_received.get(instrument.id, 0),
@@ -417,16 +401,35 @@ def build_advisor_context(
     )
     investment_exposure += pending_buy_exposure
     property_value = sum(
-        tile.price or 0
+        indexed_amount(
+            game,
+            (tile.mortgage_value or 0)
+            if tile.id in game.mortgaged_property_ids
+            else tile.price or 0,
+        )
         for tile in pack.board.tiles
         if game.owners.get(tile.id) == actor_id
     )
     building_value = sum(
-        (tile.build_cost or 0) * game.building_levels.get(tile.id, 0)
+        indexed_amount(
+            game,
+            building_replacement_cost(tile, game.building_levels.get(tile.id, 0)),
+        )
         for tile in pack.board.tiles
         if game.owners.get(tile.id) == actor_id
     )
     loan_balance = actor_loan.remaining_balance if actor_loan is not None else 0
+    installment_debt = sum(
+        plan.remaining_amount for plan in game.rent_debt_plans if plan.debtor_id == actor_id
+    )
+    operating_debt = sum(
+        debt.remaining_amount for debt in game.economy.operating_debts if debt.player_id == actor_id
+    )
+    immediate_debt = (
+        game.active_debt.amount
+        if game.active_debt is not None and game.active_debt.debtor_id == actor_id
+        else 0
+    )
     net_worth = max(
         0,
         actor.balance
@@ -435,16 +438,14 @@ def build_advisor_context(
         + investment_exposure
         + reserved_order_cash
         - pending_buy_exposure
-        - loan_balance,
+        - loan_balance
+        - installment_debt
+        - operating_debt
+        - immediate_debt,
     )
-    leveraged_limit = (
-        net_worth
-        * pack.manifest.loan_investment_max_net_worth_percent
-        // 100
-    )
+    leveraged_limit = net_worth * pack.manifest.loan_investment_max_net_worth_percent // 100
     leveraged_cash_reserve = (
-        actor_loan.installment_amount
-        * pack.manifest.loan_investment_installment_reserve
+        actor_loan.installment_amount * pack.manifest.loan_investment_installment_reserve
         + pack.manifest.pass_start_salary
         * pack.manifest.loan_investment_reserve_salary_percent
         // 100
@@ -452,9 +453,7 @@ def build_advisor_context(
         else 0
     )
     market_components = [
-        instrument
-        for instrument in game.bank.investments
-        if instrument.instrument_kind != "index"
+        instrument for instrument in game.bank.investments if instrument.instrument_kind != "index"
     ]
     market_index = (
         round(
@@ -489,11 +488,7 @@ def build_advisor_context(
         "open_market_orders": [
             {
                 "instrument": investment_name(
-                    next(
-                        item
-                        for item in game.bank.investments
-                        if item.id == order.instrument_id
-                    )
+                    next(item for item in game.bank.investments if item.id == order.instrument_id)
                 ),
                 "side": order.side.value,
                 "limit_price": order.limit_price,
@@ -503,9 +498,7 @@ def build_advisor_context(
             for order in game.bank.market_orders
             if order.player_id == actor_id
         ],
-        "leveraged_investment_limit": (
-            leveraged_limit if actor_loan is not None else None
-        ),
+        "leveraged_investment_limit": (leveraged_limit if actor_loan is not None else None),
         "cash_reserve_required_for_investing": (
             leveraged_cash_reserve if actor_loan is not None else None
         ),
@@ -587,10 +580,14 @@ def _investment_cost_basis(
                     cost * remaining / held if held > 0 else Fraction(),
                 )
             continue
-        if event.type not in {
-            "investment.shares_bought",
-            "investment.shares_sold",
-        } or event.data.get("player_id") != actor_id_text:
+        if (
+            event.type
+            not in {
+                "investment.shares_bought",
+                "investment.shares_sold",
+            }
+            or event.data.get("player_id") != actor_id_text
+        ):
             continue
         instrument_id = event.data.get("instrument_id")
         quantity = event.data.get("quantity")

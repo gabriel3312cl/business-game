@@ -4,12 +4,14 @@ from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from business_game.application.admin_service import AdminService
+from business_game.application.audio_service import GameAudioService
 from business_game.application.board_service import BoardProjectService, PackResolver
 from business_game.application.pack_loader import PackLoader
 from business_game.application.services import GameService, SessionService, UserService
 from business_game.config import settings
-from business_game.domain.errors import NotFoundError, UnauthorizedError
-from business_game.domain.models import User
+from business_game.domain.errors import ForbiddenError, NotFoundError, UnauthorizedError
+from business_game.domain.models import User, UserRole
 from business_game.infrastructure.database import get_session
 from business_game.infrastructure.repositories import UserRepository
 from business_game.security import decode_access_token
@@ -52,6 +54,18 @@ def get_session_service(
     return SessionService(session)
 
 
+def get_game_audio_service(
+    session: Annotated[AsyncSession, Depends(get_session, use_cache=False)],
+) -> GameAudioService:
+    return GameAudioService(session)
+
+
+def get_admin_service(
+    session: Annotated[AsyncSession, Depends(get_session, use_cache=False)],
+) -> AdminService:
+    return AdminService(session)
+
+
 async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -61,3 +75,11 @@ async def get_current_user(
         return await UserRepository(session).get(user_id)
     except NotFoundError as exc:
         raise UnauthorizedError("invalid or inactive user") from exc
+
+
+async def require_admin(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    if current_user.role is not UserRole.ADMIN:
+        raise ForbiddenError("administrator role is required")
+    return current_user

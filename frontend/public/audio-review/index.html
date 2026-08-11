@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Revisión de sonidos · Business Game</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: #0d0b17;
+        color: #f7f3ff;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 15% 0%, rgba(110, 83, 210, 0.25), transparent 34rem),
+          radial-gradient(circle at 100% 25%, rgba(36, 188, 164, 0.12), transparent 30rem),
+          #0d0b17;
+      }
+
+      button, input, textarea { font: inherit; }
+      button { touch-action: manipulation; }
+
+      main {
+        width: min(1120px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 42px 0 72px;
+      }
+
+      .eyebrow {
+        margin: 0 0 8px;
+        color: #b9a9ff;
+        font-size: 0.76rem;
+        font-weight: 850;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        max-width: 760px;
+        font-size: clamp(2rem, 5vw, 4rem);
+        line-height: 1.02;
+        letter-spacing: -0.04em;
+      }
+
+      .intro {
+        max-width: 780px;
+        margin: 18px 0 0;
+        color: #c8c1d7;
+        font-size: 1.04rem;
+        line-height: 1.65;
+      }
+
+      .toolbar {
+        position: sticky;
+        top: 12px;
+        z-index: 5;
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) auto auto;
+        gap: 14px;
+        align-items: center;
+        margin: 28px 0;
+        padding: 14px 16px;
+        border: 1px solid rgba(194, 180, 255, 0.22);
+        border-radius: 18px;
+        background: rgba(20, 16, 35, 0.9);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+        backdrop-filter: blur(18px);
+      }
+
+      .volume-control {
+        display: grid;
+        grid-template-columns: auto minmax(100px, 1fr) 44px;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .volume-control label { font-weight: 750; }
+      input[type="range"] { width: 100%; accent-color: #9d8cff; }
+
+      .button {
+        min-height: 42px;
+        border: 1px solid rgba(194, 180, 255, 0.35);
+        border-radius: 12px;
+        padding: 9px 14px;
+        background: rgba(157, 140, 255, 0.1);
+        color: #f7f3ff;
+        font-weight: 800;
+        cursor: pointer;
+        transition: 140ms ease;
+      }
+
+      .button:hover { background: rgba(157, 140, 255, 0.2); transform: translateY(-1px); }
+      .button:focus-visible, textarea:focus-visible, input:focus-visible {
+        outline: 3px solid rgba(112, 220, 202, 0.52);
+        outline-offset: 2px;
+      }
+
+      .button.primary {
+        border-color: transparent;
+        background: linear-gradient(135deg, #9d8cff, #6ddbc7);
+        color: #100d1c;
+      }
+
+      .status {
+        min-height: 24px;
+        margin: 0 0 16px;
+        color: #8fe1d2;
+        font-weight: 750;
+      }
+
+      .review-list { display: grid; gap: 18px; }
+
+      .sound-card {
+        overflow: hidden;
+        border: 1px solid rgba(194, 180, 255, 0.18);
+        border-radius: 20px;
+        background: linear-gradient(145deg, rgba(29, 24, 49, 0.94), rgba(17, 14, 29, 0.94));
+        box-shadow: 0 16px 44px rgba(0, 0, 0, 0.2);
+      }
+
+      .sound-heading {
+        display: flex;
+        gap: 14px;
+        justify-content: space-between;
+        align-items: start;
+        padding: 18px 20px 14px;
+        border-bottom: 1px solid rgba(194, 180, 255, 0.12);
+      }
+
+      .sound-heading h2 { margin: 0; font-size: 1.15rem; }
+      .sound-heading code { color: #aaa1ba; font-size: 0.76rem; }
+
+      .candidate-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1px;
+        background: rgba(194, 180, 255, 0.12);
+      }
+
+      .candidate {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-height: 190px;
+        padding: 18px 20px;
+        background: #171324;
+      }
+
+      .candidate h3 { margin: 0; font-size: 1rem; }
+      .candidate p { flex: 1; margin: 0; color: #bdb6cb; line-height: 1.55; }
+
+      .play {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: center;
+        align-self: start;
+        min-width: 148px;
+      }
+
+      .play[aria-pressed="true"] { background: rgba(109, 219, 199, 0.22); border-color: #6ddbc7; }
+
+      .choice-row {
+        display: flex;
+        gap: 8px 18px;
+        flex-wrap: wrap;
+        padding: 14px 20px 16px;
+      }
+
+      .choice-row span { color: #aaa1ba; font-size: 0.88rem; font-weight: 750; }
+      .choice-row label { display: inline-flex; gap: 7px; align-items: center; cursor: pointer; }
+      .choice-row input { accent-color: #9d8cff; }
+
+      .removals, .feedback {
+        margin-top: 28px;
+        padding: 22px;
+        border: 1px solid rgba(194, 180, 255, 0.18);
+        border-radius: 20px;
+        background: rgba(22, 18, 37, 0.9);
+      }
+
+      .removals h2, .feedback h2 { margin: 0 0 12px; font-size: 1.25rem; }
+      .removals ul { margin: 0; padding-left: 20px; color: #c8c1d7; line-height: 1.7; }
+      .removals .button { margin: 12px 0 4px; }
+
+      textarea {
+        width: 100%;
+        min-height: 120px;
+        resize: vertical;
+        border: 1px solid rgba(194, 180, 255, 0.24);
+        border-radius: 14px;
+        padding: 14px;
+        background: #100d1c;
+        color: #f7f3ff;
+      }
+
+      .feedback-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+      .license { margin: 22px 2px 0; color: #8f879f; font-size: 0.84rem; line-height: 1.5; }
+      .license a { color: #b9a9ff; }
+
+      @media (max-width: 720px) {
+        main { width: min(100% - 20px, 1120px); padding-top: 28px; }
+        .toolbar { position: static; grid-template-columns: 1fr 1fr; }
+        .volume-control { grid-column: 1 / -1; }
+        .candidate-grid { grid-template-columns: 1fr; }
+        .sound-heading { flex-direction: column; gap: 5px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Business Game · segunda pasada</p>
+      <h1>Más grave y más realista</h1>
+      <p class="intro">
+        Compara tu elección anterior con una revisión de tono más bajo. La versión V2 reduce las
+        capas electrónicas y da más protagonismo a fichas, cartas, dados y monedas reales.
+        Nada de esta página reemplaza todavía el audio del juego.
+      </p>
+
+      <div class="toolbar" aria-label="Controles de reproducción">
+        <div class="volume-control">
+          <label for="volume">Volumen</label>
+          <input id="volume" type="range" min="0" max="1" step="0.05" value="0.65" />
+          <output id="volume-value" for="volume">65%</output>
+        </div>
+        <button class="button" id="stop" type="button">Detener</button>
+        <button class="button primary" id="play-all" type="button">Comparar todos</button>
+      </div>
+
+      <p class="status" id="status" aria-live="polite">Listo para reproducir.</p>
+      <section class="review-list" id="review-list" aria-label="Candidatos de sonido"></section>
+
+      <section class="removals">
+        <h2>Sonidos que se eliminarán</h2>
+        <ul>
+          <li><strong>Lanzamiento de dados 2:</strong> se reutilizará el lanzamiento natural 1.</li>
+          <li><strong>Compra de propiedad rechazada:</strong> quedará en silencio.</li>
+        </ul>
+        <button class="button play" type="button" data-single="/audio/dice-roll-a.ogg">
+          ▶ Escuchar dado conservado
+        </button>
+      </section>
+
+      <section class="feedback">
+        <h2>Preparar feedback</h2>
+        <textarea id="notes" placeholder="Ejemplo: apruebo la V2 de movimiento; la deuda todavía necesita menos brillo..."></textarea>
+        <div class="feedback-actions">
+          <button class="button primary" id="copy-feedback" type="button">Copiar selección y notas</button>
+          <button class="button" id="clear-feedback" type="button">Limpiar selección</button>
+        </div>
+      </section>
+
+      <p class="license">
+        Fuentes: <a href="https://kenney.nl/assets/casino-audio">Kenney Casino Audio</a> y
+        <a href="https://kenney.nl/assets/interface-sounds">Kenney Interface Sounds</a>, ambos
+        publicados bajo Creative Commons CC0 1.0. Composiciones preparadas únicamente para esta revisión.
+      </p>
+    </main>
+
+    <script>
+      const casino = (name) => `/audio-review/sources/casino/${name}.ogg`;
+      const ui = (name) => `/audio-review/sources/interface/${name}.ogg`;
+      const cue = (src, delay = 0, gain = 1, rate = 1) => ({ src, delay, gain, rate });
+
+      const reviews = [
+        {
+          id: 'turn-yours',
+          title: 'Inicio de tu turno',
+          file: 'turn-yours.ogg',
+          candidates: [
+            {
+              name: 'Original elegido · Campana y ficha',
+              description: 'La opción A que elegiste en la primera revisión.',
+              cues: [cue(ui('confirmation_002'), 0, 0.78), cue(casino('chip-lay-1'), 70, 0.42)],
+            },
+            {
+              name: 'V2 · Campana grave y ficha',
+              description: 'La ficha entra primero y la señal electrónica queda más baja, oscura y secundaria.',
+              cues: [cue(casino('chip-lay-1'), 0, 0.52, 0.84), cue(ui('confirmation_002'), 65, 0.45, 0.78)],
+            },
+          ],
+        },
+        {
+          id: 'turn-extra-roll',
+          title: 'Lanzamiento adicional',
+          file: 'turn-extra-roll.ogg',
+          candidates: [
+            {
+              name: 'Original elegido · Rebote corto',
+              description: 'La opción A que elegiste en la primera revisión.',
+              cues: [cue(ui('pluck_001'), 0, 0.72), cue(ui('pluck_002'), 115, 0.68), cue(ui('select_001'), 230, 0.5, 1.08)],
+            },
+            {
+              name: 'V2 · Dados y rebote grave',
+              description: 'Un dado real abre el efecto; los tonos quedan bajos y apenas refuerzan el lanzamiento adicional.',
+              cues: [cue(casino('die-throw-1'), 0, 0.72, 0.88), cue(casino('chip-lay-2'), 105, 0.4, 0.82), cue(ui('pluck_001'), 185, 0.28, 0.78)],
+            },
+          ],
+        },
+        {
+          id: 'token-step-metal-soft',
+          title: 'Movimiento de ficha · cuatro variantes',
+          file: 'token-step-metal-soft-{1…4}.ogg',
+          candidates: [
+            {
+              name: 'Original elegido · Ficha seca',
+              description: 'Las cuatro variantes A que elegiste, reproducidas en secuencia.',
+              cues: [cue(casino('chip-lay-1'), 0, 0.65), cue(casino('chip-lay-2'), 300, 0.62), cue(casino('chip-lay-3'), 600, 0.64), cue(casino('chips-collide-1'), 900, 0.44)],
+            },
+            {
+              name: 'V2 · Ficha grave sobre tablero',
+              description: 'Las mismas acciones físicas, desaceleradas y sin capas brillantes. Escucharás las cuatro variantes.',
+              cues: [cue(casino('chip-lay-1'), 0, 0.7, 0.82), cue(casino('chip-lay-2'), 320, 0.68, 0.78), cue(casino('chip-lay-3'), 640, 0.7, 0.8), cue(casino('card-place-2'), 960, 0.58, 0.82)],
+            },
+          ],
+        },
+        {
+          id: 'property-purchase',
+          title: 'Propiedad comprada',
+          file: 'property-purchase.ogg',
+          candidates: [
+            {
+              name: 'Original elegido · Escritura y monedas',
+              description: 'La opción A que elegiste en la primera revisión.',
+              cues: [cue(casino('card-place-1'), 0, 0.66), cue(casino('chips-stack-1'), 95, 0.58), cue(ui('confirmation_002'), 185, 0.4)],
+            },
+            {
+              name: 'V2 · Escritura física',
+              description: 'Documento, pila y ficha a menor tono. Se elimina la confirmación electrónica.',
+              cues: [cue(casino('card-place-1'), 0, 0.74, 0.86), cue(casino('chips-stack-1'), 110, 0.7, 0.82), cue(casino('chip-lay-2'), 205, 0.45, 0.8)],
+            },
+          ],
+        },
+        {
+          id: 'property-mortgaged',
+          title: 'Propiedad hipotecada',
+          file: 'property-mortgaged.ogg',
+          candidates: [
+            {
+              name: 'Original elegido · Sello grave',
+              description: 'La opción A que elegiste en la primera revisión.',
+              cues: [cue(casino('card-place-2'), 0, 0.6), cue(ui('close_002'), 95, 0.66, 0.9), cue(ui('error_001'), 180, 0.28, 0.86)],
+            },
+            {
+              name: 'V2 · Documento bloqueado grave',
+              description: 'Papel, cierre y golpe apagado a menor velocidad, sin tono de error.',
+              cues: [cue(casino('card-place-2'), 0, 0.72, 0.82), cue(ui('close_002'), 105, 0.52, 0.76), cue(ui('drop_002'), 195, 0.4, 0.74)],
+            },
+          ],
+        },
+        {
+          id: 'property-unmortgaged',
+          title: 'Hipoteca levantada',
+          file: 'property-unmortgaged.ogg',
+          candidates: [
+            {
+              name: 'Original elegido · Liberación clara',
+              description: 'La opción A que elegiste en la primera revisión.',
+              cues: [cue(ui('open_001'), 0, 0.58), cue(ui('confirmation_001'), 85, 0.65), cue(casino('chip-lay-1'), 170, 0.36)],
+            },
+            {
+              name: 'V2 · Documento recuperado físico',
+              description: 'Deslizamiento, apertura y fichas a menor tono. No usa campana electrónica.',
+              cues: [cue(casino('card-slide-1'), 0, 0.64, 0.84), cue(ui('open_001'), 100, 0.42, 0.78), cue(casino('chips-stack-1'), 190, 0.42, 0.86)],
+            },
+          ],
+        },
+        {
+          id: 'salary-collected',
+          title: 'Salario cobrado',
+          file: 'salary-collected.ogg',
+          candidates: [
+            {
+              name: 'Original elegido · Monedas limpias',
+              description: 'La opción A que elegiste en la primera revisión.',
+              cues: [cue(casino('chips-handle-1'), 0, 0.58), cue(casino('chips-collide-2'), 120, 0.58), cue(ui('confirmation_002'), 240, 0.46)],
+            },
+            {
+              name: 'V2 · Pago físico grave',
+              description: 'Solo manipulación, choque y apilado de fichas reales a menor velocidad.',
+              cues: [cue(casino('chips-handle-1'), 0, 0.68, 0.8), cue(casino('chips-collide-2'), 130, 0.68, 0.82), cue(casino('chips-stack-2'), 255, 0.58, 0.82)],
+            },
+          ],
+        },
+        {
+          id: 'debt-created',
+          title: 'Deuda creada',
+          file: 'debt-created.ogg',
+          candidates: [
+            {
+              name: 'Original elegido · Obligación registrada',
+              description: 'La opción B que elegiste en la primera revisión.',
+              cues: [cue(ui('close_002'), 0, 0.58, 0.92), cue(ui('drop_002'), 95, 0.5, 0.88), cue(ui('tick_004'), 180, 0.32, 0.9)],
+            },
+            {
+              name: 'V2 · Deuda registrada físicamente',
+              description: 'Documento, cierre y golpe grave. Se elimina la marca electrónica aguda.',
+              cues: [cue(casino('card-place-2'), 0, 0.64, 0.8), cue(ui('close_002'), 105, 0.52, 0.75), cue(ui('drop_002'), 195, 0.44, 0.74)],
+            },
+          ],
+        },
+        {
+          id: 'debt-paid',
+          title: 'Deuda pagada',
+          file: 'debt-paid.ogg',
+          candidates: [
+            {
+              name: 'Original elegido · Cuenta resuelta',
+              description: 'La opción A que elegiste en la primera revisión.',
+              cues: [cue(casino('card-place-1'), 0, 0.5), cue(casino('chip-lay-1'), 95, 0.46), cue(ui('confirmation_001'), 175, 0.58)],
+            },
+            {
+              name: 'V2 · Cuenta cerrada físicamente',
+              description: 'Documento y fichas graves, sin la confirmación electrónica final.',
+              cues: [cue(casino('card-place-1'), 0, 0.58, 0.82), cue(casino('chip-lay-1'), 105, 0.54, 0.78), cue(casino('chips-stack-1'), 195, 0.6, 0.84)],
+            },
+          ],
+        },
+        {
+          id: 'auction-bid',
+          title: 'Nueva oferta en subasta',
+          file: 'auction-bid.ogg',
+          candidates: [
+            {
+              name: 'Original elegido · Paleta física',
+              description: 'Las tres variantes A que elegiste, reproducidas en secuencia.',
+              cues: [cue(casino('chip-lay-1'), 0, 0.72, 1.08), cue(casino('chip-lay-2'), 360, 0.7, 1.12), cue(casino('chip-lay-3'), 720, 0.72, 1.05)],
+            },
+            {
+              name: 'V2 · Paleta física grave',
+              description: 'Las tres variantes reales a menor tono, sin pulsos de interfaz.',
+              cues: [cue(casino('chip-lay-1'), 0, 0.76, 0.82), cue(casino('chip-lay-2'), 380, 0.74, 0.78), cue(casino('chip-lay-3'), 760, 0.76, 0.84)],
+            },
+          ],
+        },
+      ];
+
+      const reviewList = document.querySelector('#review-list');
+      const status = document.querySelector('#status');
+      const volume = document.querySelector('#volume');
+      const volumeValue = document.querySelector('#volume-value');
+      let activeAudios = [];
+      let activeTimers = [];
+      let playAllTimer = null;
+
+      const stopPlayback = (message = 'Reproducción detenida.') => {
+        activeTimers.forEach(window.clearTimeout);
+        activeTimers = [];
+        if (playAllTimer !== null) window.clearTimeout(playAllTimer);
+        playAllTimer = null;
+        activeAudios.forEach((audio) => {
+          audio.pause();
+          audio.currentTime = 0;
+        });
+        activeAudios = [];
+        document.querySelectorAll('.play[aria-pressed="true"]').forEach((button) => {
+          button.setAttribute('aria-pressed', 'false');
+        });
+        status.textContent = message;
+      };
+
+      const playCues = (cues, label, button) => {
+        stopPlayback();
+        if (button) button.setAttribute('aria-pressed', 'true');
+        status.textContent = `Reproduciendo: ${label}`;
+        cues.forEach((item) => {
+          const timer = window.setTimeout(() => {
+            const audio = new Audio(item.src);
+            audio.volume = Math.min(1, Number(volume.value) * item.gain);
+            audio.playbackRate = item.rate;
+            activeAudios.push(audio);
+            audio.play().catch(() => {
+              status.textContent = 'El navegador bloqueó la reproducción. Presiona nuevamente el botón.';
+            });
+          }, item.delay);
+          activeTimers.push(timer);
+        });
+      };
+
+      reviews.forEach((review) => {
+        const article = document.createElement('article');
+        article.className = 'sound-card';
+        article.innerHTML = `
+          <div class="sound-heading">
+            <h2>${review.title}</h2>
+            <code>${review.file}</code>
+          </div>
+          <div class="candidate-grid">
+            ${review.candidates.map((candidate, index) => `
+              <div class="candidate">
+                <h3>${candidate.name}</h3>
+                <p>${candidate.description}</p>
+                <button class="button play" type="button" aria-pressed="false" data-review="${review.id}" data-candidate="${index}">▶ Escuchar candidato</button>
+              </div>
+            `).join('')}
+          </div>
+          <div class="choice-row" role="group" aria-label="Elección para ${review.title}">
+            <span>Mi elección:</span>
+            <label><input type="radio" name="choice-${review.id}" value="Original" /> Original</label>
+            <label><input type="radio" name="choice-${review.id}" value="V2" /> V2</label>
+            <label><input type="radio" name="choice-${review.id}" value="Ninguno" /> Ninguno</label>
+          </div>
+        `;
+        reviewList.append(article);
+      });
+
+      reviewList.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-review]');
+        if (!button) return;
+        const review = reviews.find((item) => item.id === button.dataset.review);
+        const candidate = review?.candidates[Number(button.dataset.candidate)];
+        if (!review || !candidate) return;
+        playCues(candidate.cues, `${review.title} · ${candidate.name}`, button);
+      });
+
+      document.querySelector('[data-single]').addEventListener('click', (event) => {
+        playCues([cue(event.currentTarget.dataset.single)], 'Lanzamiento de dado conservado', event.currentTarget);
+      });
+
+      volume.addEventListener('input', () => {
+        volumeValue.textContent = `${Math.round(Number(volume.value) * 100)}%`;
+      });
+
+      document.querySelector('#stop').addEventListener('click', () => stopPlayback());
+
+      document.querySelector('#play-all').addEventListener('click', () => {
+        stopPlayback();
+        const queue = reviews.flatMap((review) => review.candidates.map((candidate) => ({ review, candidate })));
+        let index = 0;
+        const next = () => {
+          if (index >= queue.length) {
+            status.textContent = 'Revisión completa.';
+            playAllTimer = null;
+            return;
+          }
+          const { review, candidate } = queue[index++];
+          playCues(candidate.cues, `${review.title} · ${candidate.name}`);
+          const duration = Math.max(...candidate.cues.map((item) => item.delay), 0) + 1900;
+          playAllTimer = window.setTimeout(next, duration);
+        };
+        next();
+      });
+
+      document.querySelector('#copy-feedback').addEventListener('click', async () => {
+        const lines = reviews.map((review) => {
+          const selected = document.querySelector(`input[name="choice-${review.id}"]:checked`);
+          return `- ${review.title}: ${selected?.value ?? 'Sin selección'}`;
+        });
+        const notes = document.querySelector('#notes').value.trim();
+        const text = `Feedback de sonidos\n${lines.join('\n')}\n\nNotas:\n${notes || 'Sin notas adicionales.'}`;
+        try {
+          await navigator.clipboard.writeText(text);
+          status.textContent = 'Feedback copiado. Pégalo en el chat.';
+        } catch {
+          document.querySelector('#notes').value = text;
+          document.querySelector('#notes').select();
+          status.textContent = 'No se pudo copiar automáticamente. El texto quedó seleccionado.';
+        }
+      });
+
+      document.querySelector('#clear-feedback').addEventListener('click', () => {
+        document.querySelectorAll('.choice-row input').forEach((input) => { input.checked = false; });
+        document.querySelector('#notes').value = '';
+        status.textContent = 'Selección limpiada.';
+      });
+    </script>
+  </body>
+</html>

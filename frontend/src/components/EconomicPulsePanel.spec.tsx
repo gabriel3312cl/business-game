@@ -30,6 +30,17 @@ const baseEconomy: EconomicSimulationState = {
   active_events: [
     { kind: 'consumer_boom', remaining_weeks: 5, intensity: 2 },
   ],
+  forecast_events: [],
+  price_index_basis_points: 10_000,
+  inflation_base_week: 0,
+  next_operating_cost_week: 12,
+  operating_cost_assessment: null,
+  operating_debts: [],
+  next_public_project_week: 16,
+  public_projects: [],
+  next_finale_vote_week: 80,
+  finale_vote: null,
+  finale: null,
   last_market_movements: [
     movement('telecom', 283),
     movement('prison', 262),
@@ -45,7 +56,7 @@ afterEach(async () => {
 })
 
 describe('EconomicPulsePanel', () => {
-  it('uses localized, semantic and bounded economic presentation', async () => {
+  it('renders a localized compact trigger for the economic dialog', async () => {
     await i18n.changeLanguage('es')
 
     const html = renderToStaticMarkup(
@@ -55,29 +66,18 @@ describe('EconomicPulsePanel', () => {
       }),
     )
 
-    expect(html).toContain('<details')
-    expect(html).toContain('<summary')
+    expect(html).toContain('<button')
+    expect(html).toContain('aria-haspopup="dialog"')
+    expect(html).toContain('aria-controls="economic-pulse-dialog"')
+    expect(html).toContain('Abrir situación económica')
     expect(html).toContain('dateTime="2026-09-07"')
     expect(html).toContain('7 de septiembre de 2026')
     expect(html).toContain('Semana 5')
     expect(html).toContain('Primavera · dificultad Estándar')
-    expect(html).toContain('Indicadores económicos')
-    expect(html).toMatch(/<dl\b/)
-    expect(html).toMatch(/<dt\b/)
-    expect(html).toMatch(/<dd\b/)
-    expect(html).toMatch(/<ul\b/)
-    expect(html).toMatch(/<li\b/)
-    expect(html).toContain('2,02')
-    expect(html).toContain('Auge del consumo')
-    expect(html).toContain('5 semanas restantes')
-    expect(html).toContain('Telecomunicaciones')
-    expect(html).toContain('obtuvo un contrato importante')
-    expect(html).toContain('+2,83')
-    expect(html).toContain('Banco central de la partida')
-    expect(html).not.toContain('Instrumento fuera del límite')
+    expect(html).not.toContain('Indicadores económicos')
   })
 
-  it('omits empty event, company and market sections', async () => {
+  it('keeps the dialog content out of the board layout while closed', async () => {
     await i18n.changeLanguage('en')
     const html = renderToStaticMarkup(
       createElement(EconomicPulsePanel, {
@@ -92,32 +92,12 @@ describe('EconomicPulsePanel', () => {
       }),
     )
 
-    expect(html).toContain('Economic indicators')
+    expect(html).toContain('Open economic situation')
     expect(html).not.toContain('Active events')
     expect(html).not.toContain('Company news')
     expect(html).not.toContain('Weekly market movement')
   })
 
-  it('uses truthful direction icons for negative growth and a flat market', async () => {
-    await i18n.changeLanguage('es')
-    const html = renderToStaticMarkup(
-      createElement(EconomicPulsePanel, {
-        game: gameWithEconomy({
-          ...baseEconomy,
-          annual_growth_basis_points: -125,
-          active_events: [],
-          last_market_movements: [movement('telecom', 0)],
-          last_company_action: null,
-          last_company_instrument_id: null,
-        }),
-        pack,
-      }),
-    )
-
-    expect(html).toContain('TrendingDownRoundedIcon')
-    expect(html).toContain('TrendingFlatRoundedIcon')
-    expect(html).not.toContain('TrendingUpRoundedIcon')
-  })
 })
 
 function movement(instrumentId: string, changeBasisPoints: number) {

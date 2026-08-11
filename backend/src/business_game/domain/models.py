@@ -261,35 +261,33 @@ CardEffect = Annotated[
 
 
 def _effect_must_be_terminal(effect: CardEffect) -> bool:
-    return isinstance(
-        effect,
-        (
-            MoveToCardEffect,
-            MoveRelativeCardEffect,
-            MoveToNearestCardEffect,
-            MoveToNearestAuctionCardEffect,
-            RepairsCardEffect,
-            CashEachCardEffect,
-            CompleteGroupsCashCardEffect,
-            OwnedPropertiesCashCardEffect,
-            MortgagedPropertiesCashCardEffect,
-            GoToJailCardEffect,
-            SwapPositionCardEffect,
-            AllPlayersMoveRelativeCardEffect,
-            InteractiveChoiceCardEffect,
-        ),
-    ) or (
-        isinstance(effect, CashCardEffect) and effect.amount < 0
-    ) or (
-        isinstance(effect, SalaryCashCardEffect) and effect.salary_percent < 0
+    return (
+        isinstance(
+            effect,
+            (
+                MoveToCardEffect,
+                MoveRelativeCardEffect,
+                MoveToNearestCardEffect,
+                MoveToNearestAuctionCardEffect,
+                RepairsCardEffect,
+                CashEachCardEffect,
+                CompleteGroupsCashCardEffect,
+                OwnedPropertiesCashCardEffect,
+                MortgagedPropertiesCashCardEffect,
+                GoToJailCardEffect,
+                SwapPositionCardEffect,
+                AllPlayersMoveRelativeCardEffect,
+                InteractiveChoiceCardEffect,
+            ),
+        )
+        or (isinstance(effect, CashCardEffect) and effect.amount < 0)
+        or (isinstance(effect, SalaryCashCardEffect) and effect.salary_percent < 0)
     )
 
 
 def _validate_effect_order(effects: list[CardEffect]) -> None:
     if any(_effect_must_be_terminal(effect) for effect in effects[:-1]):
-        raise ValueError(
-            "movement, charging, repairs and go_to_jail effects must be terminal"
-        )
+        raise ValueError("movement, charging, repairs and go_to_jail effects must be terminal")
 
 
 class CardDefinition(ContentModel):
@@ -362,30 +360,33 @@ class TileDefinition(ContentModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
     kind: TileKind
     name_key: str
-    card_tags: list[
-        Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")]
-    ] = Field(default_factory=list, max_length=20)
+    card_tags: list[Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")]] = Field(
+        default_factory=list, max_length=20
+    )
     deck_id: str | None = None
     group: str | None = None
     color: str | None = None
-    icon: Literal[
-        "flag",
-        "bank",
-        "gavel",
-        "question",
-        "police",
-        "weekend",
-        "train",
-        "bolt",
-        "ticket",
-        "star",
-        "money",
-        "home",
-        "store",
-        "gift",
-        "car",
-        "plane",
-    ] | None = None
+    icon: (
+        Literal[
+            "flag",
+            "bank",
+            "gavel",
+            "question",
+            "police",
+            "weekend",
+            "train",
+            "bolt",
+            "ticket",
+            "star",
+            "money",
+            "home",
+            "store",
+            "gift",
+            "car",
+            "plane",
+        ]
+        | None
+    ) = None
     icon_background: Literal["circle", "rounded", "square", "none"] | None = None
     asset_path: str | None = Field(
         default=None,
@@ -495,9 +496,7 @@ class TileDefinition(ContentModel):
         )
         if unsupported:
             fields = ", ".join(unsupported)
-            raise ValueError(
-                f"'{self.kind.value}' tiles cannot define: {fields}"
-            )
+            raise ValueError(f"'{self.kind.value}' tiles cannot define: {fields}")
         if self.kind is TileKind.PROPERTY and self.purchasable is False:
             raise ValueError("properties cannot disable purchasing")
         if (
@@ -515,8 +514,7 @@ class TileDefinition(ContentModel):
             )
         ):
             raise ValueError(
-                "non-purchasable transports and utilities cannot define "
-                "economic fields"
+                "non-purchasable transports and utilities cannot define economic fields"
             )
         if self.is_purchasable and (self.price is None or self.base_rent is None):
             raise ValueError("purchasable tiles require price and base_rent")
@@ -528,20 +526,10 @@ class TileDefinition(ContentModel):
             or self.rent_levels is None
             or len(self.rent_levels) != 6
         ):
-            raise ValueError(
-                "properties require group, build_cost and six rent levels"
-            )
-        if (
-            self.kind is TileKind.TRANSPORT
-            and self.is_purchasable
-            and self.rent_levels is None
-        ):
+            raise ValueError("properties require group, build_cost and six rent levels")
+        if self.kind is TileKind.TRANSPORT and self.is_purchasable and self.rent_levels is None:
             raise ValueError("transports require rent_levels")
-        if (
-            self.kind is TileKind.UTILITY
-            and self.is_purchasable
-            and self.rent_multipliers is None
-        ):
+        if self.kind is TileKind.UTILITY and self.is_purchasable and self.rent_multipliers is None:
             raise ValueError("utilities require rent_multipliers")
         if self.rent_levels is not None:
             if any(value < 0 for value in self.rent_levels):
@@ -557,9 +545,7 @@ class TileDefinition(ContentModel):
                 )
             ):
                 raise ValueError("property rent levels must be non-decreasing")
-        if self.rent_multipliers is not None and any(
-            value < 0 for value in self.rent_multipliers
-        ):
+        if self.rent_multipliers is not None and any(value < 0 for value in self.rent_multipliers):
             raise ValueError("rent multipliers cannot be negative")
         tax_modes = (
             self.amount is not None,
@@ -586,13 +572,8 @@ class TileDefinition(ContentModel):
                 f"'{self.kind.value}' tiles use fixed landing behavior and cannot "
                 "define landing_effects"
             )
-        if any(
-            isinstance(effect, GetOutOfJailCardEffect)
-            for effect in self.landing_effects
-        ):
-            raise ValueError(
-                "get_out_of_jail is only valid inside a card definition"
-            )
+        if any(isinstance(effect, GetOutOfJailCardEffect) for effect in self.landing_effects):
+            raise ValueError("get_out_of_jail is only valid inside a card definition")
         _validate_effect_order(self.landing_effects)
         return self
 
@@ -682,14 +663,8 @@ class PackManifest(ContentModel):
             raise ValueError("loan_term_laps cannot exceed loan_max_term_laps")
         if len(self.configurable_rules) != len(set(self.configurable_rules)):
             raise ValueError("configurable_rules cannot contain duplicates")
-        if (
-            self.investment_dividend_percent
-            + self.investment_revenue_fee_percent
-            > 100
-        ):
-            raise ValueError(
-                "investment dividends and revenue fees cannot exceed 100 percent"
-            )
+        if self.investment_dividend_percent + self.investment_revenue_fee_percent > 100:
+            raise ValueError("investment dividends and revenue fees cannot exceed 100 percent")
         return self
 
 
@@ -705,11 +680,17 @@ class ContentPack(BaseModel):
     messages: dict[str, str]
 
 
+class UserRole(StrEnum):
+    PLAYER = "player"
+    ADMIN = "admin"
+
+
 class User(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     email: EmailStr
     display_name: str = Field(min_length=2, max_length=40)
     locale: str = Field(default="es", min_length=2, max_length=10)
+    role: UserRole = UserRole.PLAYER
     is_active: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -785,10 +766,7 @@ class ManagementPanelLayoutPreferences(ContentModel):
 
     @model_validator(mode="after")
     def validate_complete_layout(self) -> ManagementPanelLayoutPreferences:
-        if (
-            len(set(self.order)) != len(self.order)
-            or set(self.order) != MANAGEMENT_PANEL_IDS
-        ):
+        if len(set(self.order)) != len(self.order) or set(self.order) != MANAGEMENT_PANEL_IDS:
             raise ValueError("management order must contain every panel exactly once")
         if len(set(self.visible)) != len(self.visible):
             raise ValueError("visible management panels must be unique")
@@ -812,13 +790,9 @@ class WorkspacePanelLayoutPreferences(ContentModel):
     visible: list[WorkspacePanelId] = Field(min_length=1, max_length=9)
     heights: dict[WorkspacePanelId, int] = Field(default_factory=dict)
     placements: dict[WorkspacePanelId, WorkspacePanelPlacement] = Field(
-        default_factory=lambda: {
-            panel_id: "right" for panel_id in WORKSPACE_PANEL_IDS
-        }
+        default_factory=lambda: {panel_id: "right" for panel_id in WORKSPACE_PANEL_IDS}
     )
-    windows: dict[WorkspacePanelId, WorkspacePanelWindowGeometry] = Field(
-        default_factory=dict
-    )
+    windows: dict[WorkspacePanelId, WorkspacePanelWindowGeometry] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
@@ -839,10 +813,7 @@ class WorkspacePanelLayoutPreferences(ContentModel):
 
     @model_validator(mode="after")
     def validate_complete_layout(self) -> WorkspacePanelLayoutPreferences:
-        if (
-            len(set(self.order)) != len(self.order)
-            or set(self.order) != WORKSPACE_PANEL_IDS
-        ):
+        if len(set(self.order)) != len(self.order) or set(self.order) != WORKSPACE_PANEL_IDS:
             raise ValueError("workspace order must contain every panel exactly once")
         if len(set(self.visible)) != len(self.visible):
             raise ValueError("visible workspace panels must be unique")
@@ -865,6 +836,15 @@ class PanelLayoutPreferences(ContentModel):
         default_factory=ManagementPanelLayoutPreferences
     )
     rail: WorkspacePanelLayoutPreferences | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_visible_panels(cls, value: object) -> object:
+        if not isinstance(value, dict) or "visible" not in value:
+            return value
+        normalized = dict(value)
+        normalized.pop("visible")
+        return normalized
 
     @model_validator(mode="after")
     def validate_complete_layout(self) -> PanelLayoutPreferences:
@@ -971,11 +951,36 @@ class GameViewPreferences(ContentModel):
     market_tab: Literal["market", "performance"] = "market"
     property_filter: Literal["all", "available", "mine", "mortgaged"] = "all"
     analytics_open: bool = False
-    analytics_tab: Literal[
-        "overview", "players", "economy", "activity", "dice", "technical"
-    ] = "overview"
+    analytics_tab: Literal["overview", "players", "economy", "activity", "dice", "technical"] = (
+        "overview"
+    )
     analytics_view: Literal["fullscreen", "window"] = "fullscreen"
     analytics_source: Literal["current", "historical"] = "current"
+
+
+ColorThemePreference = Literal[
+    "neon-night",
+    "ocean",
+    "emerald",
+    "copper",
+    "high-contrast",
+    "macos-tahoe",
+    "ios26-glass",
+    "windows11",
+    "windows10",
+    "windows7",
+    "windows-xp",
+    "windows98",
+    "linux",
+    "meta",
+    "facebook",
+    "daylight",
+    "financial-paper",
+    "macos-tahoe-light",
+    "ios26-glass-light",
+    "windows11-light",
+    "facebook-light",
+]
 
 
 class UserPreferences(ContentModel):
@@ -986,6 +991,7 @@ class UserPreferences(ContentModel):
     visual_effects: VisualEffectsPreferences | None = None
     player_sort: PlayerSortPreference | None = None
     game_view: GameViewPreferences | None = None
+    color_theme: ColorThemePreference | None = None
 
 
 class UserPreferencesUpdate(ContentModel):
@@ -996,6 +1002,7 @@ class UserPreferencesUpdate(ContentModel):
     visual_effects: VisualEffectsPreferences | None = None
     player_sort: PlayerSortPreference | None = None
     game_view: GameViewPreferences | None = None
+    color_theme: ColorThemePreference | None = None
 
     @model_validator(mode="after")
     def validate_non_empty_update(self) -> UserPreferencesUpdate:
@@ -1007,6 +1014,7 @@ class UserPreferencesUpdate(ContentModel):
             and self.visual_effects is None
             and self.player_sort is None
             and self.game_view is None
+            and self.color_theme is None
         ):
             raise ValueError("at least one preference must be provided")
         return self
@@ -1106,6 +1114,84 @@ class EconomicEventState(BaseModel):
     intensity: int = Field(ge=1, le=3)
 
 
+class EconomicForecastState(BaseModel):
+    kind: Literal[
+        "innovation_boom",
+        "supply_shock",
+        "credit_tightening",
+        "consumer_boom",
+        "labor_dispute",
+        "fiscal_stimulus",
+    ]
+    starts_in_weeks: int = Field(ge=1, le=2)
+    duration_weeks: int = Field(ge=2, le=6)
+    intensity: int = Field(ge=1, le=3)
+
+
+class OperatingCostAssessmentState(BaseModel):
+    due_week: int = Field(ge=1)
+    announced_week: int = Field(ge=0)
+    amounts: dict[UUID, Annotated[int, Field(gt=0)]] = Field(
+        default_factory=dict,
+        max_length=20,
+    )
+    resolved_player_ids: list[UUID] = Field(default_factory=list, max_length=20)
+
+
+class OperatingDebtState(BaseModel):
+    player_id: UUID
+    principal: int = Field(gt=0)
+    interest_percent: int = Field(default=10, ge=0, le=100)
+    remaining_amount: int = Field(gt=0)
+    created_week: int = Field(ge=0)
+
+
+class PublicProjectKind(StrEnum):
+    RAIL_MODERNIZATION = "rail_modernization"
+    URBAN_RENEWAL = "urban_renewal"
+    ENERGY_EXPANSION = "energy_expansion"
+
+
+class PublicProjectBidState(BaseModel):
+    amount: int = Field(gt=0)
+    sequence: int = Field(ge=0)
+
+
+class PublicProjectState(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    kind: PublicProjectKind
+    status: Literal["bidding", "active", "completed", "failed", "expired"] = "bidding"
+    announced_week: int = Field(ge=0)
+    bidding_ends_week: int = Field(ge=1)
+    minimum_bid: int = Field(gt=0)
+    reward_amount: int = Field(gt=0)
+    required_tile_kind: Literal["property", "transport", "utility"]
+    required_building_levels: int = Field(default=0, ge=0, le=20)
+    bids: dict[UUID, PublicProjectBidState] = Field(
+        default_factory=dict,
+        max_length=20,
+    )
+    owner_id: UUID | None = None
+    winning_bid: int = Field(default=0, ge=0)
+    completes_week: int | None = Field(default=None, ge=1)
+
+
+class FinaleVoteState(BaseModel):
+    opened_week: int = Field(ge=0)
+    eligible_player_ids: list[UUID] = Field(min_length=1, max_length=20)
+    votes: dict[UUID, bool] = Field(default_factory=dict, max_length=20)
+
+
+class FinaleState(BaseModel):
+    started_week: int = Field(ge=0)
+    ends_week: int = Field(ge=1)
+    final_scores: dict[UUID, Annotated[int, Field(ge=0)]] = Field(
+        default_factory=dict,
+        max_length=20,
+    )
+    winner_id: UUID | None = None
+
+
 class MarketMovementState(BaseModel):
     instrument_id: str = Field(min_length=1, max_length=160)
     previous_price: int = Field(gt=0)
@@ -1130,6 +1216,20 @@ class EconomicSimulationState(BaseModel):
     consumer_confidence: int = Field(default=100, ge=0, le=200)
     market_sentiment: int = Field(default=5, ge=-100, le=100)
     active_events: list[EconomicEventState] = Field(default_factory=list, max_length=5)
+    forecast_events: list[EconomicForecastState] = Field(
+        default_factory=list,
+        max_length=3,
+    )
+    price_index_basis_points: int = Field(default=10_000, ge=10_000, le=1_000_000)
+    inflation_base_week: int | None = Field(default=None, ge=0)
+    next_operating_cost_week: int | None = Field(default=None, ge=1)
+    operating_cost_assessment: OperatingCostAssessmentState | None = None
+    operating_debts: list[OperatingDebtState] = Field(default_factory=list, max_length=20)
+    next_public_project_week: int | None = Field(default=None, ge=1)
+    public_projects: list[PublicProjectState] = Field(default_factory=list, max_length=40)
+    next_finale_vote_week: int | None = Field(default=None, ge=0)
+    finale_vote: FinaleVoteState | None = None
+    finale: FinaleState | None = None
     last_market_movements: list[MarketMovementState] = Field(
         default_factory=list,
         max_length=8,
@@ -1144,6 +1244,11 @@ class GameSettings(BaseModel):
     auction_deposit_percent: int = Field(default=10, ge=0, le=100)
     auction_minimum_bid_percent: int = Field(default=70, ge=0, le=100)
     economic_difficulty: EconomicDifficulty = EconomicDifficulty.STANDARD
+    advanced_economy_enabled: bool = True
+    operating_cost_percent: int = Field(default=3, ge=0, le=20)
+    finale_trigger_week: int = Field(default=80, ge=12, le=500)
+    finale_duration_weeks: int = Field(default=12, ge=4, le=52)
+    finale_vote_interval_weeks: int = Field(default=12, ge=4, le=52)
     rules: OptionalRules = Field(default_factory=OptionalRules)
 
 
@@ -1174,6 +1279,8 @@ class DebtReason(StrEnum):
     CARD = "card"
     JAIL_FINE = "jail_fine"
     BANK_LOAN = "bank_loan"
+    PLAYER_LOAN = "player_loan"
+    OPERATING_COST = "operating_cost"
     RESIGNATION = "resignation"
 
 
@@ -1227,6 +1334,8 @@ class RentDebtPlanState(BaseModel):
     installments_remaining: int = Field(ge=1, le=12)
     template: RentDebtPlanTemplate
     created_at_sequence: int = Field(ge=0)
+    reason: DebtReason = DebtReason.RENT_INSTALLMENT
+    source_trade_id: UUID | None = None
 
 
 class CardPaymentState(BaseModel):
@@ -1249,6 +1358,7 @@ class AuctionState(BaseModel):
     eligible_player_ids: list[UUID] = Field(min_length=1, max_length=20)
     ready_player_ids: list[UUID] = Field(default_factory=list, max_length=20)
     passed_player_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    seller_id: UUID | None = None
 
 
 class TradeOffer(BaseModel):
@@ -1562,16 +1672,9 @@ class GameState(BaseModel):
     def validate_economic_state(self) -> GameState:
         used_appearance_slots: set[int] = set()
         for player in self.players:
-            if (
-                player.appearance_slot is None
-                or player.appearance_slot in used_appearance_slots
-            ):
+            if player.appearance_slot is None or player.appearance_slot in used_appearance_slots:
                 player.appearance_slot = next(
-                    (
-                        slot
-                        for slot in range(20)
-                        if slot not in used_appearance_slots
-                    ),
+                    (slot for slot in range(20) if slot not in used_appearance_slots),
                     None,
                 )
                 if player.appearance_slot is None:
@@ -1609,9 +1712,8 @@ class GameState(BaseModel):
                 raise ValueError("only eligible auction players can be ready")
             if not set(auction.passed_player_ids).issubset(eligible_ids):
                 raise ValueError("only eligible auction players can pass")
-            if (
-                auction.phase == "idle"
-                and set(auction.ready_player_ids) & set(auction.passed_player_ids)
+            if auction.phase == "idle" and set(auction.ready_player_ids) & set(
+                auction.passed_player_ids
             ):
                 raise ValueError("an auction player cannot be ready and passed")
             if auction.phase == "idle" and (
@@ -1651,12 +1753,9 @@ class GameState(BaseModel):
                 for instrument in self.bank.investments
             ):
                 raise ValueError("investment holders must be game players")
-            instrument_by_id = {
-                instrument.id: instrument for instrument in self.bank.investments
-            }
+            instrument_by_id = {instrument.id: instrument for instrument in self.bank.investments}
             if any(
-                order.player_id not in player_ids
-                or order.instrument_id not in instrument_by_id
+                order.player_id not in player_ids or order.instrument_id not in instrument_by_id
                 for order in self.bank.market_orders
             ):
                 raise ValueError("market orders require valid players and instruments")
@@ -1664,8 +1763,7 @@ class GameState(BaseModel):
                 reserved_shares = sum(
                     order.remaining_quantity
                     for order in self.bank.market_orders
-                    if order.instrument_id == instrument.id
-                    and order.side is MarketOrderSide.SELL
+                    if order.instrument_id == instrument.id and order.side is MarketOrderSide.SELL
                 )
                 if (
                     sum(instrument.holdings.values())
@@ -1677,16 +1775,13 @@ class GameState(BaseModel):
                         "held, available, and reserved investment shares must match supply"
                     )
         relationship_pairs = [
-            (relationship.bot_id, relationship.player_id)
-            for relationship in self.bot_relationships
+            (relationship.bot_id, relationship.player_id) for relationship in self.bot_relationships
         ]
         if len(relationship_pairs) != len(set(relationship_pairs)):
             raise ValueError("bot relationships cannot be repeated")
         if any(bot_id == player_id for bot_id, player_id in relationship_pairs):
             raise ValueError("a bot cannot have a relationship with itself")
-        if len(self.mortgaged_property_ids) != len(
-            set(self.mortgaged_property_ids)
-        ):
+        if len(self.mortgaged_property_ids) != len(set(self.mortgaged_property_ids)):
             raise ValueError("mortgaged properties cannot be repeated")
         if len(self.trade_unavailable_property_ids) != len(
             set(self.trade_unavailable_property_ids)
@@ -1729,9 +1824,7 @@ class GameState(BaseModel):
             and self.pending_auction_selector_id not in player_ids
         ):
             raise ValueError("the auction selector must be a game participant")
-        if (self.pending_auction_selector_id is None) != (
-            self.pending_auction_minimum_bid is None
-        ):
+        if (self.pending_auction_selector_id is None) != (self.pending_auction_minimum_bid is None):
             raise ValueError("auction selection requires a selector and minimum bid")
         for payment in self.pending_card_payments:
             if payment.payer_id not in player_ids or payment.recipient_id not in player_ids:
@@ -1842,6 +1935,36 @@ class RequestLoanCommand(BaseModel):
 class RepayLoanCommand(BaseModel):
     action: Literal["repay_loan"]
     amount: int | None = Field(default=None, gt=0)
+
+
+class PayOperatingCostsCommand(BaseModel):
+    action: Literal["pay_operating_costs"]
+
+
+class DeferOperatingCostsCommand(BaseModel):
+    action: Literal["defer_operating_costs"]
+
+
+class RepayOperatingDebtCommand(BaseModel):
+    action: Literal["repay_operating_debt"]
+    amount: int | None = Field(default=None, gt=0)
+
+
+class BidPublicProjectCommand(BaseModel):
+    action: Literal["bid_public_project"]
+    project_id: UUID
+    amount: int = Field(gt=0)
+
+
+class OfferPropertyAuctionCommand(BaseModel):
+    action: Literal["offer_property_auction"]
+    property_id: str = Field(min_length=1, max_length=160)
+    minimum_bid: int = Field(gt=0)
+
+
+class VoteFinaleCommand(BaseModel):
+    action: Literal["vote_finale"]
+    approve: bool
 
 
 class BuySharesCommand(BaseModel):
@@ -2004,6 +2127,13 @@ class AcceptTradeCommand(BaseModel):
     trade_id: UUID
 
 
+class AcceptFinancedTradeCommand(BaseModel):
+    action: Literal["accept_financed_trade"]
+    trade_id: UUID
+    installments: int = Field(ge=2, le=12)
+    interest_percent: int = Field(ge=0, le=100)
+
+
 class RejectTradeCommand(BaseModel):
     action: Literal["reject_trade"]
     trade_id: UUID
@@ -2033,6 +2163,12 @@ GameCommand = Annotated[
     | SellGroupRoundCommand
     | RequestLoanCommand
     | RepayLoanCommand
+    | PayOperatingCostsCommand
+    | DeferOperatingCostsCommand
+    | RepayOperatingDebtCommand
+    | BidPublicProjectCommand
+    | OfferPropertyAuctionCommand
+    | VoteFinaleCommand
     | BuySharesCommand
     | SellSharesCommand
     | PlaceLimitOrderCommand
@@ -2053,6 +2189,7 @@ GameCommand = Annotated[
     | ProposeTradeCommand
     | CounterTradeCommand
     | AcceptTradeCommand
+    | AcceptFinancedTradeCommand
     | RejectTradeCommand
     | CancelTradeCommand,
     Field(discriminator="action"),
@@ -2066,10 +2203,13 @@ class GameCommandRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_auction_identity(self) -> GameCommandRequest:
-        if isinstance(
-            self.command,
-            (BidCommand, PassAuctionCommand, ReadyAuctionCommand),
-        ) and self.command.auction_id is None:
+        if (
+            isinstance(
+                self.command,
+                (BidCommand, PassAuctionCommand, ReadyAuctionCommand),
+            )
+            and self.command.auction_id is None
+        ):
             raise ValueError("auction commands require auction_id")
         return self
 
@@ -2092,6 +2232,7 @@ class CreateGameRequest(BaseModel):
     )
     deck_collection_ids: dict[str, list[str]] = Field(default_factory=dict)
     economic_difficulty: EconomicDifficulty = EconomicDifficulty.STANDARD
+    advanced_economy_enabled: bool = True
 
     @model_validator(mode="after")
     def validate_deck_collections(self) -> CreateGameRequest:
@@ -2104,10 +2245,7 @@ class CreateGameRequest(BaseModel):
                 raise ValueError("select at least one collection per deck")
             if len(collection_ids) != len(set(collection_ids)):
                 raise ValueError("deck selections cannot contain duplicates")
-            if any(
-                re.fullmatch(r"[a-z0-9][a-z0-9_-]*", item) is None
-                for item in collection_ids
-            ):
+            if any(re.fullmatch(r"[a-z0-9][a-z0-9_-]*", item) is None for item in collection_ids):
                 raise ValueError("deck selection contains an invalid collection id")
         return self
 
@@ -2124,6 +2262,11 @@ class UpdateGameSettingsRequest(BaseModel):
     auction_deposit_percent: int | None = Field(default=None, ge=0, le=100)
     auction_minimum_bid_percent: int | None = Field(default=None, ge=0, le=100)
     economic_difficulty: EconomicDifficulty | None = None
+    advanced_economy_enabled: bool | None = None
+    operating_cost_percent: int | None = Field(default=None, ge=0, le=20)
+    finale_trigger_week: int | None = Field(default=None, ge=12, le=500)
+    finale_duration_weeks: int | None = Field(default=None, ge=4, le=52)
+    finale_vote_interval_weeks: int | None = Field(default=None, ge=4, le=52)
     rules: OptionalRulesUpdate | None = None
 
     @model_validator(mode="after")
@@ -2134,6 +2277,11 @@ class UpdateGameSettingsRequest(BaseModel):
             and self.auction_deposit_percent is None
             and self.auction_minimum_bid_percent is None
             and self.economic_difficulty is None
+            and self.advanced_economy_enabled is None
+            and self.operating_cost_percent is None
+            and self.finale_trigger_week is None
+            and self.finale_duration_weeks is None
+            and self.finale_vote_interval_weeks is None
             and self.rules is None
         ):
             raise ValueError("at least one setting must be provided")

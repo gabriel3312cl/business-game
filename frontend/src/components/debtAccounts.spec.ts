@@ -22,6 +22,8 @@ function plan(
     installments_remaining: installmentsRemaining,
     template: 'custom',
     created_at_sequence: 10,
+    reason: 'rent_installment',
+    source_trade_id: null,
   }
 }
 

@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -29,6 +30,7 @@ class UserRecord(Base):
     __tablename__ = "users"
     __table_args__ = (
         UniqueConstraint("email", name="uq_users_email"),
+        CheckConstraint("role IN ('player', 'admin')", name="ck_users_role"),
         Index("ix_users_active_email", "is_active", "email"),
     )
 
@@ -36,12 +38,33 @@ class UserRecord(Base):
     email: Mapped[str] = mapped_column(String(320))
     display_name: Mapped[str] = mapped_column(String(40))
     locale: Mapped[str] = mapped_column(String(10), default="es")
+    role: Mapped[str] = mapped_column(String(12), default="player")
     password_hash: Mapped[str] = mapped_column(String(255))
     ui_preferences: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
+    )
+
+
+class GameAudioOverrideRecord(Base):
+    __tablename__ = "game_audio_overrides"
+
+    sound_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    original_filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(30))
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        default=None,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
     )
 
 

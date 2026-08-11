@@ -347,6 +347,74 @@ function eventMessage(
         cycle: t(`economy.cycle.${textValue(event, 'cycle')}`),
       })
     }
+    case 'economy.operating_cost_announced':
+      return t('activity.operatingCostAnnounced', {
+        week: numberValue(event, 'due_week'),
+      })
+    case 'economy.operating_cost_due':
+      return t('activity.operatingCostDue', {
+        week: numberValue(event, 'week'),
+      })
+    case 'economy.operating_cost_paid':
+      return t('activity.operatingCostPaid', { player, amount })
+    case 'economy.operating_cost_deferred':
+      return t('activity.operatingCostDeferred', {
+        player,
+        amount: numberValue(event, 'total_due') ?? amount,
+      })
+    case 'economy.operating_debt_paid':
+      return t('activity.operatingDebtPaid', {
+        player,
+        amount,
+        remaining: numberValue(event, 'remaining_amount'),
+      })
+    case 'economy.public_project_announced':
+      return t('activity.publicProjectAnnounced', {
+        project: t(
+          `economy.advanced.projects.${textValue(event, 'kind')}`,
+        ),
+        amount: numberValue(event, 'minimum_bid'),
+      })
+    case 'economy.public_project_bid':
+      return t('activity.publicProjectBid', {
+        player,
+        amount,
+      })
+    case 'economy.public_project_awarded': {
+      const winnerId = textValue(event, 'winner_id')
+      return winnerId
+        ? t('activity.publicProjectAwarded', {
+            player: playerName(winnerId),
+            amount,
+          })
+        : t('activity.publicProjectNoAward')
+    }
+    case 'economy.public_project_completed':
+      return t('activity.publicProjectCompleted', {
+        player,
+        amount: numberValue(event, 'reward_amount'),
+      })
+    case 'economy.public_project_failed':
+      return t('activity.publicProjectFailed', { player })
+    case 'game.finale_vote_opened':
+      return t('activity.finaleVoteOpened', {
+        weeks: numberValue(event, 'duration_weeks'),
+      })
+    case 'game.finale_vote_cast':
+      return t('activity.finaleVoteCast', {
+        player,
+        vote: event.data.approve
+          ? t('economy.advanced.finale.approve')
+          : t('economy.advanced.finale.reject'),
+      })
+    case 'game.finale_vote_rejected':
+      return t('activity.finaleVoteRejected', {
+        week: numberValue(event, 'next_vote_week'),
+      })
+    case 'game.finale_started':
+      return t('activity.finaleStarted', {
+        week: numberValue(event, 'ends_week'),
+      })
     case 'game.created':
       return t('activity.gameCreated')
     case 'player.joined':

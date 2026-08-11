@@ -39,9 +39,11 @@ import {
   type BoardToken,
 } from './BoardTile'
 import { BoardTileDialog } from './BoardTileDialog'
+import { TileVisual } from './AssetVisual'
 import { affectedTileIds } from './boardActionPulse'
 import { perimeterPosition } from './boardGeometry'
-import type { BoardHeatmap } from './boardHeatmap'
+import { boardHeatmapColor, type BoardHeatmap } from './boardHeatmap'
+import { defaultTileColor, tileIconBackgroundStyle } from './tilePresentation'
 import { tokenAssetPath } from './tokenAppearance'
 import { automaticPlayerAppearance } from './playerAppearance'
 import {
@@ -383,11 +385,11 @@ export function GameBoard({
         maxHeight: fitAvailableHeight ? '100%' : undefined,
         aspectRatio: '1',
         flex: '0 0 auto',
-        bgcolor: '#100d1d',
-        border: '1px solid rgba(255,255,255,.08)',
+        background: 'var(--game-theme-board)',
+        border: '1px solid var(--game-theme-border)',
         borderRadius: 2.5,
         overflow: 'hidden',
-        boxShadow: '0 26px 80px rgba(0,0,0,.45)',
+        boxShadow: 'var(--game-theme-shadow)',
       }}
     >
       <Box
@@ -410,6 +412,7 @@ export function GameBoard({
       {pack.board.tiles.map((tile, index) => {
         const position = perimeterPosition(index, side)
         const name = pack.messages[tile.name_key] ?? tile.id
+        const tileAccent = tile.color ?? defaultTileColor(tile.kind)
         const owner = ownersById.get(game?.owners[tile.id] ?? '')
         const buildingLevel = game?.building_levels[tile.id] ?? 0
         const mortgaged = game?.mortgaged_property_ids.includes(tile.id) ?? false
@@ -461,40 +464,115 @@ export function GameBoard({
             onFocus={() => setFocusableTileId(tile.id)}
             onKeyDown={(event) => handleTileKeyDown(event, index)}
             tooltip={
-              <Stack spacing={0.25}>
-                <Typography variant="subtitle2" fontWeight={850}>
-                  {name}
-                </Typography>
-                {tile.price != null && (
-                  <Typography variant="caption">
-                    {t('purchasePrice', { amount: tile.price })}
-                  </Typography>
-                )}
-                <Typography variant="caption">
-                  {owner
-                    ? t('ownedBy', { player: owner.displayName })
-                    : tile.price != null
-                      ? t('unownedProperty')
-                      : t(`tileKind.${tile.kind}`)}
-                </Typography>
-                {buildingLabel && (
-                  <Typography variant="caption" color="success.light" fontWeight={800}>
-                    {buildingLabel}
-                  </Typography>
-                )}
-                {mortgaged && (
-                  <Typography variant="caption" color="warning.light" fontWeight={850}>
-                    {t('mortgaged')}
-                  </Typography>
-                )}
-                <Typography variant="caption" color="secondary.light">
+              <Stack spacing={1.15}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Box
+                    aria-hidden
+                    sx={{
+                      width: 38,
+                      height: 38,
+                      flex: '0 0 auto',
+                      display: 'grid',
+                      placeItems: 'center',
+                      ...tileIconBackgroundStyle(tile.icon_background, tileAccent),
+                      '& svg': { fontSize: 22 },
+                    }}
+                  >
+                    <TileVisual
+                      kind={tile.kind}
+                      icon={tile.icon}
+                      assetPath={tile.asset_path}
+                    />
+                  </Box>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        display: 'block',
+                        color: tileAccent,
+                        fontSize: 10,
+                        fontWeight: 900,
+                        lineHeight: 1.2,
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      {t(`tileKind.${tile.kind}`)}
+                    </Typography>
+                    <Typography
+                      variant="subtitle2"
+                      sx={{ fontSize: 17, fontWeight: 900, lineHeight: 1.15 }}
+                    >
+                      {name}
+                    </Typography>
+                  </Box>
+                </Stack>
+
+                <Stack spacing={0.55}>
+                  {tile.price != null && (
+                    <Typography variant="caption" sx={{ fontSize: 13 }}>
+                      {t('purchasePrice', { amount: tile.price })}
+                    </Typography>
+                  )}
+                  {(owner || tile.price != null) && (
+                    <Stack direction="row" spacing={0.7} alignItems="center">
+                      <Box
+                        aria-hidden
+                        sx={{
+                          width: 9,
+                          height: 9,
+                          flex: '0 0 auto',
+                          borderRadius: '50%',
+                          bgcolor: owner?.color ?? 'rgba(255,255,255,.4)',
+                          border: '1px solid rgba(255,255,255,.65)',
+                          boxShadow: owner ? `0 0 8px ${owner.color}` : 'none',
+                        }}
+                      />
+                      <Typography variant="caption" sx={{ fontSize: 13 }}>
+                        {owner
+                          ? t('ownedBy', { player: owner.displayName })
+                          : t('unownedProperty')}
+                      </Typography>
+                    </Stack>
+                  )}
+                  {buildingLabel && (
+                    <Typography
+                      variant="caption"
+                      sx={{ color: '#79e691', fontSize: 13, fontWeight: 850 }}
+                    >
+                      {buildingLabel}
+                    </Typography>
+                  )}
+                  {mortgaged && (
+                    <Typography
+                      variant="caption"
+                      sx={{ color: '#ffbd5c', fontSize: 13, fontWeight: 900 }}
+                    >
+                      {t('mortgaged')}
+                    </Typography>
+                  )}
+                  {tileHeatmap && (
+                    <Typography
+                      variant="caption"
+                      sx={{ color: '#70dcff', fontSize: 13, fontWeight: 850 }}
+                    >
+                      {tileHeatmap.ariaLabel}
+                    </Typography>
+                  )}
+                </Stack>
+
+                <Typography
+                  variant="caption"
+                  sx={{
+                    pt: 0.9,
+                    borderTop: `1px solid color-mix(in srgb, ${tileAccent} 35%, transparent)`,
+                    color: 'secondary.light',
+                    fontSize: 12,
+                    fontWeight: 750,
+                  }}
+                >
                   {t('clickForTileDetails')}
                 </Typography>
-                {tileHeatmap && (
-                  <Typography variant="caption" color="info.light" fontWeight={800}>
-                    {tileHeatmap.ariaLabel}
-                  </Typography>
-                )}
               </Stack>
             }
             onClick={() => {
@@ -534,8 +612,8 @@ export function GameBoard({
             maxHeight: '46%',
             overflowY: 'auto',
             p: { xs: 1, sm: 1.5 },
-            border: `1px solid ${previewTile.color ?? 'rgba(184,255,61,.55)'}`,
-            bgcolor: 'rgba(18,14,31,.96)',
+            border: `1px solid ${previewTile.color ?? 'var(--game-theme-primary)'}`,
+            bgcolor: 'var(--game-theme-surface)',
             backdropFilter: 'blur(14px)',
             boxShadow: '0 18px 50px rgba(0,0,0,.58)',
           }}
@@ -613,14 +691,14 @@ export function GameBoard({
       )}
 
       <Stack
+        data-board-center
         sx={{
           gridColumn: `2 / ${side}`,
           gridRow: `2 / ${side}`,
           alignItems: 'center',
           justifyContent: 'center',
           textAlign: 'center',
-          background:
-            'radial-gradient(circle at center, rgba(91,73,143,.18), transparent 58%)',
+          background: 'var(--game-theme-board-center)',
           p: { xs: 0.75, sm: 1.5, md: 2.5 },
           minWidth: 0,
           minHeight: 0,
@@ -803,7 +881,7 @@ function boardTileHeatmap(
   if (heatmap.mode === 'history') {
     return {
       intensity: cell.intensity,
-      color: '#ff7043',
+      color: boardHeatmapColor(cell.intensity),
       valueLabel: String(cell.value),
       ariaLabel: t('heatmap.visitCount', { count: cell.value }),
     }
@@ -814,7 +892,7 @@ function boardTileHeatmap(
   }).format((cell.value / heatmap.total) * 100)
   return {
     intensity: cell.intensity,
-    color: '#35d7ff',
+    color: boardHeatmapColor(cell.intensity),
     valueLabel: `${percentage}%`,
     ariaLabel: t('heatmap.probabilityValue', { value: percentage }),
   }

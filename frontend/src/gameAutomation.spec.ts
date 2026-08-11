@@ -178,4 +178,28 @@ describe('nextAutomationCommand', () => {
       }),
     ).toBeNull()
   })
+
+  it('does not roll while operating costs require a decision', () => {
+    expect(
+      nextAutomationCommand({
+        game: game({
+          phase: 'waiting_for_roll',
+          economy: {
+            elapsed_weeks: 12,
+            operating_cost_assessment: {
+              due_week: 12,
+              announced_week: 11,
+              amounts: { [user.user_id]: 100 },
+              resolved_player_ids: [],
+            },
+          } as unknown as GameState['economy'],
+        }),
+        userId: user.user_id,
+        autoRejectTrades: false,
+        autoRollDice: true,
+        autoEndTurns: false,
+        motionPending: false,
+      }),
+    ).toBeNull()
+  })
 })

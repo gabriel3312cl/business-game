@@ -2,6 +2,8 @@ import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import DragIndicatorRoundedIcon from '@mui/icons-material/DragIndicatorRounded'
 import KeyboardDoubleArrowLeftRoundedIcon from '@mui/icons-material/KeyboardDoubleArrowLeftRounded'
 import KeyboardDoubleArrowRightRoundedIcon from '@mui/icons-material/KeyboardDoubleArrowRightRounded'
+import MinimizeRoundedIcon from '@mui/icons-material/MinimizeRounded'
+import OpenInFullRoundedIcon from '@mui/icons-material/OpenInFullRounded'
 import { Box, IconButton, Paper, Stack, Tooltip, Typography } from '@mui/material'
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -15,6 +17,8 @@ import type { WorkspacePanelWindowGeometry } from '../types'
 
 const MIN_WINDOW_WIDTH = 280
 const MIN_WINDOW_HEIGHT = 180
+const MINIMIZED_WINDOW_WIDTH = 320
+const WINDOW_HEADER_HEIGHT = 44
 const WORKSPACE_RAIL_WIDTH = 64
 const VISIBLE_HEADER_HEIGHT = 48
 const KEYBOARD_RESIZE_STEP = 16
@@ -29,6 +33,8 @@ interface Props {
   resizeLabel: string
   dockLeftLabel: string
   dockRightLabel: string
+  minimizeLabel: string
+  restoreLabel: string
   closeLabel: string
   closeDisabled?: boolean
   onActivate: () => void
@@ -55,6 +61,8 @@ export function FloatingWorkspacePanel({
   resizeLabel,
   dockLeftLabel,
   dockRightLabel,
+  minimizeLabel,
+  restoreLabel,
   closeLabel,
   closeDisabled = false,
   onActivate,
@@ -64,6 +72,7 @@ export function FloatingWorkspacePanel({
   onClose,
 }: Props) {
   const interactionRef = useRef<Interaction | null>(null)
+  const [minimized, setMinimized] = useState(false)
   const [draft, setDraft] = useState(() => fitGeometryToViewport(geometry))
   const draftRef = useRef(fitGeometryToViewport(geometry))
 
@@ -210,16 +219,18 @@ export function FloatingWorkspacePanel({
         position: 'absolute',
         left: draft.x,
         top: draft.y,
-        width: draft.width,
-        height: draft.height,
+        width: minimized
+          ? Math.min(draft.width, MINIMIZED_WINDOW_WIDTH)
+          : draft.width,
+        height: minimized ? WINDOW_HEADER_HEIGHT : draft.height,
         zIndex,
         display: 'flex',
         flexDirection: 'column',
         minWidth: MIN_WINDOW_WIDTH,
-        minHeight: MIN_WINDOW_HEIGHT,
+        minHeight: minimized ? WINDOW_HEADER_HEIGHT : MIN_WINDOW_HEIGHT,
         overflow: 'hidden',
-        border: '1px solid rgba(184,255,61,.32)',
-        boxShadow: '0 22px 70px rgba(0,0,0,.65)',
+        border: '1px solid var(--game-theme-border)',
+        boxShadow: 'var(--game-theme-shadow)',
       }}
     >
       <Stack
@@ -232,12 +243,12 @@ export function FloatingWorkspacePanel({
         onPointerCancel={finishInteraction}
         aria-label={moveLabel}
         sx={{
-          minHeight: 44,
+          minHeight: WINDOW_HEADER_HEIGHT,
           px: 1,
           cursor: 'grab',
           touchAction: 'none',
-          borderBottom: '1px solid rgba(255,255,255,.08)',
-          bgcolor: 'rgba(26,22,40,.98)',
+          borderBottom: '1px solid var(--game-theme-border)',
+          bgcolor: 'var(--game-theme-elevated)',
           '&:active': { cursor: 'grabbing' },
         }}
       >
@@ -265,6 +276,24 @@ export function FloatingWorkspacePanel({
             <KeyboardDoubleArrowRightRoundedIcon fontSize="small" />
           </IconButton>
         </Tooltip>
+        <Tooltip title={minimized ? restoreLabel : minimizeLabel}>
+          <IconButton
+            size="small"
+            aria-label={minimized ? restoreLabel : minimizeLabel}
+            aria-expanded={!minimized}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => {
+              onActivate()
+              setMinimized((current) => !current)
+            }}
+          >
+            {minimized ? (
+              <OpenInFullRoundedIcon fontSize="small" />
+            ) : (
+              <MinimizeRoundedIcon fontSize="small" />
+            )}
+          </IconButton>
+        </Tooltip>
         <Tooltip title={closeLabel}>
           <IconButton
             size="small"
@@ -278,6 +307,7 @@ export function FloatingWorkspacePanel({
         </Tooltip>
       </Stack>
       <Box
+        hidden={minimized}
         sx={{
           flex: 1,
           minHeight: 0,
@@ -290,6 +320,7 @@ export function FloatingWorkspacePanel({
         {children}
       </Box>
       <Box
+        hidden={minimized}
         role="separator"
         aria-label={resizeLabel}
         aria-orientation="horizontal"
@@ -307,6 +338,7 @@ export function FloatingWorkspacePanel({
         onKeyDown={resizeWithKeyboard}
         sx={{
           position: 'absolute',
+          display: minimized ? 'none' : 'block',
           right: 0,
           bottom: 0,
           width: 32,

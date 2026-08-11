@@ -3,6 +3,7 @@ import type {
   GameState,
   TileDefinition,
 } from '../types'
+import { indexedAmount } from './economicValues'
 
 export type PropertyRuleReason =
   | 'gameNotActive'
@@ -74,10 +75,12 @@ export function buildAvailability(
   )
   if (level !== minimumLevel) return denied('buildEvenly')
 
-  const cost =
+  const cost = indexedAmount(
+    game,
     level === 4 && tile.hotel_cost != null
       ? tile.hotel_cost
-      : (tile.build_cost ?? 0)
+      : (tile.build_cost ?? 0),
+  )
   const player = game.players.find((candidate) => candidate.user_id === actorId)
   if (!player || player.balance < cost) return denied('insufficientBalance')
   if (level < 4 && game.houses_remaining < 1) {
@@ -142,7 +145,7 @@ export function buildGroupRoundAvailability(
   const amount = targetTiles.reduce(
     (total, tile) =>
       total +
-      (minimumLevel === 4 && tile.hotel_cost != null
+      indexedAmount(game, minimumLevel === 4 && tile.hotel_cost != null
         ? tile.hotel_cost
         : (tile.build_cost ?? 0)),
     0,
@@ -193,7 +196,9 @@ export function sellGroupRoundAvailability(
       maximumLevel === 5 && tile.hotel_cost != null
         ? tile.hotel_cost
         : (tile.build_cost ?? 0)
-    return total + Math.floor((cost * pack.manifest.building_sell_percent) / 100)
+    return total + Math.floor(
+      (indexedAmount(game, cost) * pack.manifest.building_sell_percent) / 100,
+    )
   }, 0)
   return { allowed: true, amount, propertyCount: targetTiles.length }
 }
@@ -234,17 +239,18 @@ export function unmortgageAvailability(
     return denied('notMortgaged')
   }
   const player = game.players.find((candidate) => candidate.user_id === actorId)
-  if (!player || player.balance < unmortgageCost(pack, tile)) {
+  if (!player || player.balance < unmortgageCost(game, pack, tile)) {
     return denied('insufficientBalance')
   }
   return { allowed: true }
 }
 
 export function unmortgageCost(
+  game: GameState,
   pack: ContentPack,
   tile: TileDefinition,
 ): number {
-  const value = tile.mortgage_value ?? 0
+  const value = indexedAmount(game, tile.mortgage_value ?? 0)
   return value + Math.ceil((value * pack.manifest.mortgage_interest_percent) / 100)
 }
 

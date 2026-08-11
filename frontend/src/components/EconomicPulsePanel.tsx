@@ -3,10 +3,11 @@ import AccountBalanceRoundedIcon from '@mui/icons-material/AccountBalanceRounded
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import BusinessRoundedIcon from '@mui/icons-material/BusinessRounded'
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded'
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import DeviceThermostatRoundedIcon from '@mui/icons-material/DeviceThermostatRounded'
-import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
 import InsightsRoundedIcon from '@mui/icons-material/InsightsRounded'
 import LandscapeRoundedIcon from '@mui/icons-material/LandscapeRounded'
+import OpenInFullRoundedIcon from '@mui/icons-material/OpenInFullRounded'
 import PriceChangeRoundedIcon from '@mui/icons-material/PriceChangeRounded'
 import SentimentSatisfiedAltRoundedIcon from '@mui/icons-material/SentimentSatisfiedAltRounded'
 import ShowChartRoundedIcon from '@mui/icons-material/ShowChartRounded'
@@ -17,8 +18,18 @@ import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded'
 import WaterDropRoundedIcon from '@mui/icons-material/WaterDropRounded'
 import WbSunnyRoundedIcon from '@mui/icons-material/WbSunnyRounded'
 import WorkRoundedIcon from '@mui/icons-material/WorkRounded'
-import { Box, Chip, Paper, Stack, Typography } from '@mui/material'
-import type { ReactElement, ReactNode } from 'react'
+import {
+  Box,
+  Chip,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  Paper,
+  Stack,
+  Typography,
+} from '@mui/material'
+import { useState, type ReactElement, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type {
   ContentPack,
@@ -58,6 +69,7 @@ const FAVORABLE_EVENTS = new Set<EconomicEventState['kind']>([
 
 export function EconomicPulsePanel({ game, pack }: Props) {
   const { t, i18n } = useTranslation()
+  const [open, setOpen] = useState(false)
   const economy = game.economy
   const cycleAccent = CYCLE_ACCENT[economy.cycle]
   const formattedDate = new Intl.DateTimeFormat(i18n.language, {
@@ -100,41 +112,32 @@ export function EconomicPulsePanel({ game, pack }: Props) {
         : ACCENT.neutral
 
   return (
-    <Paper
-      component="details"
-      variant="outlined"
-      aria-label={t('economy.title')}
-      sx={{
-        width: 'min(100%, 620px)',
-        borderRadius: 2.5,
-        borderColor: `${cycleAccent}52`,
-        background: `linear-gradient(145deg, ${cycleAccent}12 0%, rgba(29,25,49,.98) 44%, rgba(16,13,29,.99) 100%)`,
-        boxShadow:
-          'inset 0 1px 0 rgba(255,255,255,.055), 0 10px 30px rgba(0,0,0,.18)',
-        overflow: 'hidden',
-        '&[open] .economic-pulse-chevron': {
-          transform: 'rotate(180deg)',
-        },
-        '&[open] .economic-pulse-summary': {
-          borderBottomColor: `${cycleAccent}32`,
-        },
-        '@media (prefers-reduced-motion: reduce)': {
-          '& .economic-pulse-chevron': { transition: 'none' },
-        },
-      }}
-    >
-      <Box
-        component="summary"
-        className="economic-pulse-summary"
+    <>
+      <Paper
+        component="button"
+        type="button"
+        variant="outlined"
+        aria-label={t('economy.openDetails')}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls="economic-pulse-dialog"
+        onClick={() => setOpen(true)}
         sx={{
+          width: 'min(100%, 620px)',
           minHeight: 56,
           px: { xs: 0.8, sm: 1.1 },
           py: 0.75,
+          m: 0,
           cursor: 'pointer',
-          listStyle: 'none',
-          borderBottom: '1px solid transparent',
+          color: 'text.primary',
+          font: 'inherit',
+          textAlign: 'initial',
+          borderRadius: 2.5,
+          borderColor: `${cycleAccent}52`,
+          background: `linear-gradient(145deg, ${cycleAccent}12 0%, rgba(29,25,49,.98) 44%, rgba(16,13,29,.99) 100%)`,
+          boxShadow:
+            'inset 0 1px 0 rgba(255,255,255,.055), 0 10px 30px rgba(0,0,0,.18)',
           transition: 'background-color 140ms ease, border-color 140ms ease',
-          '&::-webkit-details-marker': { display: 'none' },
           '&:hover': { bgcolor: `${cycleAccent}0b` },
           '&:focus-visible': {
             outline: `3px solid ${ACCENT.primary}`,
@@ -227,7 +230,6 @@ export function EconomicPulsePanel({ game, pack }: Props) {
               }}
             />
             <Box
-              className="economic-pulse-chevron"
               aria-hidden
               sx={{
                 width: 32,
@@ -235,79 +237,110 @@ export function EconomicPulsePanel({ game, pack }: Props) {
                 display: 'grid',
                 placeItems: 'center',
                 color: 'text.secondary',
-                transition: 'transform 180ms ease',
               }}
             >
-              <ExpandMoreRoundedIcon />
+              <OpenInFullRoundedIcon fontSize="small" />
             </Box>
           </Stack>
         </Stack>
-      </Box>
+      </Paper>
 
-      <Stack spacing={1.1} sx={{ p: { xs: 0.8, sm: 1.1 } }}>
-        <Box component="section" aria-label={t('economy.indicators')}>
-          <SectionHeading
-            icon={<InsightsRoundedIcon />}
-            title={t('economy.indicators')}
-            accent={ACCENT.secondary}
-          />
-          <Box
-            component="dl"
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: {
-                xs: 'repeat(2, minmax(0, 1fr))',
-                sm: 'repeat(3, minmax(0, 1fr))',
-              },
-              gap: { xs: 0.6, sm: 0.75 },
-              m: 0,
-              mt: 0.65,
-            }}
+      <Dialog
+        id="economic-pulse-dialog"
+        open={open}
+        onClose={() => setOpen(false)}
+        fullWidth
+        maxWidth="sm"
+        aria-labelledby="economic-pulse-dialog-title"
+        PaperProps={{
+          sx: {
+            maxHeight: { xs: '90dvh', sm: '86dvh' },
+            border: `1px solid ${cycleAccent}52`,
+            background: `linear-gradient(145deg, ${cycleAccent}12 0%, rgba(29,25,49,.99) 38%, rgba(16,13,29,1) 100%)`,
+          },
+        }}
+      >
+        <DialogTitle id="economic-pulse-dialog-title" sx={{ pr: 7 }}>
+          <Typography component="span" variant="h6" fontWeight={900}>
+            {t('economy.title')}
+          </Typography>
+          <IconButton
+            aria-label={t('economy.closeDetails')}
+            onClick={() => setOpen(false)}
+            sx={{ position: 'absolute', right: 12, top: 10 }}
           >
-            <Metric
-              icon={
-                economy.annual_growth_basis_points < 0 ? (
-                  <TrendingDownRoundedIcon />
-                ) : (
-                  <TrendingUpRoundedIcon />
-                )
-              }
-              label={t('economy.growth')}
-              value={basisPoints(economy.annual_growth_basis_points)}
-              accent={economy.annual_growth_basis_points >= 0 ? ACCENT.success : ACCENT.danger}
-            />
-            <Metric
-              icon={<PriceChangeRoundedIcon />}
-              label={t('economy.inflation')}
-              value={basisPoints(economy.annual_inflation_basis_points)}
-              accent={ACCENT.warning}
-            />
-            <Metric
-              icon={<AccountBalanceRoundedIcon />}
-              label={t('economy.policyRate')}
-              value={basisPoints(economy.policy_rate_basis_points)}
-              accent={ACCENT.secondary}
-            />
-            <Metric
-              icon={<WorkRoundedIcon />}
-              label={t('economy.unemployment')}
-              value={basisPoints(economy.unemployment_basis_points)}
-              accent={ACCENT.danger}
-            />
-            <Metric
-              icon={<SentimentSatisfiedAltRoundedIcon />}
-              label={t('economy.confidence')}
-              value={`${economy.consumer_confidence}/200`}
-              accent={ACCENT.primary}
-            />
-            <Metric
-              icon={<ShowChartRoundedIcon />}
-              label={t('economy.sentiment')}
-              value={signedNumber.format(economy.market_sentiment)}
-              accent={marketAccent}
-            />
-          </Box>
-        </Box>
+            <CloseRoundedIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: { xs: 1, sm: 1.5 } }}>
+          <Stack spacing={1.1}>
+            <Box component="section" aria-label={t('economy.indicators')}>
+              <SectionHeading
+                icon={<InsightsRoundedIcon />}
+                title={t('economy.indicators')}
+                accent={ACCENT.secondary}
+              />
+              <Box
+                component="dl"
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: {
+                    xs: 'repeat(2, minmax(0, 1fr))',
+                    sm: 'repeat(3, minmax(0, 1fr))',
+                  },
+                  gap: { xs: 0.6, sm: 0.75 },
+                  m: 0,
+                  mt: 0.65,
+                }}
+              >
+                <Metric
+                  icon={
+                    economy.annual_growth_basis_points < 0 ? (
+                      <TrendingDownRoundedIcon />
+                    ) : (
+                      <TrendingUpRoundedIcon />
+                    )
+                  }
+                  label={t('economy.growth')}
+                  value={basisPoints(economy.annual_growth_basis_points)}
+                  accent={
+                    economy.annual_growth_basis_points >= 0
+                      ? ACCENT.success
+                      : ACCENT.danger
+                  }
+                />
+                <Metric
+                  icon={<PriceChangeRoundedIcon />}
+                  label={t('economy.inflation')}
+                  value={basisPoints(economy.annual_inflation_basis_points)}
+                  accent={ACCENT.warning}
+                />
+                <Metric
+                  icon={<AccountBalanceRoundedIcon />}
+                  label={t('economy.policyRate')}
+                  value={basisPoints(economy.policy_rate_basis_points)}
+                  accent={ACCENT.secondary}
+                />
+                <Metric
+                  icon={<WorkRoundedIcon />}
+                  label={t('economy.unemployment')}
+                  value={basisPoints(economy.unemployment_basis_points)}
+                  accent={ACCENT.danger}
+                />
+                <Metric
+                  icon={<SentimentSatisfiedAltRoundedIcon />}
+                  label={t('economy.confidence')}
+                  value={`${economy.consumer_confidence}/200`}
+                  accent={ACCENT.primary}
+                />
+                <Metric
+                  icon={<ShowChartRoundedIcon />}
+                  label={t('economy.sentiment')}
+                  value={signedNumber.format(economy.market_sentiment)}
+                  accent={marketAccent}
+                />
+              </Box>
+            </Box>
 
         {economy.active_events.length > 0 && (
           <Box component="section" aria-label={t('economy.activeEvents')}>
@@ -396,8 +429,10 @@ export function EconomicPulsePanel({ game, pack }: Props) {
             </Stack>
           </Box>
         )}
-      </Stack>
-    </Paper>
+          </Stack>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 

@@ -58,7 +58,13 @@ function fixture(): { game: GameState; pack: ContentPack } {
     board: {
       tiles: [
         { id: 'alpha', kind: 'property', name_key: 'alpha', price: 200, build_cost: 50 },
-        { id: 'beta', kind: 'property', name_key: 'beta', price: 120 },
+        {
+          id: 'beta',
+          kind: 'property',
+          name_key: 'beta',
+          price: 120,
+          mortgage_value: 60,
+        },
       ],
       decks: [],
     },
@@ -83,12 +89,12 @@ describe('game analytics', () => {
     })
     expect(linus).toMatchObject({
       cash: 500,
-      propertyValue: 120,
+      propertyValue: 60,
       totalDebt: 110,
-      estimatedNetWorth: 510,
+      estimatedNetWorth: 450,
       linkedEvents: 1,
     })
-    expect(result.totalEstimatedNetWorth).toBe(1610)
+    expect(result.totalEstimatedNetWorth).toBe(1550)
     expect(result.totalEstimatedNetWorth).toBe(
       result.players.reduce((total, player) => total + player.estimatedNetWorth, 0),
     )

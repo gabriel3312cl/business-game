@@ -37,6 +37,11 @@ interface Props {
     auction_deposit_percent?: number
     auction_minimum_bid_percent?: number
     economic_difficulty?: EconomicDifficulty
+    advanced_economy_enabled?: boolean
+    operating_cost_percent?: number
+    finale_trigger_week?: number
+    finale_duration_weeks?: number
+    finale_vote_interval_weeks?: number
     rules?: Partial<OptionalRules>
   }) => void
 }
@@ -89,6 +94,75 @@ export function LobbySettingsPanel({
             `economy.difficultyDescription.${game.settings.economic_difficulty}`,
           )}
         </Typography>
+        <FormControlLabel
+          labelPlacement="start"
+          sx={{ m: 0, justifyContent: 'space-between', gap: 1 }}
+          control={
+            <Switch
+              checked={game.settings.advanced_economy_enabled}
+              disabled={!isHost || busy}
+              onChange={(_, checked) =>
+                onUpdate({ advanced_economy_enabled: checked })
+              }
+            />
+          }
+          label={t('economy.advanced.enabled')}
+        />
+        {game.settings.advanced_economy_enabled && (
+          <>
+            <FormControl size="small" sx={{ width: '100%' }}>
+              <InputLabel>{t('economy.advanced.operatingCost')}</InputLabel>
+              <Select
+                value={game.settings.operating_cost_percent}
+                label={t('economy.advanced.operatingCost')}
+                disabled={!isHost || busy}
+                onChange={(event) =>
+                  onUpdate({ operating_cost_percent: Number(event.target.value) })
+                }
+              >
+                {[0, 1, 2, 3, 4, 5, 7, 10].map((percent) => (
+                  <MenuItem key={percent} value={percent}>
+                    {t('economy.advanced.percentEveryFourWeeks', { percent })}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ width: '100%' }}>
+              <InputLabel>{t('economy.advanced.finaleTrigger')}</InputLabel>
+              <Select
+                value={game.settings.finale_trigger_week}
+                label={t('economy.advanced.finaleTrigger')}
+                disabled={!isHost || busy}
+                onChange={(event) =>
+                  onUpdate({ finale_trigger_week: Number(event.target.value) })
+                }
+              >
+                {[40, 60, 80, 100, 120].map((week) => (
+                  <MenuItem key={week} value={week}>
+                    {t('economy.week', { count: week })}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ width: '100%' }}>
+              <InputLabel>{t('economy.advanced.finaleDuration')}</InputLabel>
+              <Select
+                value={game.settings.finale_duration_weeks}
+                label={t('economy.advanced.finaleDuration')}
+                disabled={!isHost || busy}
+                onChange={(event) =>
+                  onUpdate({ finale_duration_weeks: Number(event.target.value) })
+                }
+              >
+                {[8, 12, 16, 20].map((week) => (
+                  <MenuItem key={week} value={week}>
+                    {t('economy.advanced.weeks', { count: week })}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </>
+        )}
         <FormControl size="small" sx={{ width: '100%', minWidth: 0 }}>
           <InputLabel>{t('maximumPlayers')}</InputLabel>
           <Select

@@ -7,7 +7,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from business_game.api.admin_routes import router as admin_router
 from business_game.api.advisor_routes import router as advisor_router
+from business_game.api.audio_routes import admin_router as admin_audio_router
+from business_game.api.audio_routes import catalog_router as audio_router
 from business_game.api.board_routes import asset_router
 from business_game.api.board_routes import router as board_router
 from business_game.api.chat_routes import router as chat_router
@@ -56,6 +59,9 @@ api.include_router(board_router)
 api.include_router(asset_router)
 api.include_router(advisor_router)
 api.include_router(chat_router)
+api.include_router(audio_router)
+api.include_router(admin_audio_router)
+api.include_router(admin_router)
 
 
 @api.middleware("http")

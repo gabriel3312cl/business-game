@@ -96,6 +96,31 @@ const SOUND_GROUPS = [
     ],
   },
   {
+    id: 'bank',
+    sounds: [
+      'bank-loan-issued',
+      'bank-loan-payment',
+      'bank-emergency-credit',
+      'bank-loan-defaulted',
+      'bank-initialized',
+    ],
+  },
+  {
+    id: 'market',
+    sounds: [
+      'market-shares-bought',
+      'market-shares-sold',
+      'market-order-filled',
+      'market-order-placed',
+      'market-order-cancelled',
+      'market-dividend-paid',
+      'market-margin-call',
+      'market-position-liquidated',
+      'market-opened',
+      'economy-week-advanced',
+    ],
+  },
+  {
     id: 'auctions',
     sounds: [
       'auction-start',

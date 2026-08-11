@@ -190,6 +190,15 @@ function DebtSection({
                   }
                 />
               </Stack>
+              {plan.reason === 'player_loan' && (
+                <Chip
+                  size="small"
+                  color="secondary"
+                  variant="outlined"
+                  label={t('debtAccounts.playerLoan')}
+                  sx={{ alignSelf: 'flex-start' }}
+                />
+              )}
               <LinearProgress variant="determinate" value={paidPercent} />
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                 <Chip

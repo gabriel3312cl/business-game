@@ -24,6 +24,7 @@ import type {
   TileDefinition,
 } from '../types'
 import { TileVisual } from './AssetVisual'
+import { indexedAmount, indexedRent } from './economicValues'
 import { playerColor } from './gameColors'
 import {
   buildAvailability,
@@ -102,6 +103,10 @@ export function BoardTileDialog({
       !game.active_debt &&
       onTrade,
   )
+  const currentAmount = (amount: number, passThroughPercent = 100) =>
+    game ? indexedAmount(game, amount, passThroughPercent) : amount
+  const currentRent = (amount: number) =>
+    game ? indexedRent(game, tile, amount) : amount
   const build =
     game && currentUserId
       ? buildAvailability(game, pack, tile, currentUserId)
@@ -163,7 +168,7 @@ export function BoardTileDialog({
         <Stack spacing={2}>
           <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
             {tile.purchasable !== false && tile.price != null && (
-              <Chip label={t('purchasePrice', { amount: tile.price })} />
+              <Chip label={t('purchasePrice', { amount: currentAmount(tile.price) })} />
             )}
             {owner ? (
               <Chip
@@ -193,28 +198,28 @@ export function BoardTileDialog({
             }}
           >
             {tile.base_rent != null && (
-              <InfoCell label={t('baseRent')} value={`$${tile.base_rent}`} />
+              <InfoCell label={t('baseRent')} value={`$${currentRent(tile.base_rent)}`} />
             )}
             {tile.mortgage_value != null && (
               <InfoCell
                 label={t('mortgageValue')}
-                value={`$${tile.mortgage_value}`}
+                value={`$${currentAmount(tile.mortgage_value)}`}
               />
             )}
             {tile.build_cost != null && (
               <InfoCell
                 label={t('houseCost')}
-                value={`$${tile.build_cost}`}
+                value={`$${currentAmount(tile.build_cost)}`}
               />
             )}
             {tile.build_cost != null && (
               <InfoCell
                 label={t('hotelCost')}
-                value={`$${tile.hotel_cost ?? tile.build_cost}`}
+                value={`$${currentAmount(tile.hotel_cost ?? tile.build_cost)}`}
               />
             )}
             {tile.amount != null && (
-              <InfoCell label={t('landingAmount')} value={`$${tile.amount}`} />
+              <InfoCell label={t('landingAmount')} value={`$${currentAmount(tile.amount, 80)}`} />
             )}
             {tile.net_worth_percent != null && (
               <InfoCell
@@ -260,7 +265,7 @@ export function BoardTileDialog({
                     <Typography variant="caption" color="text.secondary">
                       {rentLevelLabel(t, tile, index)}
                     </Typography>
-                    <Typography fontWeight={850}>${rent}</Typography>
+                    <Typography fontWeight={850}>${currentRent(rent)}</Typography>
                   </Paper>
                 ))}
               </Box>
@@ -377,7 +382,7 @@ export function BoardTileDialog({
                       }
                     >
                       {t('unmortgageFor', {
-                        amount: unmortgageCost(pack, tile),
+                        amount: unmortgageCost(game, pack, tile),
                       })}
                     </Button>
                   ) : (
@@ -391,7 +396,9 @@ export function BoardTileDialog({
                         })
                       }
                     >
-                      {t('mortgageFor', { amount: tile.mortgage_value ?? 0 })}
+                      {t('mortgageFor', {
+                        amount: currentAmount(tile.mortgage_value ?? 0),
+                      })}
                     </Button>
                   )}
                   {tile.kind === 'property' && (
@@ -408,9 +415,13 @@ export function BoardTileDialog({
                       >
                         {level === 4
                           ? t('buyHotel', {
-                              amount: tile.hotel_cost ?? tile.build_cost ?? 0,
+                              amount: currentAmount(
+                                tile.hotel_cost ?? tile.build_cost ?? 0,
+                              ),
                             })
-                          : t('buyHouse', { amount: tile.build_cost ?? 0 })}
+                          : t('buyHouse', {
+                              amount: currentAmount(tile.build_cost ?? 0),
+                            })}
                       </Button>
                       <Button
                         variant="outlined"
