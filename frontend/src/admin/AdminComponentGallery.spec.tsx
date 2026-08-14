@@ -18,6 +18,9 @@ describe('AdminComponentGallery', () => {
     expect(html).toContain('Módulos de la aplicación')
     expect(html).toContain('Partidas activas')
     expect(html).toContain('Chat de la mesa')
+    expect(html).toContain('Subastas')
+    expect(html).toContain('2 estados interactivos')
+    expect(html).toContain('Abrir subasta')
     expect(html).toContain('Banco y crédito')
     expect(html).toContain('Mercado')
     expect(html).toContain('Propiedades')
@@ -41,6 +44,7 @@ describe('AdminComponentGallery', () => {
 
     expect(html).toContain('Component catalog')
     expect(html).toContain('Application modules')
+    expect(html).toContain('Auctions')
     expect(html).toContain('Bank and credit')
     expect(html).toContain('Bot management')
     expect(html).toContain('Dialogs and cards')

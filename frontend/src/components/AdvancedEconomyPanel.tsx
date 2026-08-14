@@ -135,7 +135,7 @@ export function AdvancedEconomyPanel({ game, pack, user, busy, onCommand }: Prop
       sx={{
         width: 'min(100%, 620px)',
         p: { xs: 0.85, sm: 1.1 },
-        borderRadius: 3,
+        borderRadius: '20px',
         borderColor: `${ACCENT.info}42`,
         background:
           'linear-gradient(145deg, rgba(72,200,255,.06) 0%, rgba(22,27,48,.98) 44%, rgba(12,17,31,.99) 100%)',
@@ -153,7 +153,7 @@ export function AdvancedEconomyPanel({ game, pack, user, busy, onCommand }: Prop
               display: 'grid',
               placeItems: 'center',
               flex: '0 0 auto',
-              borderRadius: 1.6,
+              borderRadius: '12px',
               color: ACCENT.info,
               bgcolor: `${ACCENT.info}1a`,
               border: `1px solid ${ACCENT.info}36`,
@@ -466,7 +466,7 @@ function CardIcon({
         display: 'grid',
         placeItems: 'center',
         flex: '0 0 auto',
-        borderRadius: 1.5,
+        borderRadius: '10px',
         color: accent,
         bgcolor: `${accent}18`,
         border: `1px solid ${accent}34`,
@@ -480,7 +480,7 @@ function CardIcon({
 function cardSx(accent: string) {
   return {
     p: { xs: 0.9, sm: 1.05 },
-    borderRadius: 2.4,
+    borderRadius: '16px',
     border: `1px solid ${accent}2f`,
     background: `linear-gradient(135deg, ${accent}0d 0%, rgba(8,14,24,.84) 58%, rgba(7,11,20,.92) 100%)`,
     boxShadow: 'inset 0 1px 0 rgba(255,255,255,.04)',

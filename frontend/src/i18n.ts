@@ -857,6 +857,7 @@ void i18n.use(initReactI18next).init({
               'Revisa los componentes, estados y patrones visuales del juego. Los controles son interactivos y no modifican partidas ni datos reales.',
             previewTheme: 'Tema de previsualización',
             openSample: 'Abrir muestra',
+            openAuction: 'Abrir subasta',
             closeSample: 'Cerrar muestra',
             overlayGroups: {
               auction: 'Subastas',
@@ -913,6 +914,7 @@ void i18n.use(initReactI18next).init({
             modules: {
               activeGames: 'Partidas activas',
               tableChat: 'Chat de la mesa',
+              auctions: 'Subastas',
               players: 'Jugadores',
               playerStatus: 'Estado del jugador',
               properties: 'Propiedades',
@@ -930,6 +932,7 @@ void i18n.use(initReactI18next).init({
               wide: 'Vista ancha',
               rail: 'Panel lateral · 420 px',
               live: 'Componente real',
+              interactiveStates: '{{count}} estados interactivos',
             },
             sections: {
               application: 'Módulos de la aplicación',
@@ -3078,6 +3081,7 @@ void i18n.use(initReactI18next).init({
               'Review the game components, states, and visual patterns. Controls are interactive and do not change games or real data.',
             previewTheme: 'Preview theme',
             openSample: 'Open sample',
+            openAuction: 'Open auction',
             closeSample: 'Close sample',
             overlayGroups: {
               auction: 'Auctions',
@@ -3134,6 +3138,7 @@ void i18n.use(initReactI18next).init({
             modules: {
               activeGames: 'Active games',
               tableChat: 'Table chat',
+              auctions: 'Auctions',
               players: 'Players',
               playerStatus: 'Player status',
               properties: 'Properties',
@@ -3151,6 +3156,7 @@ void i18n.use(initReactI18next).init({
               wide: 'Wide view',
               rail: 'Side panel · 420 px',
               live: 'Real component',
+              interactiveStates: '{{count}} interactive states',
             },
             sections: {
               application: 'Application modules',

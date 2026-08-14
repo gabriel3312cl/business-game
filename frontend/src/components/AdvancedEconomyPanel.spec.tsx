@@ -32,6 +32,8 @@ describe('AdvancedEconomyPanel', () => {
     expect(html).toContain('Inflación acumulada')
     expect(html).toContain('1,8')
     expect(html).not.toContain('Próximo cierre')
+    expect(html).toContain('border-radius:20px')
+    expect(html).toContain('border-radius:16px')
   })
 
   it('marks a project closed as soon as its closing week begins', () => {

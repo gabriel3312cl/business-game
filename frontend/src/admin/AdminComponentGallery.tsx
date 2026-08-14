@@ -201,6 +201,13 @@ export function AdminComponentGallery() {
                 </ModulePreview>
 
                 <ModulePreview
+                  name={t('admin.components.modules.auctions')}
+                  viewport={t('admin.components.viewport.interactiveStates', { count: 2 })}
+                >
+                  <AdminOverlayGallery filter="auctions" />
+                </ModulePreview>
+
+                <ModulePreview
                   name={t('admin.components.modules.tableChat')}
                   viewport={t('admin.components.viewport.rail')}
                   contentWidth={420}
@@ -286,7 +293,7 @@ export function AdminComponentGallery() {
               title={t('admin.components.sections.overlaysCatalog')}
               description={t('admin.components.sections.overlaysCatalogHelp')}
             >
-              <AdminOverlayGallery />
+              <AdminOverlayGallery filter="other" />
             </ComponentSection>
 
             <ComponentSection

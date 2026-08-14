@@ -195,7 +195,8 @@ function PanelSample({
         variant="outlined"
         sx={{
           p: { xs: 1.25, md: 2 },
-          height: tall ? 620 : 470,
+          height: tall ? 620 : 'auto',
+          maxHeight: tall ? 620 : 470,
           overflow: 'auto',
           bgcolor: 'background.default',
           backgroundImage: 'none',

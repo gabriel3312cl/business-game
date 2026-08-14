@@ -54,12 +54,16 @@ type OverlaySample =
 
 const noopCommand = async () => true
 
-export function AdminOverlayGallery() {
+export function AdminOverlayGallery({
+  filter = 'all',
+}: {
+  filter?: 'all' | 'auctions' | 'other'
+}) {
   const { t } = useTranslation()
   const [sample, setSample] = useState<OverlaySample | null>(null)
   const close = () => setSample(null)
 
-  const samples: Array<{
+  const allSamples: Array<{
     id: OverlaySample
     icon: ReactNode
     group: 'auction' | 'cards' | 'game' | 'account'
@@ -76,6 +80,11 @@ export function AdminOverlayGallery() {
     { id: 'game-setup', icon: <TuneRoundedIcon />, group: 'game' },
     { id: 'auth', icon: <AccountCircleRoundedIcon />, group: 'account' },
   ]
+  const samples = allSamples.filter((item) => {
+    if (filter === 'auctions') return item.group === 'auction'
+    if (filter === 'other') return item.group !== 'auction'
+    return true
+  })
 
   return (
     <>
@@ -112,7 +121,9 @@ export function AdminOverlayGallery() {
                 label={t(`admin.components.overlayGroups.${item.group}`)}
               />
               <Button size="small" onClick={() => setSample(item.id)}>
-                {t('admin.components.openSample')}
+                {item.group === 'auction'
+                  ? t('admin.components.openAuction')
+                  : t('admin.components.openSample')}
               </Button>
             </CardActions>
           </Card>
