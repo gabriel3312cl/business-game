@@ -1,6 +1,6 @@
-import board from '../../../content/packs/extended-demo/board.json'
-import messages from '../../../content/packs/extended-demo/locales/es.json'
-import manifest from '../../../content/packs/extended-demo/manifest.json'
+import board from './fixtures/extended-demo/board.json'
+import messages from './fixtures/extended-demo/locales/es.json'
+import manifest from './fixtures/extended-demo/manifest.json'
 import type {
   ContentPack,
   GameState,
