@@ -856,7 +856,88 @@ void i18n.use(initReactI18next).init({
             description:
               'Revisa los componentes, estados y patrones visuales del juego. Los controles son interactivos y no modifican partidas ni datos reales.',
             previewTheme: 'Tema de previsualización',
+            openSample: 'Abrir muestra',
+            closeSample: 'Cerrar muestra',
+            overlayGroups: {
+              auction: 'Subastas',
+              cards: 'Tarjetas',
+              game: 'Partida',
+              account: 'Cuenta',
+            },
+            overlays: {
+              'auction-ready': {
+                title: 'Subasta · preparación',
+                description: 'Depósitos, participantes elegibles y confirmación antes de ofertar.',
+              },
+              'auction-bidding': {
+                title: 'Subasta · ofertas',
+                description: 'Mapa, propiedad, puja vigente, historial y préstamo rápido.',
+              },
+              'card-draw': {
+                title: 'Tarjetas · selección',
+                description: 'Abanico de cartas antes de revelar la elección.',
+              },
+              'card-revealed': {
+                title: 'Tarjetas · revelada',
+                description: 'Carta elegida, contenido y continuidad de la partida.',
+              },
+              'card-choice': {
+                title: 'Tarjeta · decisión',
+                description: 'Pregunta interactiva con alternativas y consecuencias.',
+              },
+              'card-result': {
+                title: 'Tarjeta · resultado',
+                description: 'Resolución de una decisión y resultado confirmado.',
+              },
+              property: {
+                title: 'Detalle de propiedad',
+                description: 'Precio, renta, grupo, dueño, edificios y acciones disponibles.',
+              },
+              finished: {
+                title: 'Fin de partida',
+                description: 'Ganador, métricas finales y clasificación completa.',
+              },
+              token: {
+                title: 'Personalización de ficha',
+                description: 'Colores, gradientes, patrones, formas e iconos.',
+              },
+              'game-setup': {
+                title: 'Configuración de partida',
+                description: 'Dificultad, economía avanzada y colecciones de cartas.',
+              },
+              auth: {
+                title: 'Acceso y registro',
+                description: 'Formulario de cuenta, validación y cambio de modo.',
+              },
+            },
+            modules: {
+              activeGames: 'Partidas activas',
+              tableChat: 'Chat de la mesa',
+              players: 'Jugadores',
+              playerStatus: 'Estado del jugador',
+              properties: 'Propiedades',
+              trades: 'Intercambios',
+              bank: 'Banco y crédito',
+              market: 'Mercado',
+              debts: 'Cuentas y deudas',
+              economy: 'Pulso económico',
+              advancedEconomy: 'Economía avanzada',
+              activity: 'Actividad de la partida',
+              lobby: 'Configuración de la sala',
+              bots: 'Administración de bots',
+            },
+            viewport: {
+              wide: 'Vista ancha',
+              rail: 'Panel lateral · 420 px',
+              live: 'Componente real',
+            },
             sections: {
+              application: 'Módulos de la aplicación',
+              applicationHelp:
+                'Componentes completos con los mismos datos, tamaños y estados que aparecen en el juego.',
+              overlaysCatalog: 'Modales y tarjetas',
+              overlaysCatalogHelp:
+                'Abre cada componente real para revisar su diseño, contenido y estados completos.',
               foundation: 'Fundamentos',
               foundationHelp: 'Tipografía y colores base del tema seleccionado.',
               actions: 'Botones y acciones',
@@ -2996,7 +3077,88 @@ void i18n.use(initReactI18next).init({
             description:
               'Review the game components, states, and visual patterns. Controls are interactive and do not change games or real data.',
             previewTheme: 'Preview theme',
+            openSample: 'Open sample',
+            closeSample: 'Close sample',
+            overlayGroups: {
+              auction: 'Auctions',
+              cards: 'Cards',
+              game: 'Game',
+              account: 'Account',
+            },
+            overlays: {
+              'auction-ready': {
+                title: 'Auction · readiness',
+                description: 'Deposits, eligible participants, and confirmation before bidding.',
+              },
+              'auction-bidding': {
+                title: 'Auction · bidding',
+                description: 'Map, property, current bid, history, and quick loan.',
+              },
+              'card-draw': {
+                title: 'Cards · selection',
+                description: 'Card fan before revealing the selection.',
+              },
+              'card-revealed': {
+                title: 'Cards · revealed',
+                description: 'Selected card, content, and game continuation.',
+              },
+              'card-choice': {
+                title: 'Card · decision',
+                description: 'Interactive question with alternatives and consequences.',
+              },
+              'card-result': {
+                title: 'Card · result',
+                description: 'Decision resolution and confirmed outcome.',
+              },
+              property: {
+                title: 'Property details',
+                description: 'Price, rent, group, owner, buildings, and available actions.',
+              },
+              finished: {
+                title: 'Game finished',
+                description: 'Winner, final metrics, and complete standings.',
+              },
+              token: {
+                title: 'Token customization',
+                description: 'Colors, gradients, patterns, shapes, and icons.',
+              },
+              'game-setup': {
+                title: 'Game setup',
+                description: 'Difficulty, advanced economy, and card collections.',
+              },
+              auth: {
+                title: 'Sign in and registration',
+                description: 'Account form, validation, and mode switching.',
+              },
+            },
+            modules: {
+              activeGames: 'Active games',
+              tableChat: 'Table chat',
+              players: 'Players',
+              playerStatus: 'Player status',
+              properties: 'Properties',
+              trades: 'Trades',
+              bank: 'Bank and credit',
+              market: 'Market',
+              debts: 'Accounts and debts',
+              economy: 'Economic pulse',
+              advancedEconomy: 'Advanced economy',
+              activity: 'Game activity',
+              lobby: 'Room settings',
+              bots: 'Bot management',
+            },
+            viewport: {
+              wide: 'Wide view',
+              rail: 'Side panel · 420 px',
+              live: 'Real component',
+            },
             sections: {
+              application: 'Application modules',
+              applicationHelp:
+                'Complete components with the same data, sizes, and states used in the game.',
+              overlaysCatalog: 'Dialogs and cards',
+              overlaysCatalogHelp:
+                'Open each real component to review its complete design, content, and states.',
               foundation: 'Foundations',
               foundationHelp: 'Typography and base colors for the selected theme.',
               actions: 'Buttons and actions',

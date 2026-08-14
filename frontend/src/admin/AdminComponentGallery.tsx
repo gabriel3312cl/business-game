@@ -7,6 +7,7 @@ import HomeWorkRoundedIcon from '@mui/icons-material/HomeWorkRounded'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import MoreVertRoundedIcon from '@mui/icons-material/MoreVertRounded'
 import NotificationsRoundedIcon from '@mui/icons-material/NotificationsRounded'
+import OpenInNewRoundedIcon from '@mui/icons-material/OpenInNewRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import {
   Alert,
@@ -56,15 +57,60 @@ import {
 import { ThemeProvider } from '@mui/material/styles'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { GameChatPanel } from '../chat/GameChatPanel'
+import type { GameChat } from '../chat/useGameChat'
+import { ActiveGamesPanel } from '../components/ActiveGamesPanel'
 import { Dice3D } from '../components/Dice3D'
 import { TileVisual } from '../components/AssetVisual'
+import { PersonalizablePanel } from '../components/PersonalizablePanel'
 import {
   createGameTheme,
   DEFAULT_GAME_COLOR_THEME,
   GAME_COLOR_THEMES,
   getGameColorTheme,
 } from '../theme'
-import type { GameColorThemeId } from '../types'
+import type { GameColorThemeId, GameState, User } from '../types'
+import { AdminOverlayGallery } from './AdminOverlayGallery'
+import { AdminPanelModuleGallery } from './AdminPanelModuleGallery'
+
+const PREVIEW_USER = {
+  id: 'preview-user',
+  display_name: 'Batman',
+} as User
+
+const ACTIVE_GAME_PREVIEWS = [
+  previewGame({
+    id: 'e457e4ae-preview',
+    players: ['Batman', 'Camila'],
+    currentPlayer: 0,
+  }),
+  previewGame({
+    id: '1d7bdabe-preview',
+    players: [
+      'Batman',
+      'Bot Equilibrado 1',
+      'Bot Negociador 2',
+      'Bot Inversionista 3',
+    ],
+    currentPlayer: 2,
+  }),
+]
+
+const CHAT_PREVIEW: GameChat = {
+  messages: [
+    previewMessage(1, 'Bot Equilibrado 4', '$300 de renta en Reading Railroad. Así se financia el tablero.'),
+    previewMessage(2, 'Bot Negociador 4', '$1200 de renta en Marvin Gardens. Así se financia el tablero.'),
+    previewMessage(3, 'Bot Equilibrado 2', 'Otro jugador recibió $150 como premio. Ahora hay margen para negociar.'),
+    previewMessage(4, 'Bot Negociador 4', 'Otro jugador recibió $100 como premio. Nada mal.'),
+  ],
+  hasMore: false,
+  loading: false,
+  loadingOlder: false,
+  error: false,
+  receive: () => undefined,
+  loadOlder: () => undefined,
+  dismissError: () => undefined,
+}
 
 export function AdminComponentGallery() {
   const { t } = useTranslation()
@@ -137,6 +183,56 @@ export function AdminComponentGallery() {
         >
           <Stack spacing={3}>
             <ComponentSection
+              title={t('admin.components.sections.application')}
+              description={t('admin.components.sections.applicationHelp')}
+            >
+              <Stack spacing={2.5}>
+                <ModulePreview
+                  name={t('admin.components.modules.activeGames')}
+                  viewport={t('admin.components.viewport.wide')}
+                >
+                  <ActiveGamesPanel
+                    games={ACTIVE_GAME_PREVIEWS}
+                    user={PREVIEW_USER}
+                    loading={false}
+                    onResume={() => undefined}
+                    onRefresh={() => undefined}
+                  />
+                </ModulePreview>
+
+                <ModulePreview
+                  name={t('admin.components.modules.tableChat')}
+                  viewport={t('admin.components.viewport.rail')}
+                  contentWidth={420}
+                >
+                  <Box sx={{ height: 560 }}>
+                    <PersonalizablePanel
+                      id="component-gallery-chat"
+                      title={t('chat.title')}
+                      fillAvailableHeight
+                      headerActions={
+                        <IconButton size="small" aria-label={t('admin.components.openSample')}>
+                          <OpenInNewRoundedIcon fontSize="small" />
+                        </IconButton>
+                      }
+                    >
+                      <GameChatPanel
+                        game={ACTIVE_GAME_PREVIEWS[1]}
+                        user={PREVIEW_USER}
+                        chat={CHAT_PREVIEW}
+                        showHeader={false}
+                        fillAvailableHeight
+                        onSend={async () => true}
+                      />
+                    </PersonalizablePanel>
+                  </Box>
+                </ModulePreview>
+
+                <AdminPanelModuleGallery />
+              </Stack>
+            </ComponentSection>
+
+            <ComponentSection
               title={t('admin.components.sections.foundation')}
               description={t('admin.components.sections.foundationHelp')}
             >
@@ -184,6 +280,13 @@ export function AdminComponentGallery() {
                   ))}
                 </Box>
               </Box>
+            </ComponentSection>
+
+            <ComponentSection
+              title={t('admin.components.sections.overlaysCatalog')}
+              description={t('admin.components.sections.overlaysCatalogHelp')}
+            >
+              <AdminOverlayGallery />
             </ComponentSection>
 
             <ComponentSection
@@ -419,4 +522,77 @@ function ComponentSection({
       <Divider sx={{ mt: 3 }} />
     </Box>
   )
+}
+
+function ModulePreview({
+  name,
+  viewport,
+  contentWidth,
+  children,
+}: {
+  name: string
+  viewport: string
+  contentWidth?: number
+  children: React.ReactNode
+}) {
+  return (
+    <Box>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ mb: 1 }}>
+        <Typography fontWeight={850}>{name}</Typography>
+        <Chip size="small" variant="outlined" label={viewport} />
+      </Stack>
+      <Paper
+        variant="outlined"
+        sx={{
+          p: { xs: 1, md: 2 },
+          overflow: 'auto',
+          bgcolor: 'background.default',
+          backgroundImage: 'none',
+        }}
+      >
+        <Box sx={{ width: contentWidth ?? '100%', minWidth: 0, maxWidth: '100%', mx: contentWidth ? 'auto' : 0 }}>
+          {children}
+        </Box>
+      </Paper>
+    </Box>
+  )
+}
+
+function previewGame({
+  id,
+  players,
+  currentPlayer,
+}: {
+  id: string
+  players: string[]
+  currentPlayer: number
+}): GameState {
+  return {
+    id,
+    status: 'playing',
+    host_user_id: PREVIEW_USER.id,
+    current_player_index: currentPlayer,
+    players: players.map((displayName, index) => ({
+      user_id: index === 0 ? PREVIEW_USER.id : `preview-bot-${id}-${index}`,
+      display_name: displayName,
+      is_bot: index !== 0,
+      bankrupt: false,
+    })),
+    spectators: [],
+  } as unknown as GameState
+}
+
+function previewMessage(id: number, authorName: string, body: string) {
+  return {
+    id,
+    game_id: ACTIVE_GAME_PREVIEWS[1]?.id ?? 'preview-game',
+    author_id: `preview-message-author-${id}`,
+    author_name: authorName,
+    author_kind: 'bot' as const,
+    is_bot: true,
+    body,
+    template_key: null,
+    template_params: {},
+    created_at: `2026-08-13T22:${String(9 + id).padStart(2, '0')}:00-04:00`,
+  }
 }

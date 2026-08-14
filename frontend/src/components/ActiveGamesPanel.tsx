@@ -97,7 +97,7 @@ export function ActiveGamesPanel({
                   borderColor: 'rgba(255,255,255,.11)',
                   bgcolor: 'rgba(255,255,255,.035)',
                   border: '1px solid',
-                  borderRadius: 2.5,
+                  borderRadius: '20px',
                 }}
               >
                 <Box sx={{ p: 1.5 }}>
@@ -148,6 +148,7 @@ export function ActiveGamesPanel({
                       variant="contained"
                       color="secondary"
                       onClick={() => onResume(game)}
+                      sx={{ borderRadius: '14px' }}
                     >
                       {t('activeGames.resume')}
                     </Button>

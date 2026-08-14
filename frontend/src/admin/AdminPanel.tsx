@@ -29,7 +29,7 @@ import {
   Typography,
 } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api'
 import { GAME_SOUNDS, gameAudio, type GameSound } from '../audio/gameAudio'
@@ -39,7 +39,12 @@ import type {
   GameAudioCatalogItem,
   User,
 } from '../types'
-import { AdminComponentGallery } from './AdminComponentGallery'
+
+const AdminComponentGallery = lazy(() =>
+  import('./AdminComponentGallery').then((module) => ({
+    default: module.AdminComponentGallery,
+  })),
+)
 
 interface Props {
   user: User
@@ -316,7 +321,15 @@ export function AdminPanel({ user, onClose }: Props) {
 
       <Box sx={{ p: { xs: 1.5, md: 2.5 }, overflow: 'auto', minHeight: 0 }}>
         {tab === 'components' ? (
-          <AdminComponentGallery />
+          <Suspense
+            fallback={
+              <Stack alignItems="center" py={8}>
+                <CircularProgress />
+              </Stack>
+            }
+          >
+            <AdminComponentGallery />
+          </Suspense>
         ) : error && (
           <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 2 }}>
             {error}
