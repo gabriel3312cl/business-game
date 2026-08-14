@@ -39,13 +39,14 @@ import type {
   GameAudioCatalogItem,
   User,
 } from '../types'
+import { AdminComponentGallery } from './AdminComponentGallery'
 
 interface Props {
   user: User
   onClose: () => void
 }
 
-type AdminTab = 'users' | 'rooms' | 'audio'
+type AdminTab = 'users' | 'rooms' | 'audio' | 'components'
 
 const ADMIN_SOUND_GROUPS = [
   {
@@ -310,15 +311,18 @@ export function AdminPanel({ user, onClose }: Props) {
         <Tab value="users" label={t('admin.tabs.users')} />
         <Tab value="rooms" label={t('admin.tabs.rooms')} />
         <Tab value="audio" label={t('admin.tabs.audio')} />
+        <Tab value="components" label={t('admin.tabs.components')} />
       </Tabs>
 
       <Box sx={{ p: { xs: 1.5, md: 2.5 }, overflow: 'auto', minHeight: 0 }}>
-        {error && (
+        {tab === 'components' ? (
+          <AdminComponentGallery />
+        ) : error && (
           <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 2 }}>
             {error}
           </Alert>
         )}
-        {loading ? (
+        {tab !== 'components' && (loading ? (
           <Stack alignItems="center" py={8}>
             <CircularProgress />
           </Stack>
@@ -681,7 +685,7 @@ export function AdminPanel({ user, onClose }: Props) {
               </Box>
             ))}
           </Stack>
-        )}
+        ))}
       </Box>
     </Paper>
   )
