@@ -227,8 +227,17 @@ async def update_my_preferences(
     data: UserPreferencesUpdate,
     current_user: Annotated[User, Depends(get_current_user)],
     users: Annotated[UserService, Depends(get_user_service)],
+    games: Annotated[GameService, Depends(get_game_service)],
 ) -> UserPreferences:
-    return await users.update_preferences(current_user.id, data)
+    preferences = await users.update_preferences(current_user.id, data)
+    if data.token_appearance is not None:
+        updated_games = await games.sync_player_token_appearance(
+            current_user.id,
+            data.token_appearance,
+        )
+        for game in updated_games:
+            await broadcast_game_state(game, complete_events=False)
+    return preferences
 
 
 @router.delete("/users/me", status_code=status.HTTP_204_NO_CONTENT)

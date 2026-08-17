@@ -278,6 +278,10 @@ class GameAudioManager {
     this.stopSounds(() => true)
   }
 
+  stop(sound: GameSound): void {
+    this.stopSounds((candidate) => candidate === sound)
+  }
+
   private stopSounds(matches: (sound: GameSound) => boolean): void {
     for (const [player, activeSound] of this.active) {
       if (!matches(activeSound.sound)) continue

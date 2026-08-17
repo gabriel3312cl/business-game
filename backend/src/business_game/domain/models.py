@@ -1042,6 +1042,7 @@ class PlayerState(BaseModel):
     user_id: UUID
     display_name: str
     appearance_slot: int | None = Field(default=None, ge=0, le=19)
+    token_appearance: TokenAppearancePreferences | None = None
     is_bot: bool = False
     bot_personality: BotPersonality | None = None
     bot_controller: BotController | None = None

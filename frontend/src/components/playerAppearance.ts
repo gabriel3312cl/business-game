@@ -58,3 +58,15 @@ export function automaticPlayerAppearance(
     emoji: token.emoji,
   }
 }
+
+export function resolvedPlayerAppearance(
+  player: Pick<PlayerState, 'appearance_slot' | 'token_appearance'>,
+  fallbackIndex: number,
+  localOverride: TokenAppearanceSettings | null = null,
+): TokenAppearanceSettings {
+  return (
+    localOverride ??
+    player.token_appearance ??
+    automaticPlayerAppearance(player, fallbackIndex)
+  )
+}

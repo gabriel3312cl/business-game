@@ -445,6 +445,7 @@ export interface PlayerState {
   user_id: string
   display_name: string
   appearance_slot?: number | null
+  token_appearance?: TokenAppearanceSettings | null
   is_bot: boolean
   bot_personality: BotPersonality | null
   bot_controller: BotController | null

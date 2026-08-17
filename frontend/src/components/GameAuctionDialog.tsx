@@ -29,7 +29,10 @@ import type {
   VisualEffectsIntensity,
 } from '../types'
 import { playerColor } from './gameColors'
-import { compareAuctionPrice } from './auctionPresentation'
+import {
+  auctionCountdownDelayMs,
+  compareAuctionPrice,
+} from './auctionPresentation'
 import { perimeterPosition } from './boardGeometry'
 import {
   assessHistoricalProperty,
@@ -48,6 +51,7 @@ interface Props {
   boardHistory: BoardHistoricalStats | null
   onCommand: (command: GameCommand) => Promise<boolean>
   onCountdownWarning?: () => void
+  onCountdownWarningEnd?: () => void
   motionIntensity?: VisualEffectsIntensity
 }
 
@@ -70,6 +74,7 @@ export function GameAuctionDialog({
   boardHistory,
   onCommand,
   onCountdownWarning,
+  onCountdownWarningEnd,
   motionIntensity = 'full',
 }: Props) {
   const { t } = useTranslation()
@@ -83,7 +88,6 @@ export function GameAuctionDialog({
   const [pendingBidAmount, setPendingBidAmount] = useState<number | null>(null)
   const auctionActionLockRef = useRef(false)
   const auctionActionTimerRef = useRef<number | null>(null)
-  const warnedDeadlineRef = useRef<string | null>(null)
 
   useEffect(() => {
     setNow(Date.now())
@@ -132,17 +136,30 @@ export function GameAuctionDialog({
   const urgentSeconds = readinessIdle ? 5 : 2
 
   useEffect(() => {
-    if (
-      deadline &&
-      remainingSeconds !== null &&
-      remainingSeconds > 0 &&
-      remainingSeconds <= urgentSeconds &&
-      warnedDeadlineRef.current !== deadline
-    ) {
-      warnedDeadlineRef.current = deadline
-      onCountdownWarning?.()
+    if (!deadline) return
+
+    const deadlineMs = Date.parse(deadline)
+    if (Number.isNaN(deadlineMs)) return
+
+    const nowMs = Date.now()
+    const warningDelayMs = auctionCountdownDelayMs(deadlineMs, nowMs)
+    if (warningDelayMs === null) return
+
+    const warningTimer = window.setTimeout(
+      () => onCountdownWarning?.(),
+      warningDelayMs,
+    )
+    const endTimer = window.setTimeout(
+      () => onCountdownWarningEnd?.(),
+      Math.max(0, deadlineMs - nowMs),
+    )
+
+    return () => {
+      window.clearTimeout(warningTimer)
+      window.clearTimeout(endTimer)
+      onCountdownWarningEnd?.()
     }
-  }, [deadline, onCountdownWarning, remainingSeconds, urgentSeconds])
+  }, [deadline, onCountdownWarning, onCountdownWarningEnd])
 
   const auction = game.active_auction
   if (!auction) return null
@@ -283,6 +300,8 @@ export function GameAuctionDialog({
       slotProps={{
         paper: {
           sx: {
+            maxHeight: { sm: 'calc(100dvh - 32px)' },
+            overflow: 'hidden',
             background:
               'linear-gradient(155deg, rgba(28,23,45,.99), rgba(13,11,23,.99))',
             border: '1px solid rgba(157,140,255,.2)',
@@ -304,10 +323,15 @@ export function GameAuctionDialog({
         },
       }}
     >
-      <DialogTitle id="auction-title" textAlign="center" color="secondary.light">
+      <DialogTitle
+        id="auction-title"
+        textAlign="center"
+        color="secondary.light"
+        sx={{ py: { xs: 1.5, sm: 1.75 }, fontWeight: 850 }}
+      >
         {t('auction')}
       </DialogTitle>
-      <DialogContent>
+      <DialogContent sx={{ px: { xs: 2, sm: 2.5 }, pb: 2.5 }}>
         {error && (
           <Alert severity="warning" sx={{ mb: 2 }}>
             {error}
@@ -327,14 +351,15 @@ export function GameAuctionDialog({
               xs: '1fr',
               md: 'minmax(0,1.2fr) minmax(240px,.8fr)',
             },
-            gap: { xs: 2, md: 3 },
+            gap: { xs: 2, md: 2.5 },
+            alignItems: 'start',
           }}
         >
-          <Stack spacing={{ xs: 2, sm: 2.5 }}>
+          <Stack spacing={{ xs: 1.5, sm: 1.75 }}>
             <Typography
-              variant="h4"
+              variant="h5"
               fontWeight={850}
-              sx={{ fontSize: { xs: '1.65rem', sm: '2.125rem' } }}
+              sx={{ fontSize: { xs: '1.5rem', sm: '1.75rem' } }}
             >
               <GavelRoundedIcon
                 color="secondary"
@@ -347,7 +372,7 @@ export function GameAuctionDialog({
               aria-live="polite"
               variant="outlined"
               sx={{
-                p: 1.5,
+                p: 1.25,
                 borderRadius: 2.5,
                 bgcolor: 'rgba(75,81,133,.22)',
                 borderColor: 'rgba(157,140,255,.22)',
@@ -386,7 +411,7 @@ export function GameAuctionDialog({
                   >
                     <Typography
                       key={auction.current_bid}
-                      variant="h3"
+                      variant="h4"
                       sx={{
                         fontVariantNumeric: 'tabular-nums',
                         animation:
@@ -564,7 +589,7 @@ export function GameAuctionDialog({
             <Paper
               variant="outlined"
               sx={{
-                p: 1.5,
+                p: 1.25,
                 borderRadius: 2.5,
                 bgcolor: 'rgba(11,9,18,.24)',
                 borderColor: 'rgba(255,255,255,.1)',
@@ -624,7 +649,7 @@ export function GameAuctionDialog({
             {showQuickLoan && (
               <Box
                 sx={{
-                  p: 1.5,
+                  p: 1.25,
                   borderRadius: 2,
                   border: '1px solid rgba(157,140,255,.28)',
                   bgcolor: 'rgba(157,140,255,.08)',
@@ -757,7 +782,7 @@ export function GameAuctionDialog({
                             amount,
                           )
                         }
-                        sx={{ minWidth: 112, minHeight: 56 }}
+                        sx={{ minWidth: 104, minHeight: 52 }}
                       >
                         <Box>
                           <Typography fontWeight={850}>${amount}</Typography>
@@ -776,7 +801,7 @@ export function GameAuctionDialog({
                           auction_id: auction.id,
                         })
                       }
-                      sx={{ minHeight: 56 }}
+                      sx={{ minHeight: 52 }}
                     >
                       {t('pass')}
                     </Button>
@@ -808,8 +833,10 @@ export function GameAuctionDialog({
               borderRadius: 3,
               bgcolor: 'rgba(75,81,133,.48)',
               border: '1px solid rgba(255,255,255,.08)',
-              p: { xs: 2, sm: 3 },
-              minHeight: { md: 360 },
+              p: { xs: 1.5, sm: 2 },
+              alignSelf: 'start',
+              position: { md: 'sticky' },
+              top: { md: 0 },
             }}
           >
             <Box
@@ -865,11 +892,13 @@ export function GameAuctionDialog({
 
             <Box
               sx={{
-                mt: 2.5,
+                mt: 2,
                 display: 'grid',
                 gridTemplateColumns: {
                   xs: '1fr',
-                  sm: 'minmax(150px,.75fr) minmax(0,1.25fr)',
+                  sm: '160px minmax(0,1fr)',
+                  md: '1fr',
+                  lg: '160px minmax(0,1fr)',
                 },
                 gap: 1.5,
                 alignItems: 'start',
@@ -1119,7 +1148,7 @@ function AuctionBoardMap({
   return (
     <Box
       sx={{
-        p: 1.25,
+        p: 1,
         borderRadius: 2,
         bgcolor: 'rgba(11,9,18,.28)',
       }}
@@ -1139,7 +1168,7 @@ function AuctionBoardMap({
           gridTemplateRows: `repeat(${sideLength}, minmax(0, 1fr))`,
           gap: '2px',
           width: '100%',
-          maxWidth: 220,
+          maxWidth: 180,
           aspectRatio: '1',
           mx: 'auto',
         }}
@@ -1203,7 +1232,7 @@ function AuctionMoneyValue({
       <Typography variant="caption" color="text.secondary" display="block">
         {label}
       </Typography>
-      <Typography variant="h5" fontWeight={900} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+      <Typography variant="h6" fontWeight={900} sx={{ fontVariantNumeric: 'tabular-nums' }}>
         ${amount}
       </Typography>
     </Box>

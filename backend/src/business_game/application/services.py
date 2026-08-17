@@ -147,6 +147,7 @@ from business_game.domain.models import (
     SwapPositionCardEffect,
     TileDefinition,
     TileKind,
+    TokenAppearancePreferences,
     TradeOffer,
     TradeStatus,
     TurnPhase,
@@ -371,6 +372,7 @@ class GameService:
         self._packs = packs
         self._pack_resolver = pack_resolver
         self._games = GameRepository(session)
+        self._users = UserRepository(session)
         secure_random = random.SystemRandom()
         self._dice_roller = dice_roller or (
             lambda: (secure_random.randint(1, 6), secure_random.randint(1, 6))
@@ -461,6 +463,7 @@ class GameService:
         advanced_economy_enabled: bool = True,
     ) -> GameState:
         async with self._session.begin():
+            preferences = await self._users.get_preferences(actor.id)
             pack = (
                 await self._pack_resolver.load(pack_id, version=version)
                 if self._pack_resolver is not None
@@ -494,6 +497,7 @@ class GameService:
                     user_id=actor.id,
                     display_name=actor.display_name,
                     appearance_slot=self._next_appearance_slot(game),
+                    token_appearance=preferences.token_appearance,
                     balance=pack.manifest.starting_balance,
                 )
             )
@@ -552,6 +556,7 @@ class GameService:
 
     async def join(self, game_id: UUID, actor: User) -> GameState:
         async with self._session.begin():
+            preferences = await self._users.get_preferences(actor.id)
             game = await self._games.get(game_id, for_update=True)
             previous_sequence = game.event_sequence
             pack = self._pack(game)
@@ -570,6 +575,7 @@ class GameService:
                     user_id=actor.id,
                     display_name=actor.display_name,
                     appearance_slot=self._next_appearance_slot(game),
+                    token_appearance=preferences.token_appearance,
                     balance=pack.manifest.starting_balance,
                 )
             )
@@ -578,6 +584,28 @@ class GameService:
             self._sync_bank(game)
             await self._games.save(game, previous_sequence, sync_members=True)
             return game
+
+    async def sync_player_token_appearance(
+        self,
+        user_id: UUID,
+        appearance: TokenAppearancePreferences,
+    ) -> list[GameState]:
+        updated_games: list[GameState] = []
+        async with self._session.begin():
+            active_games = await self._games.list_active_for_user(user_id)
+            for active_game in active_games:
+                game = await self._games.get(active_game.id, for_update=True)
+                player = next(
+                    (item for item in game.players if item.user_id == user_id),
+                    None,
+                )
+                if player is None or player.token_appearance == appearance:
+                    continue
+                previous_sequence = game.event_sequence
+                player.token_appearance = appearance.model_copy(deep=True)
+                await self._games.save(game, previous_sequence)
+                updated_games.append(game)
+        return updated_games
 
     async def add_bot(
         self,

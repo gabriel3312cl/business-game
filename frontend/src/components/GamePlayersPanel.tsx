@@ -48,7 +48,7 @@ import {
   tokenFillStyle,
   tokenShapeStyle,
 } from './tokenAppearance'
-import { automaticPlayerAppearance } from './playerAppearance'
+import { resolvedPlayerAppearance } from './playerAppearance'
 
 interface Props {
   game: GameState
@@ -150,13 +150,11 @@ export function GamePlayersPanel({
       >
         {players.map(({ player, playerIndex, estimatedNetWorth }) => {
           const active = playerIndex === game.current_player_index
-          const customAppearance =
-            player.user_id === user.id ? currentUserTokenAppearance : null
-          const automaticAppearance = automaticPlayerAppearance(
+          const appearance = resolvedPlayerAppearance(
             player,
             playerIndex,
+            player.user_id === user.id ? currentUserTokenAppearance : null,
           )
-          const appearance = customAppearance ?? automaticAppearance
           const color = appearance.color
           const assetPath = tokenAssetPath(appearance.icon)
           const relationship = player.is_bot

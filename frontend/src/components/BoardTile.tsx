@@ -121,9 +121,9 @@ export function BoardTile({
       title={
         <Box
           sx={{
-            width: { xs: 220, sm: 260 },
+            width: { xs: 208, sm: 232 },
             overflow: 'hidden',
-            borderRadius: 2.25,
+            borderRadius: '16px',
             border: `1px solid color-mix(in srgb, ${accent} 70%, white)`,
             background: mortgaged
               ? 'repeating-linear-gradient(135deg, rgba(255,174,51,.10) 0 8px, rgba(11,9,18,.12) 8px 16px), var(--game-theme-tile-tooltip)'
@@ -135,12 +135,12 @@ export function BoardTile({
           <Box
             aria-hidden
             sx={{
-              height: 9,
+              height: 6,
               bgcolor: accent,
               boxShadow: `0 2px 14px color-mix(in srgb, ${accent} 60%, transparent)`,
             }}
           />
-          <Box sx={{ p: 1.5 }}>{tooltip}</Box>
+          <Box sx={{ p: 1.25 }}>{tooltip}</Box>
         </Box>
       }
       arrow

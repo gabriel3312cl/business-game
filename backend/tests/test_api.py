@@ -626,6 +626,86 @@ async def test_game_creation_uses_authenticated_identity(client: AsyncClient) ->
     assert game["events"][1]["type"] == "player.joined"
 
 
+async def test_player_token_appearance_is_shared_across_clients(
+    client: AsyncClient,
+) -> None:
+    host_headers = await register_and_login(
+        client,
+        email="appearance-host@example.com",
+    )
+    guest_headers = await register_and_login(
+        client,
+        email="appearance-guest@example.com",
+    )
+    host_appearance = {
+        "color": "#70b7ff",
+        "secondary_color": "#ff6ea8",
+        "fill": "gradient",
+        "gradient_angle": 45,
+        "pattern": "waves",
+        "shape": "star",
+        "icon": "emoji",
+        "emoji": "🚀",
+    }
+    guest_appearance = {
+        "color": "#ff9500",
+        "secondary_color": "#6c63ff",
+        "fill": "pattern",
+        "gradient_angle": 120,
+        "pattern": "stripes",
+        "shape": "shield",
+        "icon": "cat",
+        "emoji": None,
+    }
+
+    assert (
+        await client.patch(
+            "/api/v1/users/me/preferences",
+            headers=host_headers,
+            json={"token_appearance": host_appearance},
+        )
+    ).status_code == 200
+    assert (
+        await client.patch(
+            "/api/v1/users/me/preferences",
+            headers=guest_headers,
+            json={"token_appearance": guest_appearance},
+        )
+    ).status_code == 200
+
+    created = await client.post(
+        "/api/v1/games",
+        headers=host_headers,
+        json={"pack_id": "classic-demo"},
+    )
+    assert created.status_code == 201
+    game = created.json()
+    assert game["players"][0]["token_appearance"] == host_appearance
+
+    joined = await client.post(
+        f"/api/v1/games/{game['id']}/players",
+        headers=guest_headers,
+    )
+    assert joined.status_code == 200
+    assert joined.json()["players"][0]["token_appearance"] == host_appearance
+    assert joined.json()["players"][1]["token_appearance"] == guest_appearance
+
+    updated_guest_appearance = {**guest_appearance, "color": "#00c896"}
+    updated = await client.patch(
+        "/api/v1/users/me/preferences",
+        headers=guest_headers,
+        json={"token_appearance": updated_guest_appearance},
+    )
+    assert updated.status_code == 200
+
+    host_view = await client.get(
+        f"/api/v1/games/{game['id']}",
+        headers=host_headers,
+    )
+    assert host_view.status_code == 200
+    assert host_view.json()["players"][1]["token_appearance"] == updated_guest_appearance
+
+
 async def test_board_history_requires_membership_and_returns_aggregate_contract(
     client: AsyncClient,
 ) -> None:

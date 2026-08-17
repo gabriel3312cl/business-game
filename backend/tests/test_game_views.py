@@ -12,6 +12,16 @@ from business_game.domain.models import (
 def test_game_state_view_hides_server_and_other_player_private_state() -> None:
     actor_id = uuid4()
     opponent_id = uuid4()
+    opponent_appearance = {
+        "color": "#70b7ff",
+        "secondary_color": "#ff6ea8",
+        "fill": "gradient",
+        "gradient_angle": 45,
+        "pattern": "waves",
+        "shape": "star",
+        "icon": "emoji",
+        "emoji": "🚀",
+    }
     game = GameState(
         host_user_id=actor_id,
         pack_id="classic-demo",
@@ -26,6 +36,7 @@ def test_game_state_view_hides_server_and_other_player_private_state() -> None:
                 user_id=opponent_id,
                 display_name="Opponent",
                 jail_card_ids=["opponent-card"],
+                token_appearance=opponent_appearance,
             ),
         ],
         deck_orders={"opportunity": ["card-2", "card-1"]},
@@ -51,5 +62,6 @@ def test_game_state_view_hides_server_and_other_player_private_state() -> None:
     assert "deck_cursors" not in payload
     assert payload["players"][0]["jail_card_ids"] == ["actor-card"]
     assert payload["players"][1]["jail_card_ids"] == []
+    assert payload["players"][1]["token_appearance"] == opponent_appearance
     assert len(payload["trades"]) == 1
     assert payload["trades"][0]["offered_cash"] == 50

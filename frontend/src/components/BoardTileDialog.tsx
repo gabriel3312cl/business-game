@@ -125,15 +125,30 @@ export function BoardTileDialog({
       : null
 
   return (
-    <Dialog open onClose={onClose} fullWidth maxWidth="sm">
-      <Box sx={{ height: 8, bgcolor: accent }} />
-      <DialogTitle sx={{ pr: 7 }}>
-        <Stack direction="row" spacing={1.25} alignItems="center">
+    <Dialog
+      open
+      onClose={onClose}
+      fullWidth
+      maxWidth="sm"
+      slotProps={{
+        paper: {
+          sx: {
+            maxWidth: { sm: 540 },
+            maxHeight: { sm: 'calc(100dvh - 32px)' },
+            borderRadius: { xs: '16px', sm: '20px' },
+            overflow: 'hidden',
+          },
+        },
+      }}
+    >
+      <Box sx={{ height: 6, flexShrink: 0, bgcolor: accent }} />
+      <DialogTitle sx={{ px: 2.25, py: 1.5, pr: 6.5 }}>
+        <Stack direction="row" spacing={1} alignItems="center">
           <Box
             aria-hidden
             sx={{
-              width: 42,
-              height: 42,
+              width: 36,
+              height: 36,
               flex: '0 0 auto',
               display: 'grid',
               placeItems: 'center',
@@ -158,14 +173,14 @@ export function BoardTileDialog({
         <IconButton
           aria-label={t('close')}
           onClick={onClose}
-          sx={{ position: 'absolute', top: 12, right: 12 }}
+          sx={{ position: 'absolute', top: 10, right: 10 }}
         >
           <CloseRoundedIcon />
         </IconButton>
       </DialogTitle>
 
-      <DialogContent>
-        <Stack spacing={2}>
+      <DialogContent sx={{ px: 2.25, pb: 1.5 }}>
+        <Stack spacing={1.5}>
           <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
             {tile.purchasable !== false && tile.price != null && (
               <Chip label={t('purchasePrice', { amount: currentAmount(tile.price) })} />
@@ -194,7 +209,7 @@ export function BoardTileDialog({
             sx={{
               display: 'grid',
               gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              gap: 1,
+              gap: 0.75,
             }}
           >
             {tile.base_rent != null && (
@@ -248,8 +263,8 @@ export function BoardTileDialog({
               <Box
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))',
-                  gap: 0.75,
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(84px, 1fr))',
+                  gap: 0.5,
                 }}
               >
                 {tile.rent_levels.map((rent, index) => (
@@ -257,7 +272,8 @@ export function BoardTileDialog({
                     key={`${tile.id}-rent-${index}`}
                     variant="outlined"
                     sx={{
-                      p: 1,
+                      p: 0.875,
+                      borderRadius: '12px',
                       borderColor:
                         game && index === level ? accent : 'rgba(255,255,255,.12)',
                     }}
@@ -326,7 +342,7 @@ export function BoardTileDialog({
                     }
                   />
                 </Stack>
-                <Stack spacing={0.75}>
+                <Stack spacing={0.5}>
                   {groupTiles.map((groupTile) => {
                     const groupTileOwnerId = game?.owners[groupTile.id]
                     const groupTileOwner = game?.players.find(
@@ -343,6 +359,9 @@ export function BoardTileDialog({
                           justifyContent: 'space-between',
                           textTransform: 'none',
                           gap: 1,
+                          minHeight: 36,
+                          px: 1.25,
+                          borderRadius: '12px',
                         }}
                       >
                         <span>{pack.messages[groupTile.name_key] ?? groupTile.id}</span>
@@ -450,7 +469,14 @@ export function BoardTileDialog({
           )}
         </Stack>
       </DialogContent>
-      <DialogActions>
+      <DialogActions
+        sx={{
+          px: 2.25,
+          py: 1.25,
+          borderTop: '1px solid',
+          borderColor: 'divider',
+        }}
+      >
         {showOwnerTrade && ownerId && owner && (
           <Button
             variant="contained"
@@ -475,7 +501,7 @@ export function BoardTileDialog({
 
 function InfoCell({ label, value }: { label: string; value: string }) {
   return (
-    <Paper variant="outlined" sx={{ p: 1.25 }}>
+    <Paper variant="outlined" sx={{ p: 1, borderRadius: '12px' }}>
       <Typography variant="caption" color="text.secondary">
         {label}
       </Typography>

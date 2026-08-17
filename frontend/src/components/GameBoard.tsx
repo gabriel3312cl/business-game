@@ -45,7 +45,7 @@ import { perimeterPosition } from './boardGeometry'
 import { boardHeatmapColor, type BoardHeatmap } from './boardHeatmap'
 import { defaultTileColor, tileIconBackgroundStyle } from './tilePresentation'
 import { tokenAssetPath } from './tokenAppearance'
-import { automaticPlayerAppearance } from './playerAppearance'
+import { resolvedPlayerAppearance } from './playerAppearance'
 import {
   type MotionAudioCue,
   type MotionSettlement,
@@ -201,9 +201,11 @@ export function GameBoard({
   const ownersById = new Map<string, BoardOwner>()
   game?.players.forEach((player, index) => {
     const currentUser = player.user_id === currentUserId
-    const customAppearance = currentUser ? currentUserTokenAppearance : null
-    const automaticAppearance = automaticPlayerAppearance(player, index)
-    const appearance = customAppearance ?? automaticAppearance
+    const appearance = resolvedPlayerAppearance(
+      player,
+      index,
+      currentUser ? currentUserTokenAppearance : null,
+    )
     const presentation = {
       playerNumber: index + 1,
       displayName: player.display_name,
@@ -464,18 +466,18 @@ export function GameBoard({
             onFocus={() => setFocusableTileId(tile.id)}
             onKeyDown={(event) => handleTileKeyDown(event, index)}
             tooltip={
-              <Stack spacing={1.15}>
-                <Stack direction="row" spacing={1} alignItems="center">
+              <Stack spacing={0.85}>
+                <Stack direction="row" spacing={0.85} alignItems="center">
                   <Box
                     aria-hidden
                     sx={{
-                      width: 38,
-                      height: 38,
+                      width: 32,
+                      height: 32,
                       flex: '0 0 auto',
                       display: 'grid',
                       placeItems: 'center',
                       ...tileIconBackgroundStyle(tile.icon_background, tileAccent),
-                      '& svg': { fontSize: 22 },
+                      '& svg': { fontSize: 18 },
                     }}
                   >
                     <TileVisual
@@ -490,7 +492,7 @@ export function GameBoard({
                       sx={{
                         display: 'block',
                         color: tileAccent,
-                        fontSize: 10,
+                        fontSize: 9,
                         fontWeight: 900,
                         lineHeight: 1.2,
                         letterSpacing: '0.08em',
@@ -501,16 +503,16 @@ export function GameBoard({
                     </Typography>
                     <Typography
                       variant="subtitle2"
-                      sx={{ fontSize: 17, fontWeight: 900, lineHeight: 1.15 }}
+                      sx={{ fontSize: 15, fontWeight: 900, lineHeight: 1.15 }}
                     >
                       {name}
                     </Typography>
                   </Box>
                 </Stack>
 
-                <Stack spacing={0.55}>
+                <Stack spacing={0.35}>
                   {tile.price != null && (
-                    <Typography variant="caption" sx={{ fontSize: 13 }}>
+                    <Typography variant="caption" sx={{ fontSize: 12 }}>
                       {t('purchasePrice', { amount: tile.price })}
                     </Typography>
                   )}
@@ -528,7 +530,7 @@ export function GameBoard({
                           boxShadow: owner ? `0 0 8px ${owner.color}` : 'none',
                         }}
                       />
-                      <Typography variant="caption" sx={{ fontSize: 13 }}>
+                      <Typography variant="caption" sx={{ fontSize: 12 }}>
                         {owner
                           ? t('ownedBy', { player: owner.displayName })
                           : t('unownedProperty')}
@@ -538,7 +540,7 @@ export function GameBoard({
                   {buildingLabel && (
                     <Typography
                       variant="caption"
-                      sx={{ color: '#79e691', fontSize: 13, fontWeight: 850 }}
+                      sx={{ color: '#79e691', fontSize: 12, fontWeight: 850 }}
                     >
                       {buildingLabel}
                     </Typography>
@@ -546,7 +548,7 @@ export function GameBoard({
                   {mortgaged && (
                     <Typography
                       variant="caption"
-                      sx={{ color: '#ffbd5c', fontSize: 13, fontWeight: 900 }}
+                      sx={{ color: '#ffbd5c', fontSize: 12, fontWeight: 900 }}
                     >
                       {t('mortgaged')}
                     </Typography>
@@ -554,7 +556,7 @@ export function GameBoard({
                   {tileHeatmap && (
                     <Typography
                       variant="caption"
-                      sx={{ color: '#70dcff', fontSize: 13, fontWeight: 850 }}
+                      sx={{ color: '#70dcff', fontSize: 12, fontWeight: 850 }}
                     >
                       {tileHeatmap.ariaLabel}
                     </Typography>
@@ -564,10 +566,10 @@ export function GameBoard({
                 <Typography
                   variant="caption"
                   sx={{
-                    pt: 0.9,
+                    pt: 0.7,
                     borderTop: `1px solid color-mix(in srgb, ${tileAccent} 35%, transparent)`,
                     color: 'secondary.light',
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: 750,
                   }}
                 >
@@ -771,11 +773,13 @@ export function GameBoard({
                   sx={{ display: { xs: 'none', md: 'flex' } }}
                 >
                   {game.players.map((player, index) => {
-                    const appearance =
+                    const appearance = resolvedPlayerAppearance(
+                      player,
+                      index,
                       player.user_id === currentUserId
-                        ? currentUserTokenAppearance ??
-                          automaticPlayerAppearance(player, index)
-                        : automaticPlayerAppearance(player, index)
+                        ? currentUserTokenAppearance
+                        : null,
+                    )
                     return (
                       <Chip
                         key={player.user_id}

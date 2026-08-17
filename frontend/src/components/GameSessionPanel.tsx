@@ -1097,7 +1097,11 @@ export function GameSessionPanel({
     gameAudio.play('token-teleport', { gain: 0.78 })
   }, [])
   const handleAuctionCountdown = useCallback(() => {
+    gameAudio.stop('auction-countdown')
     gameAudio.play('auction-countdown', { gain: 0.78 })
+  }, [])
+  const handleAuctionCountdownEnd = useCallback(() => {
+    gameAudio.stop('auction-countdown')
   }, [])
 
   useEffect(() => {
@@ -1298,6 +1302,7 @@ export function GameSessionPanel({
             tokenAppearanceRef.current = restored
             setTokenAppearance(restored)
             writeTokenAppearance(user.id, restored)
+            saveTokenAppearanceRemotely(restored)
           }
         } else if (tokenAppearanceRef.current) {
           saveTokenAppearanceRemotely(tokenAppearanceRef.current)
@@ -4126,6 +4131,7 @@ export function GameSessionPanel({
           boardHistory={boardHistory}
           onCommand={sendCommand}
           onCountdownWarning={handleAuctionCountdown}
+          onCountdownWarningEnd={handleAuctionCountdownEnd}
           motionIntensity={presentationMotionIntensity}
         />
       )}
